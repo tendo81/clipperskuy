@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+frontend/dist/
+
+# Binary dependencies (too large for git)
+binaries/
+
+# Database & user data
+backend/data/
+*.db
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp
+*.tmp
+temp/
+
+# Agent
+.agent/
+
+# Misc
+*.exe
+!electron/resources/*.ico

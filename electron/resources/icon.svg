@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f0f1a"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="50%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="bolt2" x1="0.5" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#7c3aed" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="96" fill="none" stroke="rgba(124,58,237,0.2)" stroke-width="2"/>
+  
+  <!-- Glow effect behind bolt -->
+  <ellipse cx="256" cy="270" rx="120" ry="160" fill="#7c3aed" opacity="0.08"/>
+  
+  <!-- Main Lightning Bolt -->
+  <g filter="shadow">
+    <!-- Back bolt (slightly offset for 3D depth) -->
+    <polygon points="290,72 168,260 240,260 210,440 345,230 268,230 290,72" 
+             fill="url(#bolt2)" opacity="0.4" transform="translate(6,4)"/>
+    
+    <!-- Front bolt -->
+    <polygon points="290,72 168,260 240,260 210,440 345,230 268,230 290,72" 
+             fill="url(#bolt)" filter="glow"/>
+    
+    <!-- Highlight edge -->
+    <polygon points="290,72 168,260 240,260 210,440 345,230 268,230 290,72" 
+             fill="none" stroke="url(#bolt2)" stroke-width="2" opacity="0.6"/>
+  </g>
+  
+  <!-- Scissors cut marks (small) -->
+  <g opacity="0.7" transform="translate(256,256)">
+    <line x1="-140" y1="-8" x2="-100" y2="-8" stroke="#06b6d4" stroke-width="3" stroke-linecap="round"/>
+    <line x1="-140" y1="8" x2="-100" y2="8" stroke="#06b6d4" stroke-width="3" stroke-linecap="round"/>
+    <line x1="100" y1="-8" x2="140" y2="-8" stroke="#a855f7" stroke-width="3" stroke-linecap="round"/>
+    <line x1="100" y1="8" x2="140" y2="8" stroke="#a855f7" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  
+  <!-- Subtle shine -->
+  <ellipse cx="220" cy="160" rx="60" ry="30" fill="white" opacity="0.04" transform="rotate(-20,220,160)"/>
+</svg>

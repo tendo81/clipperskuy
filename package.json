@@ -1,0 +1,83 @@
+{
+    "name": "clipperskuy",
+    "version": "1.0.0",
+    "description": "AI-Powered Video Clip Engine — Auto-detect viral moments from long videos",
+    "main": "electron/main.js",
+    "author": "ClipperSkuy",
+    "license": "UNLICENSED",
+    "private": true,
+    "scripts": {
+        "dev": "concurrently \"cd backend && node src/server.js\" \"cd frontend && npx vite --port 5173\"",
+        "dev:electron": "concurrently \"cd backend && node src/server.js\" \"cd frontend && npx vite --port 5173\" \"wait-on http://localhost:5173 && set ELECTRON_RUN_AS_NODE= && electron .\"",
+        "build:frontend": "cd frontend && npx vite build",
+        "build": "npm run build:frontend && electron-builder --win",
+        "build:portable": "npm run build:frontend && electron-builder --win portable",
+        "postinstall": "cd backend && npm install && cd ../frontend && npm install"
+    },
+    "devDependencies": {
+        "concurrently": "^9.2.1",
+        "electron": "^28.3.3",
+        "electron-builder": "^26.7.0",
+        "sharp": "^0.34.5",
+        "wait-on": "^9.0.4"
+    },
+    "build": {
+        "appId": "com.clipperskuy.app",
+        "productName": "ClipperSkuy",
+        "copyright": "Copyright © 2026 ClipperSkuy",
+        "directories": {
+            "output": "dist",
+            "buildResources": "electron/resources"
+        },
+        "files": [
+            "electron/**/*",
+            "frontend/dist/**/*",
+            "backend/**/*",
+            "!backend/data/**",
+            "!backend/node_modules/.cache/**",
+            "!**/node_modules/@electron/**"
+        ],
+        "extraResources": [
+            {
+                "from": "binaries/ffmpeg.exe",
+                "to": "ffmpeg.exe"
+            },
+            {
+                "from": "binaries/ffprobe.exe",
+                "to": "ffprobe.exe"
+            },
+            {
+                "from": "binaries/yt-dlp.exe",
+                "to": "yt-dlp.exe"
+            }
+        ],
+        "win": {
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ],
+            "icon": "electron/resources/icon.ico",
+            "artifactName": "ClipperSkuy-Setup-${version}.exe"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "shortcutName": "ClipperSkuy"
+        },
+        "portable": {
+            "artifactName": "ClipperSkuy-Portable-${version}.exe"
+        },
+        "publish": {
+            "provider": "github",
+            "owner": "tendo81",
+            "repo": "clipperskuy",
+            "releaseType": "release"
+        }
+    }
+}
