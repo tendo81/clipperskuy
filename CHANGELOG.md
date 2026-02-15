@@ -31,11 +31,38 @@ All notable changes to ClipperSkuy will be documented in this file.
 
 ---
 
+## [1.1.0] - 2026-02-15
+
+### 🎵 Audio & Sound Update
+
+#### New Features
+- **Background Music Library** — Upload and manage royalty-free music tracks
+  - Category filters (Energetic, Chill, Cinematic, Funny, Motivational)
+  - Preview playback before applying
+  - Adjustable volume (0-100%)
+  - Auto-mix with speech audio (fade in/out)
+- **SFX Sound Effects** — Add sound effects to clips
+  - Upload WAV/MP3 sound effects
+  - Place multiple SFX at specific timestamps
+  - Per-SFX volume control
+  - Categories: Notification, Impact, Reaction, Transition, Game
+- **Enhanced Dashboard Stats** — 6 stat cards
+  - Projects, Clips Generated, Exported, Clips Duration, Completed, Music Tracks
+- **Custom Clip Count** — Input exact number of desired clips
+- **Simplified Settings** — App Customization moved to Admin Panel only
+
+#### Improvements
+- Audio mixing engine supports Speech + Music + multiple SFX simultaneously
+- Music auto-loops if shorter than clip duration
+- Music fades out 2 seconds before clip end
+
+---
+
 ## [Unreleased]
 
 ### Planned
-- Background music library
-- B-roll auto-insert
-- Sound effects
+- Keyboard shortcuts
+- Bulk caption style
 - Transition effects
+- AI hashtag generator
 - Direct upload to social platforms

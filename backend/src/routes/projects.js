@@ -55,12 +55,26 @@ router.get('/stats/overview', (req, res) => {
         const totalClips = get('SELECT COUNT(*) as count FROM clips');
         const completedProjects = get("SELECT COUNT(*) as count FROM projects WHERE status = 'completed'");
         const totalDuration = get('SELECT COALESCE(SUM(duration), 0) as total FROM projects');
+        const exportedClips = get("SELECT COUNT(*) as count FROM clips WHERE status = 'rendered'");
+        const clipsDuration = get('SELECT COALESCE(SUM(duration), 0) as total FROM clips');
+        const favCaptionStyle = get("SELECT caption_style, COUNT(*) as cnt FROM clips GROUP BY caption_style ORDER BY cnt DESC LIMIT 1");
+
+        // Music tracks count
+        let musicCount = 0;
+        try {
+            const mc = get('SELECT COUNT(*) as count FROM music_tracks');
+            musicCount = mc?.count || 0;
+        } catch (e) { /* table may not exist */ }
 
         res.json({
             totalProjects: totalProjects?.count || 0,
             totalClips: totalClips?.count || 0,
             completedProjects: completedProjects?.count || 0,
-            totalDuration: totalDuration?.total || 0
+            totalDuration: totalDuration?.total || 0,
+            exportedClips: exportedClips?.count || 0,
+            clipsDuration: clipsDuration?.total || 0,
+            favCaptionStyle: favCaptionStyle?.caption_style || 'hormozi',
+            musicTracks: musicCount
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -351,7 +365,7 @@ router.put('/clips/:clipId', (req, res) => {
         const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
         if (!clip) return res.status(404).json({ error: 'Clip not found' });
 
-        const { start_time, end_time, duration, title, caption_style, caption_settings } = req.body;
+        const { start_time, end_time, duration, title, caption_style, caption_settings, music_track_id, music_volume } = req.body;
 
         if (start_time !== undefined) {
             run('UPDATE clips SET start_time = ? WHERE id = ?', [start_time, req.params.clipId]);
@@ -373,6 +387,12 @@ router.put('/clips/:clipId', (req, res) => {
                 typeof caption_settings === 'string' ? caption_settings : JSON.stringify(caption_settings),
                 req.params.clipId
             ]);
+        }
+        if (music_track_id !== undefined) {
+            run('UPDATE clips SET music_track_id = ? WHERE id = ?', [music_track_id, req.params.clipId]);
+        }
+        if (music_volume !== undefined) {
+            run('UPDATE clips SET music_volume = ? WHERE id = ?', [music_volume, req.params.clipId]);
         }
 
         // If times changed, reset render status (clip needs re-render)

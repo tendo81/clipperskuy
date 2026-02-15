@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FolderOpen, Scissors, Clock, Plus, ArrowRight, Sparkles, TrendingUp, Zap, Trash2, Film } from 'lucide-react';
+import { FolderOpen, Scissors, Clock, Plus, ArrowRight, Sparkles, TrendingUp, Zap, Trash2, Film, Download, Music } from 'lucide-react';
 
 const API = 'http://localhost:5000/api';
 
@@ -18,8 +18,8 @@ function formatDuration(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m ${s}s`;
 }
 
 function formatTimeAgo(dateStr) {
@@ -51,7 +51,11 @@ const statusConfig = {
 };
 
 export default function Dashboard() {
-    const [stats, setStats] = useState({ totalProjects: 0, totalClips: 0, completedProjects: 0, totalDuration: 0 });
+    const [stats, setStats] = useState({
+        totalProjects: 0, totalClips: 0, completedProjects: 0,
+        totalDuration: 0, exportedClips: 0, clipsDuration: 0,
+        favCaptionStyle: 'hormozi', musicTracks: 0
+    });
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -91,8 +95,10 @@ export default function Dashboard() {
     const statCards = [
         { icon: FolderOpen, label: 'Projects', value: stats.totalProjects, color: 'purple' },
         { icon: Scissors, label: 'Clips Generated', value: stats.totalClips, color: 'cyan' },
-        { icon: Clock, label: 'Video Processed', value: formatDuration(stats.totalDuration), color: 'green' },
-        { icon: TrendingUp, label: 'Completed', value: stats.completedProjects, color: 'amber' },
+        { icon: Download, label: 'Exported', value: stats.exportedClips, color: 'green' },
+        { icon: Clock, label: 'Clips Duration', value: formatDuration(stats.clipsDuration), color: 'amber' },
+        { icon: TrendingUp, label: 'Completed', value: stats.completedProjects, color: 'purple' },
+        { icon: Music, label: 'Music Tracks', value: stats.musicTracks, color: 'cyan' },
     ];
 
     return (

@@ -20,7 +20,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Ensure data directories exist
-const dirs = ['uploads', 'outputs', 'thumbnails', 'temp', 'brandkits'];
+const dirs = ['uploads', 'outputs', 'thumbnails', 'temp', 'brandkits', 'music', 'sfx'];
 dirs.forEach(dir => {
   fs.ensureDirSync(path.join(__dirname, '..', 'data', dir));
 });
@@ -57,12 +57,16 @@ async function start() {
     const brandingRoutes = require('./routes/branding');
     const licenseRoutes = require('./routes/license');
     const adminRoutes = require('./routes/admin');
+    const musicRoutes = require('./routes/music');
+    const sfxRoutes = require('./routes/sfx');
     app.use('/api/projects', projectRoutes);
     app.use('/api/settings', settingsRoutes);
     app.use('/api/brandkits', brandkitRoutes);
     app.use('/api/branding', brandingRoutes);
     app.use('/api/license', licenseRoutes);
     app.use('/api/admin', adminRoutes);
+    app.use('/api/music', musicRoutes);
+    app.use('/api/sfx', sfxRoutes);
 
     // Error handler
     app.use((err, req, res, next) => {

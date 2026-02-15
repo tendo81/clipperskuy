@@ -148,6 +148,17 @@ async function renderClip(clipId, io) {
     // ===== Audio filter (normalization) =====
     const audioFilter = 'loudnorm=I=-16:TP=-1.5:LRA=11';
 
+    // ===== Background Music =====
+    let musicTrack = null;
+    if (clip.music_track_id) {
+        const track = get('SELECT * FROM music_tracks WHERE id = ?', [clip.music_track_id]);
+        if (track && track.file_path && fs.existsSync(track.file_path)) {
+            musicTrack = track;
+            emit(9, `Adding music: ${track.name}`);
+        }
+    }
+    const musicVolume = (clip.music_volume || 20) / 100; // 0-1 range
+
     // ===== Watermark =====
     const watermarkFilter = buildWatermarkFilter(settings, outW, outH);
 
@@ -155,7 +166,7 @@ async function renderClip(clipId, io) {
     const progressBarFilter = buildProgressBarFilter(settings, outW, outH, duration);
 
     // ===== ATTEMPT 1: Preferred filter with subtitles =====
-    const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || watermarkFilter);
+    const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || watermarkFilter || musicTrack);
     const vf = faceTrackFilter || buildVideoFilter(reframingMode, outW, outH);
 
     // Build subtitle filter string
@@ -171,24 +182,99 @@ async function renderClip(clipId, io) {
         '-t', String(duration),
     ];
 
+    // Track input indexes
+    let inputIdx = 1;
+
     // Add watermark input if needed
     if (watermarkFilter && settings.watermark_path && fs.existsSync(settings.watermark_path)) {
         args1.push('-i', settings.watermark_path);
+        inputIdx++;
+    }
+
+    // Add music input if needed
+    const musicInputIdx = inputIdx;
+    if (musicTrack) {
+        args1.push('-stream_loop', '-1', '-i', musicTrack.file_path);
+        inputIdx++;
+    }
+
+    // ===== SFX =====
+    const { all: dbAll } = require('../database');
+    let clipSfxList = [];
+    try {
+        clipSfxList = dbAll(
+            `SELECT cs.*, st.file_path as sfx_path, st.name as sfx_name
+             FROM clip_sfx cs JOIN sfx_tracks st ON cs.sfx_track_id = st.id
+             WHERE cs.clip_id = ? ORDER BY cs.position`, [clipId]
+        ).filter(s => s.sfx_path && fs.existsSync(s.sfx_path));
+    } catch (e) { /* table may not exist yet */ }
+
+    // Add SFX inputs
+    const sfxInputs = [];
+    for (const sfx of clipSfxList) {
+        sfxInputs.push({ idx: inputIdx, position: sfx.position || 0, volume: (sfx.volume || 80) / 100 });
+        args1.push('-i', sfx.sfx_path);
+        inputIdx++;
+    }
+
+    if (clipSfxList.length > 0) {
+        emit(9, `Adding ${clipSfxList.length} SFX`);
+    }
+
+    // Build audio filter chain
+    let audioArgs;
+    const hasSfx = sfxInputs.length > 0;
+    if (musicTrack || hasSfx) {
+        // Complex audio mixing: speech + music + sfx
+        const fadeStart = Math.max(0, duration - 2);
+        let parts = [];
+        let mixInputs = [];
+
+        // Speech (always input 0)
+        parts.push(`[0:a]${audioFilter}[speech]`);
+        mixInputs.push('[speech]');
+
+        // Background music
+        if (musicTrack) {
+            parts.push(`[${musicInputIdx}:a]volume=${musicVolume},afade=t=in:st=0:d=1,afade=t=out:st=${fadeStart}:d=2[bgm]`);
+            mixInputs.push('[bgm]');
+        }
+
+        // SFX (each with delay positioning)
+        sfxInputs.forEach((sfx, i) => {
+            const delayMs = Math.round(sfx.position * 1000);
+            parts.push(`[${sfx.idx}:a]volume=${sfx.volume},adelay=${delayMs}|${delayMs}[sfx${i}]`);
+            mixInputs.push(`[sfx${i}]`);
+        });
+
+        // Mix all audio sources
+        const totalInputs = mixInputs.length;
+        const audioMix = parts.join(';') + ';' +
+            mixInputs.join('') + `amix=inputs=${totalInputs}:duration=first:dropout_transition=2[aout]`;
+
+        audioArgs = { complex: audioMix, map: '[aout]' };
+    } else {
+        audioArgs = { simple: audioFilter };
     }
 
     if (useFilterComplex && watermarkFilter) {
         // Complex filter with watermark
         const vidChain = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p';
-        const fullFilter = `[0:v]${vidChain}[vid];${watermarkFilter}`;
+        let fullFilter = `[0:v]${vidChain}[vid];${watermarkFilter}`;
+        if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
         args1.push('-filter_complex', fullFilter);
-        args1.push('-map', '[outv]', '-map', '0:a?');
-        args1.push('-af', audioFilter);
+        args1.push('-map', '[outv]');
+        if (audioArgs.map) args1.push('-map', audioArgs.map);
+        else { args1.push('-map', '0:a?'); args1.push('-af', audioFilter); }
     } else if (useFilterComplex) {
-        // Complex filter without watermark
-        const fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
+        // Complex filter without watermark (but maybe with music)
+        const vidPart = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
+        let fullFilter = vidPart;
+        if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
         args1.push('-filter_complex', fullFilter);
-        args1.push('-map', '[outv]', '-map', '0:a?');
-        args1.push('-af', audioFilter);
+        args1.push('-map', '[outv]');
+        if (audioArgs.map) args1.push('-map', audioArgs.map);
+        else { args1.push('-map', '0:a?'); args1.push('-af', audioFilter); }
     } else {
         // Simple filter
         const fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p';

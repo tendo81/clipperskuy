@@ -179,6 +179,49 @@ async function initDatabase() {
     )
   `);
 
+  // Music library
+  db.run(`
+    CREATE TABLE IF NOT EXISTS music_tracks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      file_name TEXT,
+      category TEXT DEFAULT 'general',
+      mood TEXT DEFAULT 'neutral',
+      bpm INTEGER DEFAULT 0,
+      duration REAL DEFAULT 0,
+      file_size INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // SFX library
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sfx_tracks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      file_name TEXT,
+      category TEXT DEFAULT 'general',
+      duration REAL DEFAULT 0,
+      file_size INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // SFX placed on clips
+  db.run(`
+    CREATE TABLE IF NOT EXISTS clip_sfx (
+      id TEXT PRIMARY KEY,
+      clip_id TEXT NOT NULL,
+      sfx_track_id TEXT NOT NULL,
+      position REAL DEFAULT 0,
+      volume INTEGER DEFAULT 80,
+      FOREIGN KEY (clip_id) REFERENCES clips(id) ON DELETE CASCADE,
+      FOREIGN KEY (sfx_track_id) REFERENCES sfx_tracks(id)
+    )
+  `);
+
   // --- Migrations for existing databases ---
   // Add new columns to license_keys if missing
   try {
@@ -206,6 +249,20 @@ async function initDatabase() {
       db.run('ALTER TABLE clips ADD COLUMN caption_settings TEXT');
       console.log('[DB] Migration: added caption_settings column');
       saveDatabase();
+    }
+  } catch (e) { /* ignore */ }
+
+  // Add music columns to clips if missing
+  try {
+    const clipCols2 = db.exec("PRAGMA table_info(clips)")[0];
+    const clipColNames2 = clipCols2 ? clipCols2.values.map(r => r[1]) : [];
+    if (!clipColNames2.includes('music_track_id')) {
+      db.run('ALTER TABLE clips ADD COLUMN music_track_id TEXT');
+      console.log('[DB] Migration: added music_track_id to clips');
+    }
+    if (!clipColNames2.includes('music_volume')) {
+      db.run('ALTER TABLE clips ADD COLUMN music_volume INTEGER DEFAULT 20');
+      console.log('[DB] Migration: added music_volume to clips');
     }
   } catch (e) { /* ignore */ }
 

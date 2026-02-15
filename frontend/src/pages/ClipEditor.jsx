@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import MusicSelector from '../components/MusicSelector';
+import SfxSelector from '../components/SfxSelector';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     ArrowLeft, Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
@@ -172,6 +174,14 @@ export default function ClipEditor() {
     const segSaveTimer = useRef(null);
     const [expandedTimingIdx, setExpandedTimingIdx] = useState(null);
     const [wordTimings, setWordTimings] = useState({});  // { segIdx: [{word, start, end}, ...] }
+
+    // Music state
+    const [showMusicSelector, setShowMusicSelector] = useState(false);
+    const [musicTrackName, setMusicTrackName] = useState(null);
+
+    // SFX state
+    const [showSfxSelector, setShowSfxSelector] = useState(false);
+    const [sfxCount, setSfxCount] = useState(0);
 
     // Load data
     useEffect(() => {
@@ -656,6 +666,32 @@ export default function ClipEditor() {
                     </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {/* Music Button */}
+                    <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => setShowMusicSelector(true)}
+                        style={{ gap: 5, fontSize: 12 }}
+                        title="Background Music"
+                    >
+                        🎵 Music
+                    </button>
+                    {musicTrackName && (
+                        <span className="music-badge">🎵 {musicTrackName}</span>
+                    )}
+
+                    {/* SFX Button */}
+                    <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => setShowSfxSelector(true)}
+                        style={{ gap: 5, fontSize: 12 }}
+                        title="Sound Effects"
+                    >
+                        🔊 SFX
+                    </button>
+                    {sfxCount > 0 && (
+                        <span className="music-badge">🔊 {sfxCount}</span>
+                    )}
+
                     {/* Save & Export Buttons */}
                     <button
                         className={`btn btn-sm ${hasChanges ? 'btn-primary' : 'btn-ghost'}`}
@@ -1912,6 +1948,54 @@ export default function ClipEditor() {
                     to { transform: rotate(360deg); }
                 }
             `}</style>
+
+            {/* Music Selector Modal */}
+            {showMusicSelector && (
+                <MusicSelector
+                    clipId={clipId}
+                    currentTrackId={clip?.music_track_id}
+                    currentVolume={clip?.music_volume || 20}
+                    onClose={() => setShowMusicSelector(false)}
+                    onSelect={async (trackId, vol) => {
+                        try {
+                            await fetch(`${API}/projects/${projectId}/clips/${clipId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ music_track_id: trackId, music_volume: vol })
+                            });
+                            // Fetch track name
+                            if (trackId) {
+                                const res = await fetch(`${API}/music`);
+                                const tracks = await res.json();
+                                const t = tracks.find(tr => tr.id === trackId);
+                                setMusicTrackName(t?.name || 'Music');
+                            } else {
+                                setMusicTrackName(null);
+                            }
+                            setClip(prev => ({ ...prev, music_track_id: trackId, music_volume: vol }));
+                            setShowMusicSelector(false);
+                        } catch (err) {
+                            console.error('Failed to set music:', err);
+                        }
+                    }}
+                />
+            )}
+
+            {/* SFX Selector Modal */}
+            {showSfxSelector && (
+                <SfxSelector
+                    clipId={clipId}
+                    clipDuration={trimEnd - trimStart}
+                    onClose={() => setShowSfxSelector(false)}
+                    onUpdate={async () => {
+                        try {
+                            const res = await fetch(`${API}/sfx/clip/${clipId}`);
+                            const data = await res.json();
+                            setSfxCount(data.length);
+                        } catch (e) { }
+                    }}
+                />
+            )}
         </>
     );
 }
