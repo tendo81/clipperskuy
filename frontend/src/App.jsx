@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import UpdateNotification from './components/UpdateNotification';
 import Dashboard from './pages/Dashboard';
 import Upload from './pages/Upload';
 import Projects from './pages/Projects';
@@ -30,6 +31,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
+        <UpdateNotification />
       </div>
     </Router>
   );
