@@ -7,6 +7,10 @@ const { generateFaceTrackCrop } = require('./faceTracker');
 const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'clips');
 
+// Resolve FFmpeg/FFprobe path — use env variable, bundled binary, or fallback to PATH
+const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
+const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
+
 fs.ensureDirSync(CLIPS_DIR);
 
 /**
@@ -20,7 +24,7 @@ function runFFmpeg(args, duration, emit, io, projectId) {
         const cmdStr = `ffmpeg ${args.join(' ')}`;
         console.log(`[Render] FFmpeg: ${cmdStr}`);
 
-        const proc = spawn('ffmpeg', args, { windowsHide: true });
+        const proc = spawn(FFMPEG_PATH, args, { windowsHide: true });
 
         // CRITICAL: Close stdin immediately so FFmpeg doesn't hang waiting for input
         proc.stdin.end();
@@ -84,7 +88,7 @@ function runFFmpeg(args, duration, emit, io, projectId) {
 
         proc.on('error', (err) => {
             clearTimeout(timeout);
-            console.error(`[Render] FFmpeg spawn error: ${err.message}`);
+            console.error(`[Render] FFmpeg spawn error: ${err.message}. Is FFmpeg installed? Path: ${FFMPEG_PATH}`);
             reject(err);
         });
     });
@@ -162,10 +166,11 @@ async function renderClip(clipId, io) {
         emit(5, `Free tier: resolusi dibatasi ${outW}x${outH}`);
     }
 
-    // Force CPU for free tier (no GPU acceleration)
+    // Force CPU for free tier (no GPU acceleration) + faster preset to prevent hanging
     if (!renderLimits.gpuAllowed) {
         settings.encoder = 'libx264';
         settings.hw_accel = 'none';
+        settings.quality_preset = 'fast'; // Force fast preset for free tier to avoid CPU bottleneck
     }
 
     // Force watermark text for free tier if no watermark image
@@ -177,9 +182,8 @@ async function renderClip(clipId, io) {
     let sourceW = 0;
     try {
         const { execSync } = require('child_process');
-        const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
         const probeResult = execSync(
-            `"${ffprobePath}" -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${project.source_path}"`,
+            `"${FFPROBE_PATH}" -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${project.source_path}"`,
             { encoding: 'utf-8', timeout: 10000 }
         ).trim();
         const [srcW, srcH] = probeResult.split(',').map(Number);
