@@ -460,14 +460,20 @@ async function renderClip(clipId, io) {
     // Detect if vf is already a complex filter graph (fit/split modes start with [0:v]split)
     const isComplexVf = vf.includes('[0:v]');
 
+    // For complex filter modes (fit/split), we separate subtitle burn-in into a second pass.
+    // The ASS filter has path escaping issues inside -filter_complex, causing subtitles to silently fail.
+    // Strategy: pass 1 = reframing only, pass 2 = subtitle burn-in via simple -vf.
+    const needsSubtitlePass = isComplexVf && subFilter;
+    const extraFiltersNoSub = needsSubtitlePass
+        ? [progressBarFilter, textWatermarkFilter].filter(Boolean).join(',')
+        : extraFilters;
+
     if (useFilterComplex && watermarkFilter) {
         // Complex filter with watermark image overlay
         let fullFilter;
         if (isComplexVf) {
-            // fit/split: vf already has [0:v]split..., append extras after last filter output
-            fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[vid]';
+            fullFilter = vf + (extraFiltersNoSub ? `,${extraFiltersNoSub}` : '') + ',format=yuv420p[vid]';
         } else {
-            // center/face_track: simple filter chain, prepend [0:v]
             fullFilter = `[0:v]${vf}` + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[vid]';
         }
         fullFilter += `;${watermarkFilter}`;
@@ -480,7 +486,7 @@ async function renderClip(clipId, io) {
         // Complex filter without watermark (fit/split or with music/sfx)
         let fullFilter;
         if (isComplexVf) {
-            fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
+            fullFilter = vf + (extraFiltersNoSub ? `,${extraFiltersNoSub}` : '') + ',format=yuv420p[outv]';
         } else {
             fullFilter = `[0:v]${vf}` + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
         }
@@ -496,12 +502,16 @@ async function renderClip(clipId, io) {
         args1.push('-af', audioFilter);
     }
 
+    // If we need subtitle second pass, output to temp file first
+    const needsSecondPass = needsSubtitlePass;
+    const tempOutputPath = needsSecondPass ? outputPath.replace('.mp4', '_temp.mp4') : null;
+
     args1.push(
         '-c:v', encoder, ...encoderArgs, '-crf', crf,
         '-c:a', 'aac', '-b:a', '192k',
         '-shortest',
         '-movflags', '+faststart',
-        outputPath
+        needsSecondPass ? tempOutputPath : outputPath
     );
 
     // For GPU encoders, replace -crf with appropriate quality param
@@ -526,7 +536,54 @@ async function renderClip(clipId, io) {
 
     const result1 = await runFFmpeg(args1, duration, emit, io, project.id);
 
-    if (result1.success && validateOutput(outputPath)) {
+    // For fit/split modes: run second pass to burn subtitles
+    const checkPath = needsSecondPass ? tempOutputPath : outputPath;
+    if (result1.success && validateOutput(checkPath)) {
+        if (needsSecondPass) {
+            // Second pass: burn subtitles onto the temp file using simple -vf
+            emit(85, 'Burning subtitles...');
+            console.log(`[Render] Pass 2: Burning subtitles onto ${tempOutputPath}`);
+            const subArgs = [
+                '-y',
+                '-i', tempOutputPath,
+                '-vf', `${subFilter},format=yuv420p`,
+                '-c:v', encoder, ...encoderArgs, '-crf', crf,
+                '-c:a', 'copy',
+                '-shortest',
+                '-movflags', '+faststart',
+                outputPath
+            ];
+            // Fix CRF for GPU encoders in pass 2 as well
+            if (encoder !== 'libx264') {
+                const crfIdx2 = subArgs.indexOf('-crf');
+                if (crfIdx2 > -1) {
+                    const hasQuality2 = encoderArgs.some(a => ['-quality', '-cq', '-global_quality', '-preset'].includes(a));
+                    if (hasQuality2) subArgs.splice(crfIdx2, 2);
+                    else if (encoder.includes('nvenc')) subArgs[crfIdx2] = '-cq';
+                    else if (encoder.includes('amf')) { subArgs[crfIdx2] = '-quality'; subArgs[crfIdx2 + 1] = 'balanced'; }
+                    else if (encoder.includes('qsv')) subArgs[crfIdx2] = '-global_quality';
+                }
+            }
+            const result1b = await runFFmpeg(subArgs, duration, emit, io, project.id);
+            // Clean up temp file
+            try { fs.unlinkSync(tempOutputPath); } catch (e) { }
+
+            if (result1b.success && validateOutput(outputPath)) {
+                const stats = fs.statSync(outputPath);
+                const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
+                run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
+                emit(100, `Done! ${sizeMB} MB`);
+                console.log(`[Render] Clip #${clip.clip_number} exported (2-pass): ${outputPath} (${sizeMB} MB)`);
+                return { outputPath, size: stats.size };
+            }
+            // If subtitle pass failed, use the temp file as-is (without subtitles)
+            console.warn('[Render] Subtitle pass failed, using video without subtitles');
+            try {
+                fs.copyFileSync(tempOutputPath, outputPath);
+                fs.unlinkSync(tempOutputPath);
+            } catch (e) { /* temp might already be deleted */ }
+        }
+
         const stats = fs.statSync(outputPath);
         const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
         run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
