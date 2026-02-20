@@ -184,6 +184,25 @@ export default function License() {
                     </div>
                 </div>
 
+                {/* Activation Status Indicator */}
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16,
+                    padding: '10px 14px', borderRadius: 10,
+                    background: isLicensed ? 'rgba(34, 197, 94, 0.08)' : isTrial ? 'rgba(245, 158, 11, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                    border: `1px solid ${isLicensed ? 'rgba(34, 197, 94, 0.2)' : isTrial ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
+                }}>
+                    {isLicensed ? (
+                        <><CheckCircle size={18} color="#22c55e" />
+                            <span style={{ fontSize: 14, fontWeight: 600, color: '#22c55e' }}>Activated — {tier.charAt(0).toUpperCase() + tier.slice(1)} License</span></>
+                    ) : isTrial ? (
+                        <><Clock size={18} color="#f59e0b" />
+                            <span style={{ fontSize: 14, fontWeight: 600, color: '#f59e0b' }}>Trial Active — {trial?.daysRemaining || 0} hari tersisa</span></>
+                    ) : (
+                        <><XCircle size={18} color="#ef4444" />
+                            <span style={{ fontSize: 14, fontWeight: 600, color: '#ef4444' }}>Belum Diaktivasi — Masukkan license key di bawah</span></>
+                    )}
+                </div>
+
                 {/* License Key Input */}
                 <div style={{ marginBottom: 16 }}>
                     <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 6, display: 'block' }}>
