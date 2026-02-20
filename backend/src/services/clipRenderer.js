@@ -457,26 +457,40 @@ async function renderClip(clipId, io) {
         audioArgs = { simple: audioFilter };
     }
 
+    // Detect if vf is already a complex filter graph (fit/split modes start with [0:v]split)
+    const isComplexVf = vf.includes('[0:v]');
+
     if (useFilterComplex && watermarkFilter) {
-        // Complex filter with watermark
-        const vidChain = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p';
-        let fullFilter = `[0:v]${vidChain}[vid];${watermarkFilter}`;
+        // Complex filter with watermark image overlay
+        let fullFilter;
+        if (isComplexVf) {
+            // fit/split: vf already has [0:v]split..., append extras after last filter output
+            fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[vid]';
+        } else {
+            // center/face_track: simple filter chain, prepend [0:v]
+            fullFilter = `[0:v]${vf}` + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[vid]';
+        }
+        fullFilter += `;${watermarkFilter}`;
         if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
         args1.push('-filter_complex', fullFilter);
         args1.push('-map', '[outv]');
         if (audioArgs.map) args1.push('-map', audioArgs.map);
         else { args1.push('-map', '0:a?'); args1.push('-af', audioFilter); }
     } else if (useFilterComplex) {
-        // Complex filter without watermark (but maybe with music)
-        const vidPart = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
-        let fullFilter = vidPart;
+        // Complex filter without watermark (fit/split or with music/sfx)
+        let fullFilter;
+        if (isComplexVf) {
+            fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
+        } else {
+            fullFilter = `[0:v]${vf}` + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
+        }
         if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
         args1.push('-filter_complex', fullFilter);
         args1.push('-map', '[outv]');
         if (audioArgs.map) args1.push('-map', audioArgs.map);
         else { args1.push('-map', '0:a?'); args1.push('-af', audioFilter); }
     } else {
-        // Simple filter
+        // Simple filter (center/face_track without music/watermark)
         const fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p';
         args1.push('-vf', fullFilter);
         args1.push('-af', audioFilter);
