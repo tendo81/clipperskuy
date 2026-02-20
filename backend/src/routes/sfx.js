@@ -10,7 +10,8 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { getDb, saveDatabase, all, get, run } = require('../database');
 
-const SFX_DIR = path.join(__dirname, '..', '..', 'data', 'sfx');
+const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
+const SFX_DIR = path.join(DATA_DIR, 'sfx');
 fs.ensureDirSync(SFX_DIR);
 
 // Multer storage

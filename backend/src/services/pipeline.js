@@ -5,8 +5,9 @@ const { extractAudio, splitAudioToChunks, formatDuration } = require('./ffmpeg')
 const { transcribe, transcribeWithGroq } = require('./transcribe');
 const { detectClips } = require('./clipDetector');
 const { all, get, run } = require('../database');
+const { getRenderLimits } = require('./license');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 
 // ===== Active Jobs Tracker (for cancel support) =====
 const activeJobs = new Map(); // projectId -> { aborted: false }
@@ -152,15 +153,24 @@ async function processProject(projectId, io) {
         log('info', `Source: ${path.basename(project.source_path)}`);
         log('info', `Duration: ${formatDuration(project.duration || 0)} | Resolution: ${project.width}×${project.height}`);
 
+        // ===== Check source duration limit (free tier) =====
+        const tierLimits = getRenderLimits();
+        const maxDurationMin = tierLimits.maxSourceDurationMin;
+        const videoDurationMin = (project.duration || 0) / 60;
+        if (maxDurationMin < Infinity && videoDurationMin > maxDurationMin) {
+            log('warn', `🔒 Free tier: max source video ${maxDurationMin} menit. Video ini ${videoDurationMin.toFixed(1)} menit.`);
+            throw new Error(`Free tier hanya mendukung video sampai ${maxDurationMin} menit. Video ini ${videoDurationMin.toFixed(1)} menit. Upgrade ke PRO untuk video tanpa batas!`);
+        }
+
         // Load settings
         const settingsRows = all('SELECT * FROM settings');
         const settings = {};
         settingsRows.forEach(r => { settings[r.key] = r.value; });
-        settings.language = project.language;
+        settings.language = (project.language && project.language !== 'auto') ? project.language : (settings.language || 'auto');
 
         const groqKeyCount = settings.groq_api_key ? settings.groq_api_key.split(',').filter(k => k.trim()).length : 0;
         const geminiKeyCount = settings.gemini_api_key ? settings.gemini_api_key.split(',').filter(k => k.trim()).length : 0;
-        log('info', `AI Config: Groq keys=${groqKeyCount}, Gemini keys=${geminiKeyCount}, Primary=${settings.ai_provider_primary}`);
+        log('info', `AI Config: Groq keys=${groqKeyCount}, Gemini keys=${geminiKeyCount}, Primary=${settings.ai_provider_primary}, Language=${settings.language}`);
 
         if (!settings.groq_api_key && !settings.gemini_api_key) {
             throw new Error('No AI API key configured. Go to Settings and add your Groq or Gemini API key.');
@@ -207,6 +217,7 @@ async function processProject(projectId, io) {
                 log('success', `Audio split into ${chunks.length} chunks (10 min each)`);
 
                 const allSegments = [];
+                const allWords = [];
                 let fullText = '';
                 let detectedLanguage = 'unknown';
 
@@ -226,9 +237,16 @@ async function processProject(projectId, io) {
                             end: (seg.end || 0) + chunk.startTime
                         }));
                         allSegments.push(...offsetSegments);
+                        // Collect word timestamps with offset
+                        const offsetWords = (result.words || []).map(w => ({
+                            ...w,
+                            start: (w.start || 0) + chunk.startTime,
+                            end: (w.end || 0) + chunk.startTime
+                        }));
+                        allWords.push(...offsetWords);
                         fullText += (fullText ? ' ' : '') + result.text;
                         if (result.language) detectedLanguage = result.language;
-                        log('success', `Chunk ${i + 1} done: ${result.text.length} chars, ${(result.segments || []).length} segments`);
+                        log('success', `Chunk ${i + 1} done: ${result.text.length} chars, ${(result.segments || []).length} segments, ${offsetWords.length} words`);
                     } catch (err) {
                         log('error', `Chunk ${i + 1} failed: ${err.message}`);
                         if (err.message.includes('429') || err.message.includes('rate')) {
@@ -263,7 +281,8 @@ async function processProject(projectId, io) {
                     throw new Error('Transcription failed: no text produced');
                 }
 
-                transcript = { text: fullText, language: detectedLanguage, segments: allSegments, words: [] };
+                transcript = { text: fullText, language: detectedLanguage, segments: allSegments, words: allWords };
+                log('info', `Word-level timestamps collected: ${allWords.length} words`);
                 log('success', `All chunks transcribed. Total: ${fullText.length} chars, ${allSegments.length} segments`);
             } else {
                 // Short video: single file transcription
@@ -370,6 +389,18 @@ async function processProject(projectId, io) {
         }
         log('success', `${clips.length} clips saved to database`);
 
+        // ===== Clip count limit (free tier) =====
+        const maxClips = tierLimits.maxClipsPerProject;
+        if (maxClips < Infinity && clips.length > maxClips) {
+            log('warn', `🔒 Free tier: max ${maxClips} clips per project. ${clips.length - maxClips} clip(s) disembunyikan.`);
+            // Mark excess clips as 'locked'
+            const excessClips = all('SELECT id FROM clips WHERE project_id = ? ORDER BY virality_score DESC LIMIT -1 OFFSET ?', [projectId, maxClips]);
+            for (const ec of excessClips) {
+                run("UPDATE clips SET status = 'locked' WHERE id = ?", [ec.id]);
+            }
+            log('info', `Top ${maxClips} clips tersedia. Upgrade ke PRO untuk akses semua ${clips.length} clips.`);
+        }
+
         // ===== DONE =====
         run("UPDATE projects SET status = 'completed', updated_at = datetime('now') WHERE id = ?", [projectId]);
         emit('done', 100, `Processing complete! ${clips.length} clips found.`);
@@ -402,4 +433,13 @@ async function processProject(projectId, io) {
     }
 }
 
-module.exports = { processProject, cancelProject, getActiveJobs, addToQueue, removeFromQueue, getQueueStatus };
+/**
+ * Re-transcribe a project: delete existing transcript, then run pipeline again
+ */
+async function retranscribeProject(projectId, io) {
+    console.log(`[Retranscribe] Deleting existing transcript for project: ${projectId}`);
+    run('DELETE FROM transcripts WHERE project_id = ?', [projectId]);
+    return processProject(projectId, io);
+}
+
+module.exports = { processProject, cancelProject, getActiveJobs, addToQueue, removeFromQueue, getQueueStatus, retranscribeProject };

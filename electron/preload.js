@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // App info
     getVersion: () => ipcRenderer.invoke('get-app-version'),
     getPaths: () => ipcRenderer.invoke('get-app-paths'),
+    getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
 
     // Window controls (for custom titlebar)
     minimize: () => ipcRenderer.invoke('window-minimize'),
@@ -28,9 +29,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     downloadUpdate: () => ipcRenderer.invoke('download-update'),
     installUpdate: () => ipcRenderer.invoke('install-update'),
 
+    // Notifications
+    showNotification: (title, body) => ipcRenderer.invoke('show-notification', { title, body }),
+
+    // About & Logs
+    showAbout: () => ipcRenderer.invoke('show-about'),
+    openLogFile: () => ipcRenderer.invoke('open-log-file'),
+
     // Listen for events from main process
     onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_, info) => callback(info)),
     onUpdateProgress: (callback) => ipcRenderer.on('update-progress', (_, percent) => callback(percent)),
     onUpdateReady: (callback) => ipcRenderer.on('update-ready', () => callback()),
+    onUpdateNotAvailable: (callback) => ipcRenderer.on('update-not-available', (_, info) => callback(info)),
+    onUpdateError: (callback) => ipcRenderer.on('update-error', (_, info) => callback(info)),
     onFirstRun: (callback) => ipcRenderer.on('first-run', (_, isFirst) => callback(isFirst)),
+    onBackendRestarted: (callback) => ipcRenderer.on('backend-restarted', () => callback()),
+    onBackendCrashed: (callback) => ipcRenderer.on('backend-crashed', () => callback()),
 });

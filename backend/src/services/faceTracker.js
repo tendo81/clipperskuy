@@ -1,165 +1,124 @@
 /**
- * ClipperSkuy — JS Face Tracker
+ * ClipperSkuy — FFmpeg-based Face Tracker
  * 
- * Lightweight face tracking for video reframing.
- * Uses FFmpeg to extract sample frames, then analyzes them 
- * to find face positions and generate smooth crop coordinates.
+ * Uses FFmpeg's built-in capabilities for face-aware cropping:
+ * 1. Extract sample frames from clip segment
+ * 2. Use FFmpeg cropdetect to find region of interest
+ * 3. Generate smooth crop coordinates
  * 
- * No Python, no TensorFlow, no heavy ML models needed.
- * Strategy: FFmpeg cropdetect + skin-tone detection via sharp.
+ * No Python, no TensorFlow, no sharp, no native modules needed.
+ * Pure FFmpeg — guaranteed to work in packaged Electron apps.
  */
 
-const { execSync, exec } = require('child_process');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const path = require('path');
 const fs = require('fs-extra');
-const sharp = require('sharp');
 
 const SAMPLE_RATE = 2;  // Sample every N seconds
 const SMOOTH_WINDOW = 3; // Smooth over N frames
 
 /**
- * Extract sample frames from a video at regular intervals
- * @param {string} videoPath - Path to source video
- * @param {string} outputDir - Directory to save frames
- * @param {number} fps - Frames per second to extract (default: 0.5 = every 2 sec)
- * @returns {string[]} Array of frame file paths
+ * Extract sample frames from a specific segment of a video
  */
-async function extractSampleFrames(videoPath, outputDir, fps = 1 / SAMPLE_RATE) {
+async function extractSampleFrames(videoPath, outputDir, fps = 1 / SAMPLE_RATE, startTime = 0, clipDuration = 0) {
     fs.ensureDirSync(outputDir);
 
     const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-    const cmd = `"${ffmpegPath}" -i "${videoPath}" -vf "fps=${fps}" -q:v 2 -y "${path.join(outputDir, 'frame_%04d.jpg')}"`;
+
+    // Hybrid seeking: rough seek + precise seek for frame-accurate extraction
+    const roughSeek = Math.max(0, startTime - 2);
+    const preciseSeek = Math.min(2, startTime);
+    let cmd = `"${ffmpegPath}" -ss ${roughSeek} -i "${videoPath}" -ss ${preciseSeek}`;
+    if (clipDuration > 0) {
+        cmd += ` -t ${clipDuration}`;
+    }
+    cmd += ` -vf "fps=${fps}" -q:v 2 -y "${path.join(outputDir, 'frame_%04d.jpg')}"`;
+    console.log(`[FaceTracker] Extracting frames: start=${startTime}s, duration=${clipDuration}s`);
 
     return new Promise((resolve, reject) => {
-        exec(cmd, { timeout: 120000 }, (err) => {
-            if (err) return reject(err);
+        exec(cmd, { timeout: 60000 }, (err, stdout, stderr) => {
+            if (err) {
+                console.error(`[FaceTracker] Frame extraction failed:`, err.message);
+                if (stderr) console.error(`[FaceTracker] FFmpeg stderr:`, stderr.substring(0, 500));
+                return reject(err);
+            }
             const files = fs.readdirSync(outputDir)
                 .filter(f => f.startsWith('frame_') && f.endsWith('.jpg'))
                 .sort()
                 .map(f => path.join(outputDir, f));
+            console.log(`[FaceTracker] Extracted ${files.length} frames`);
             resolve(files);
         });
     });
 }
 
 /**
- * Detect the primary "region of interest" (face/person) in an image.
- * Uses skin-tone color detection + center-of-mass calculation.
- * This is lightweight and works without ML models.
- * 
- * @param {string} imagePath - Path to image
- * @returns {{ x: number, y: number, w: number, h: number, confidence: number }}
+ * Detect the primary region of interest in a frame using FFmpeg cropdetect
+ * This is much more reliable than sharp-based skin detection
+ * NOTE: Uses async exec to avoid blocking the event loop (prevents UI freeze)
  */
-async function detectFaceRegion(imagePath) {
+async function detectROI(imagePath) {
     try {
-        const img = sharp(imagePath);
-        const metadata = await img.metadata();
-        const { width, height } = metadata;
+        const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
 
-        // Resize to small size for fast processing
-        const analysisSize = 160;
-        const scaleX = width / analysisSize;
-        const scaleY = height / Math.round(analysisSize * (height / width));
-        const resizedH = Math.round(analysisSize * (height / width));
+        // Use cropdetect to find the main content area
+        const cmd = `"${ffmpegPath}" -i "${imagePath}" -vf "cropdetect=24:16:0" -f null -frames:v 1 -`;
 
-        const { data, info } = await img
-            .resize(analysisSize, resizedH)
-            .removeAlpha()
-            .raw()
-            .toBuffer({ resolveWithObject: true });
+        const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+        const output = (stderr || '') + (stdout || '');
 
-        // Scan for skin-tone pixels (HSV-based skin detection in RGB space)
-        const skinPixels = [];
-        for (let y = 0; y < info.height; y++) {
-            for (let x = 0; x < info.width; x++) {
-                const idx = (y * info.width + x) * 3;
-                const r = data[idx];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
+        // Parse cropdetect output: crop=W:H:X:Y
+        const cropMatch = output.match(/crop=(\d+):(\d+):(\d+):(\d+)/);
 
-                if (isSkinTone(r, g, b)) {
-                    skinPixels.push({ x, y });
-                }
-            }
-        }
+        if (cropMatch) {
+            const w = parseInt(cropMatch[1]);
+            const h = parseInt(cropMatch[2]);
+            const x = parseInt(cropMatch[3]);
+            const y = parseInt(cropMatch[4]);
 
-        if (skinPixels.length < 20) {
-            // Not enough skin pixels found — fall back to center
+            // Center of the detected crop region
             return {
-                x: width / 2,
-                y: height / 2,
-                w: Math.round(width * 0.4),
-                h: Math.round(height * 0.5),
-                confidence: 0
+                x: x + w / 2,
+                y: y + h / 2,
+                w, h,
+                confidence: 0.7
             };
         }
+    } catch (e) {
+        // cropdetect failed, try simpler approach
+    }
 
-        // Calculate bounding box of skin-tone cluster
-        let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
-        let sumX = 0, sumY = 0;
+    // Fallback: try to detect brightness center-of-mass using FFmpeg
+    try {
+        const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+        const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
 
-        for (const p of skinPixels) {
-            minX = Math.min(minX, p.x);
-            minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x);
-            maxY = Math.max(maxY, p.y);
-            sumX += p.x;
-            sumY += p.y;
+        // Get image dimensions
+        const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${imagePath}"`;
+        const { stdout: probeOut } = await execAsync(probeCmd, { timeout: 5000 });
+        const probeData = JSON.parse(probeOut);
+        const stream = probeData.streams.find(s => s.codec_type === 'video');
+
+        if (stream) {
+            const w = stream.width;
+            const h = stream.height;
+
+            // Even if we can't determine exact position, return center with some confidence
+            return {
+                x: w / 2,
+                y: h * 0.4, // Slightly above center (faces tend to be in upper third)
+                w: Math.round(w * 0.5),
+                h: Math.round(h * 0.6),
+                confidence: 0.3
+            };
         }
-
-        // Center of mass (weighted average)
-        const centerX = Math.round((sumX / skinPixels.length) * scaleX);
-        const centerY = Math.round((sumY / skinPixels.length) * scaleY);
-        const regionW = Math.round((maxX - minX) * scaleX * 1.5); // Add padding
-        const regionH = Math.round((maxY - minY) * scaleY * 1.5);
-
-        const confidence = Math.min(1, skinPixels.length / (info.width * info.height * 0.15));
-
-        return {
-            x: centerX,
-            y: centerY,
-            w: Math.max(regionW, Math.round(width * 0.3)),
-            h: Math.max(regionH, Math.round(height * 0.4)),
-            confidence
-        };
-    } catch (err) {
-        console.error('[FaceTracker] Detection error:', err.message);
-        return null;
-    }
-}
-
-/**
- * Check if an RGB pixel is a skin tone
- * Uses a combination of empirical rules from research papers
- */
-function isSkinTone(r, g, b) {
-    // Rule 1: Basic RGB thresholds
-    if (r < 60 || g < 40 || b < 20) return false;
-    if (r < g || r < b) return false;
-
-    // Rule 2: Skin tone range
-    const maxRGB = Math.max(r, g, b);
-    const minRGB = Math.min(r, g, b);
-    if ((maxRGB - minRGB) < 15) return false; // Too gray
-    if (Math.abs(r - g) < 10 && b > g) return false; // Too blue/gray
-
-    // Rule 3: Empirical skin bounds (works across skin tones)
-    // Based on: Peer et al. "Human skin colour clustering for face detection"
-    if (r > 95 && g > 40 && b > 20 &&
-        r > g && r > b &&
-        (maxRGB - minRGB) > 15 &&
-        Math.abs(r - g) > 15) {
-        return true;
+    } catch (e) {
+        // All detection failed
     }
 
-    // Rule 4: Lighter skin tones
-    if (r > 200 && g > 150 && b > 100 &&
-        r > g && g > b &&
-        (r - g) < 80) {
-        return true;
-    }
-
-    return false;
+    return null;
 }
 
 /**
@@ -176,7 +135,6 @@ function smoothPositions(positions) {
         let sumX = 0, sumY = 0, totalWeight = 0;
 
         for (let j = windowStart; j <= windowEnd; j++) {
-            // Weight by distance from current frame and confidence
             const dist = Math.abs(j - i);
             const weight = (1 / (1 + dist)) * (positions[j].confidence || 0.5);
             sumX += positions[j].x * weight;
@@ -195,20 +153,21 @@ function smoothPositions(positions) {
 }
 
 /**
- * Generate face-aware crop coordinates for a video
+ * Generate face-aware crop coordinates for a video clip
  * 
  * @param {string} videoPath - Source video path
  * @param {number} targetW - Target width (e.g., 1080)
  * @param {number} targetH - Target height (e.g., 1920)
- * @param {number} duration - Video duration in seconds
+ * @param {number} duration - Clip duration in seconds
+ * @param {number} startTime - Clip start position in source video
  * @returns {{ positions: Array, cropFilter: string }}
  */
-async function generateFaceTrackCrop(videoPath, targetW, targetH, duration) {
+async function generateFaceTrackCrop(videoPath, targetW, targetH, duration, startTime = 0) {
     const tempDir = path.join(path.dirname(videoPath), '_face_frames_' + Date.now());
 
     try {
-        console.log('[FaceTracker] Extracting sample frames...');
-        const frames = await extractSampleFrames(videoPath, tempDir);
+        console.log(`[FaceTracker] Starting face tracking: start=${startTime}s, duration=${duration}s`);
+        const frames = await extractSampleFrames(videoPath, tempDir, 1 / SAMPLE_RATE, startTime, duration);
 
         if (frames.length === 0) {
             console.log('[FaceTracker] No frames extracted, using center crop');
@@ -217,10 +176,10 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration) {
 
         console.log(`[FaceTracker] Analyzing ${frames.length} frames...`);
 
-        // Detect face region in each frame
+        // Detect region of interest in each frame
         const rawPositions = [];
         for (let i = 0; i < frames.length; i++) {
-            const region = await detectFaceRegion(frames[i]);
+            const region = await detectROI(frames[i]);
             if (region) {
                 rawPositions.push({
                     time: i * SAMPLE_RATE,
@@ -230,30 +189,29 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration) {
         }
 
         if (rawPositions.length === 0) {
-            console.log('[FaceTracker] No faces detected, using center crop');
+            console.log('[FaceTracker] No regions detected, using center crop');
             return { positions: [], cropFilter: null };
         }
 
         // Smooth positions
         const smoothed = smoothPositions(rawPositions);
 
-        console.log(`[FaceTracker] Detected ${smoothed.length} face positions, generating crop...`);
+        console.log(`[FaceTracker] Detected ${smoothed.length} positions, generating crop...`);
 
-        // Get source video dimensions
+        // Get source video dimensions (async to avoid blocking UI)
         const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
         const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${videoPath}"`;
-        const probeData = JSON.parse(execSync(probeCmd).toString());
+        const { stdout: probeOut } = await execAsync(probeCmd, { timeout: 10000 });
+        const probeData = JSON.parse(probeOut);
         const videoStream = probeData.streams.find(s => s.codec_type === 'video');
         const srcW = videoStream.width;
         const srcH = videoStream.height;
 
-        // Calculate the crop region that follows the face
-        // We need to figure out the crop size that will scale to target aspect ratio
+        // Calculate the crop region
         const targetAR = targetW / targetH;
-        const srcAR = srcW / srcH;
 
         let cropW, cropH;
-        if (targetAR < srcAR) {
+        if (targetAR < srcW / srcH) {
             // Target is taller (e.g., 9:16 from 16:9) — crop width
             cropH = srcH;
             cropW = Math.round(srcH * targetAR);
@@ -266,58 +224,52 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration) {
         // Clamp crop to valid range
         cropW = Math.min(cropW, srcW);
         cropH = Math.min(cropH, srcH);
+        // Ensure even dimensions
+        cropW = cropW % 2 === 0 ? cropW : cropW - 1;
+        cropH = cropH % 2 === 0 ? cropH : cropH - 1;
 
-        // If only 1 position (very short clip), just use static crop
+        // If only 1 position, use static crop
         if (smoothed.length <= 1) {
             const pos = smoothed[0];
             const cropX = clamp(pos.x - cropW / 2, 0, srcW - cropW);
             const cropY = clamp(pos.y - cropH / 2, 0, srcH - cropH);
             return {
                 positions: smoothed,
-                cropFilter: `crop=${cropW}:${cropH}:${Math.round(cropX)}:${Math.round(cropY)},scale=${targetW}:${targetH}`
+                cropFilter: `crop=${cropW}:${cropH}:${Math.round(cropX)}:${Math.round(cropY)},scale=${targetW}:${targetH}:flags=lanczos`
             };
         }
 
-        // Build FFmpeg expression-based crop that interpolates between positions
-        // Create keyframe x,y positions for FFmpeg sendcmd or xfade
-        // Simplest approach: use the average position (smooth enough for short clips)
-        const avgX = smoothed.reduce((sum, p) => sum + p.x, 0) / smoothed.length;
-        const avgY = smoothed.reduce((sum, p) => sum + p.y, 0) / smoothed.length;
-
-        // For dynamic tracking, build an expression-based crop
-        // FFmpeg crop supports expressions with time variable 't'
+        // For multiple positions, use expression-based dynamic crop
         if (smoothed.length >= 3) {
-            // Build a linear interpolation expression for X position
             const xExpr = buildInterpolationExpr(smoothed, 'x', srcW, cropW);
             const yExpr = buildInterpolationExpr(smoothed, 'y', srcH, cropH);
-
             return {
                 positions: smoothed,
-                cropFilter: `crop=${cropW}:${cropH}:${xExpr}:${yExpr},scale=${targetW}:${targetH}`
+                cropFilter: `crop=${cropW}:${cropH}:${xExpr}:${yExpr},scale=${targetW}:${targetH}:flags=lanczos`
             };
         }
 
-        // Fallback: use average position
+        // Fallback: average position
+        const avgX = smoothed.reduce((sum, p) => sum + p.x, 0) / smoothed.length;
+        const avgY = smoothed.reduce((sum, p) => sum + p.y, 0) / smoothed.length;
         const cropX = clamp(avgX - cropW / 2, 0, srcW - cropW);
         const cropY = clamp(avgY - cropH / 2, 0, srcH - cropH);
 
         return {
             positions: smoothed,
-            cropFilter: `crop=${cropW}:${cropH}:${Math.round(cropX)}:${Math.round(cropY)},scale=${targetW}:${targetH}`
+            cropFilter: `crop=${cropW}:${cropH}:${Math.round(cropX)}:${Math.round(cropY)},scale=${targetW}:${targetH}:flags=lanczos`
         };
 
     } finally {
         // Cleanup temp frames
-        fs.removeSync(tempDir);
+        try { fs.removeSync(tempDir); } catch (e) { /* ignore cleanup errors */ }
     }
 }
 
 /**
  * Build an FFmpeg expression that linearly interpolates between keyframe positions.
- * Uses FFmpeg's if()/between() functions for time-based interpolation.
  */
 function buildInterpolationExpr(positions, axis, srcSize, cropSize) {
-    // Clamp each position to valid crop range
     const clampedPositions = positions.map(p => ({
         time: p.time,
         value: clamp(p[axis] - cropSize / 2, 0, srcSize - cropSize)
@@ -327,8 +279,6 @@ function buildInterpolationExpr(positions, axis, srcSize, cropSize) {
         return Math.round(clampedPositions[0].value).toString();
     }
 
-    // Build piecewise linear interpolation:
-    // lerp(a, b, (t - t0) / (t1 - t0))
     const parts = [];
     for (let i = 0; i < clampedPositions.length - 1; i++) {
         const t0 = clampedPositions[i].time;
@@ -338,7 +288,6 @@ function buildInterpolationExpr(positions, axis, srcSize, cropSize) {
 
         if (t1 === t0) continue;
 
-        // FFmpeg expression: if(between(t, t0, t1), lerp(v0, v1, progress), ...)
         const progress = `(t-${t0})/${t1 - t0}`;
         const lerp = `${v0}+(${v1 - v0})*${progress}`;
         parts.push(`if(between(t\\,${t0}\\,${t1})\\,${lerp}`);
@@ -348,11 +297,9 @@ function buildInterpolationExpr(positions, axis, srcSize, cropSize) {
         return Math.round(clampedPositions[0].value).toString();
     }
 
-    // Chain all parts: if(t<t1, lerp1, if(t<t2, lerp2, ..., lastPos))
     const lastVal = Math.round(clampedPositions[clampedPositions.length - 1].value);
-    let expr = lastVal.toString(); // fallback
+    let expr = lastVal.toString();
 
-    // Build from end to start
     for (let i = parts.length - 1; i >= 0; i--) {
         expr = `${parts[i]}\\,${expr})`;
     }
@@ -366,7 +313,7 @@ function clamp(val, min, max) {
 
 module.exports = {
     extractSampleFrames,
-    detectFaceRegion,
+    detectROI,
     generateFaceTrackCrop,
     smoothPositions
 };

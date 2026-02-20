@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload as UploadIcon, Link2, Film, Smartphone, Crosshair, User, Columns, Maximize, Clock, Sparkles, Globe, Rocket, CheckCircle, Loader, X, FileVideo } from 'lucide-react';
@@ -56,7 +56,17 @@ export default function UploadPage() {
     const [progressMessage, setProgressMessage] = useState('');
     const [uploadDone, setUploadDone] = useState(false);
     const [error, setError] = useState(null);
+    const [licenseTier, setLicenseTier] = useState('free');
     const fileRef = useRef(null);
+
+    // Fetch license tier on mount
+    useEffect(() => {
+        // Preview free only works if admin is logged in
+        const isAdmin = !!sessionStorage.getItem('admin_password');
+        const previewFree = isAdmin && localStorage.getItem('previewFreeTier') === 'true';
+        if (previewFree) { setLicenseTier('free'); return; }
+        fetch(`${API}/license`).then(r => r.json()).then(d => setLicenseTier(d.tier || 'free')).catch(() => { });
+    }, []);
 
     const isYoutubeUrl = (url) => {
         return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/.test(url);
@@ -92,25 +102,43 @@ export default function UploadPage() {
 
         try {
             if (!file && youtubeUrl && isYoutubeUrl(youtubeUrl)) {
-                // YouTube URL download
+                // YouTube URL download with real-time SSE progress
                 setProgressMessage('Connecting to YouTube...');
                 setUploadProgress(5);
 
-                const res = await fetch(`${API}/projects/youtube`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: youtubeUrl, ...settings })
-                });
+                // Open SSE stream for progress updates
+                const evtSource = new EventSource(`${API}/projects/youtube/progress`);
 
-                if (!res.ok) {
-                    const errData = await res.json();
-                    throw new Error(errData.error || 'YouTube download failed');
+                evtSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.message) setProgressMessage(data.message);
+                        if (typeof data.progress === 'number') setUploadProgress(data.progress);
+                    } catch (e) { /* ignore parse errors */ }
+                };
+
+                try {
+                    const res = await fetch(`${API}/projects/youtube`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: youtubeUrl, ...settings })
+                    });
+
+                    evtSource.close();
+
+                    if (!res.ok) {
+                        const errData = await res.json();
+                        throw new Error(errData.error || 'YouTube download failed');
+                    }
+
+                    setUploadProgress(100);
+                    setProgressMessage('Download complete!');
+                    setUploadDone(true);
+                    setTimeout(() => navigate('/projects'), 1500);
+                } catch (err) {
+                    evtSource.close();
+                    throw err;
                 }
-
-                setUploadProgress(100);
-                setProgressMessage('Download complete!');
-                setUploadDone(true);
-                setTimeout(() => navigate('/projects'), 1500);
             } else if (file) {
                 // File upload
                 setProgressMessage(`Uploading ${file.name}...`);
@@ -146,7 +174,11 @@ export default function UploadPage() {
                 throw new Error('Please upload a video file or enter a valid YouTube URL');
             }
         } catch (err) {
-            setError(err.message);
+            let errorMsg = err.message;
+            if (err.message === 'Failed to fetch' || err.message.includes('NetworkError')) {
+                errorMsg = 'Cannot connect to backend server. Please restart the app. If the problem persists, try reinstalling ClipperSkuy.';
+            }
+            setError(errorMsg);
             setUploading(false);
             setUploadProgress(0);
             setProgressMessage('');
@@ -252,13 +284,29 @@ export default function UploadPage() {
                             <div className="chip-group">
                                 {reframingModes.map((m) => {
                                     const Icon = m.icon;
+                                    const isLocked = m.id === 'face_track' && licenseTier === 'free';
                                     return (
-                                        <button key={m.id} className={`chip ${reframing === m.id ? 'active' : ''}`} onClick={() => setReframing(m.id)} style={{ minWidth: 130 }}>
+                                        <button key={m.id}
+                                            className={`chip ${reframing === m.id ? 'active' : ''}`}
+                                            onClick={() => !isLocked && setReframing(m.id)}
+                                            style={{
+                                                minWidth: 130, position: 'relative',
+                                                opacity: isLocked ? 0.5 : 1,
+                                                cursor: isLocked ? 'not-allowed' : 'pointer'
+                                            }}>
                                             <Icon size={16} />
                                             <div style={{ textAlign: 'left' }}>
                                                 <div style={{ fontSize: 13 }}>{m.label}</div>
                                                 <div style={{ fontSize: 10, opacity: 0.6 }}>{m.desc}</div>
                                             </div>
+                                            {isLocked && (
+                                                <span style={{
+                                                    position: 'absolute', top: -6, right: -6,
+                                                    background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                                                    color: '#fff', fontSize: 9, fontWeight: 700,
+                                                    padding: '1px 6px', borderRadius: 8
+                                                }}>🔒 PRO</span>
+                                            )}
                                         </button>
                                     );
                                 })}

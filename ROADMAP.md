@@ -290,6 +290,13 @@
 - [x] Customize: font, size, color, position, animation
 - [x] Word-level timing editor
 - [x] Manual caption editing
+- [x] **Karaoke-style word highlight in export** (matches preview exactly) ✅ NEW
+  - All words visible, active word highlighted with accent color + 110% scale
+  - Word-level timestamps from Groq Whisper for accurate sync
+  - Fallback to even distribution when word timestamps unavailable
+- [x] **Re-transcribe button** for improved subtitle sync ✅ NEW
+  - Deletes old transcript, runs fresh transcription with word-level timestamps
+  - Fixes subtitle timing for projects transcribed before word timestamps feature
 
 **✅ Deliverable Phase 4**: User bisa preview, edit, trim clips dan customize subtitles.
 
@@ -313,6 +320,8 @@
   CPU only    → libx264 (fallback)
   ```
 - [x] Subtitle burn-in (ASS/SRT via FFmpeg) ✅
+- [x] **fontsdir integration** — FFmpeg finds user-installed fonts (Montserrat, etc.) ✅ NEW
+- [x] **Per-word karaoke subtitle rendering** (ASS inline color overrides) ✅ NEW
 - [x] Audio normalization & enhancement (loudnorm) ✅
 
 ### 5.2 Export Options
@@ -322,6 +331,8 @@
   - 📱 Quick Share (720p, lower bitrate, ultrafast)
 - [x] Format options: MP4 (H.264) ✅
 - [x] Batch export (all clips at once) ✅
+- [x] **Clip selection persistence** (is_selected saved to DB) ✅ NEW
+- [x] **Export Selected / Export All** toggle based on selection ✅ NEW
 - [x] Custom output directory selection ✅
 
 ### 5.3 Export Progress
@@ -392,6 +403,11 @@
 - [x] Hardware fingerprint (Machine ID) ✅
 - [x] Feature gating per tier (free/trial/pro/enterprise) ✅
 - [x] License activation/deactivation UI ✅
+- [x] **Admin panel hidden from Electron** — only accessible via web browser ✅ NEW
+  - `/admin` route disabled in Electron
+  - `Ctrl+Shift+A` shortcut disabled in Electron
+  - License menu hidden from sidebar in Electron
+  - Change password available in Admin panel (web only)
 
 ### 6.5 Settings & Configuration
 - [x] General: ✅
@@ -446,6 +462,16 @@
 - [ ] Hashtag suggestions
 - [ ] Trend analysis
 - [ ] A/B thumbnail generator
+
+### v1.5 — Subtitle & Caption (Completed Features) ✅
+- [x] 10 caption style presets with per-style font, color, outline, highlight
+- [x] True karaoke word-by-word highlight in exports (ASS inline overrides)
+- [x] Word-level timestamp collection from Groq Whisper API
+- [x] Chunked transcription preserves word timestamps with time offset
+- [x] fontsdir parameter for FFmpeg to find user-installed fonts
+- [x] Font fallback system (Montserrat, Arial, Impact, Georgia)
+- [x] Re-transcribe endpoint for improving subtitle sync on old projects
+- [x] Thicker outline (6px) and shadow (3px) for bold caption styles
 
 ---
 

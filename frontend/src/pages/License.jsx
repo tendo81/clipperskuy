@@ -159,55 +159,7 @@ export default function License() {
                 </motion.p>
             </div>
 
-            {/* Trial Banner */}
-            {isTrial && trial && (
-                <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    style={{
-                        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(139, 92, 246, 0.1))',
-                        border: '1px solid rgba(245, 158, 11, 0.3)',
-                        borderRadius: 12, padding: '14px 20px', marginBottom: 20,
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-                    }}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <Clock size={18} color="#f59e0b" />
-                        <span style={{ fontSize: 14, color: '#fff' }}>
-                            <strong>Trial Active</strong> — {trial.daysRemaining} of {trial.totalDays} days remaining.
-                            {trial.daysRemaining <= 3 && <span style={{ color: '#ef4444' }}> Expiring soon!</span>}
-                        </span>
-                    </div>
-                    {/* Trial progress bar */}
-                    <div style={{ width: 120, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-                        <div style={{
-                            width: `${((trial.totalDays - trial.daysRemaining) / trial.totalDays) * 100}%`,
-                            height: '100%', borderRadius: 3,
-                            background: trial.daysRemaining <= 3 ? '#ef4444' : '#f59e0b',
-                            transition: 'width 0.3s'
-                        }} />
-                    </div>
-                </motion.div>
-            )}
 
-            {/* Expired Trial Banner */}
-            {status === 'free' && trial?.expired && (
-                <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    style={{
-                        background: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        borderRadius: 12, padding: '14px 20px', marginBottom: 20,
-                        display: 'flex', alignItems: 'center', gap: 10
-                    }}
-                >
-                    <AlertTriangle size={18} color="#ef4444" />
-                    <span style={{ fontSize: 14, color: '#fff' }}>
-                        <strong>Trial Expired!</strong> Upgrade to Pro to unlock all features.
-                    </span>
-                </motion.div>
-            )}
 
             {/* Current Status */}
             <motion.div
@@ -281,9 +233,30 @@ export default function License() {
                         </p>
                     )}
                     {isLicensed && (
-                        <p style={{ fontSize: 12, color: '#22c55e', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <CheckCircle size={12} /> License active since {new Date(licenseData.activatedAt).toLocaleDateString()}
-                        </p>
+                        <div style={{ marginTop: 8 }}>
+                            <p style={{ fontSize: 12, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4, margin: '0 0 6px' }}>
+                                <CheckCircle size={12} /> License active since {new Date(licenseData.activatedAt).toLocaleDateString()}
+                            </p>
+                            {/* Expiry Info */}
+                            {licenseData.expiresAt ? (() => {
+                                const days = licenseData.daysRemaining;
+                                const expDate = new Date(licenseData.expiresAt).toLocaleDateString();
+                                const color = days <= 7 ? '#ef4444' : days <= 30 ? '#f59e0b' : '#22c55e';
+                                return (
+                                    <p style={{ fontSize: 12, color, display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}>
+                                        {days <= 7 ? <AlertTriangle size={12} /> : <Clock size={12} />}
+                                        {days <= 0
+                                            ? `License expired on ${expDate}`
+                                            : `Expires ${expDate} — ${days} day${days !== 1 ? 's' : ''} remaining`
+                                        }
+                                    </p>
+                                );
+                            })() : (
+                                <p style={{ fontSize: 12, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}>
+                                    ♾️ Lifetime license — never expires
+                                </p>
+                            )}
+                        </div>
                     )}
                 </div>
 

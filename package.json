@@ -1,6 +1,6 @@
 {
     "name": "clipperskuy",
-    "version": "1.1.0",
+    "version": "1.1.4",
     "description": "AI-Powered Video Clip Engine — Auto-detect viral moments from long videos",
     "main": "electron/main.js",
     "author": "ClipperSkuy",
@@ -13,6 +13,9 @@
         "build": "npm run build:frontend && electron-builder --win",
         "build:portable": "npm run build:frontend && electron-builder --win portable",
         "postinstall": "cd backend && npm install && cd ../frontend && npm install"
+    },
+    "dependencies": {
+        "electron-updater": "^6.7.3"
     },
     "devDependencies": {
         "concurrently": "^9.2.1",
@@ -31,12 +34,38 @@
         },
         "files": [
             "electron/**/*",
+            "!electron/test_main.js",
+            "!electron/afterPack.js",
             "frontend/dist/**/*",
             "backend/**/*",
             "!backend/data/**",
             "!backend/node_modules/.cache/**",
-            "!**/node_modules/@electron/**"
+            {
+                "from": "node_modules/electron-updater",
+                "to": "node_modules/electron-updater"
+            },
+            {
+                "from": "node_modules/builder-util-runtime",
+                "to": "node_modules/builder-util-runtime"
+            },
+            {
+                "from": "node_modules/tiny-typed-emitter",
+                "to": "node_modules/tiny-typed-emitter"
+            },
+            {
+                "from": "node_modules/semver",
+                "to": "node_modules/semver"
+            },
+            {
+                "from": "node_modules/lazy-val",
+                "to": "node_modules/lazy-val"
+            },
+            {
+                "from": "node_modules/lodash.isequal",
+                "to": "node_modules/lodash.isequal"
+            }
         ],
+        "asar": false,
         "extraResources": [
             {
                 "from": "binaries/ffmpeg.exe",
@@ -49,6 +78,10 @@
             {
                 "from": "binaries/yt-dlp.exe",
                 "to": "yt-dlp.exe"
+            },
+            {
+                "from": "binaries/deno/deno.exe",
+                "to": "deno/deno.exe"
             }
         ],
         "win": {
@@ -77,7 +110,8 @@
             "provider": "github",
             "owner": "tendo81",
             "repo": "clipperskuy",
-            "releaseType": "release"
+            "releaseType": "release",
+            "private": true
         }
     }
 }

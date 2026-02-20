@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Film, Clock, Monitor, HardDrive, Scissors, Play, Trash2, Download, RefreshCw, Settings, Loader, CheckCircle, AlertCircle, Zap, Hash, Trophy, MessageCircle, Share2, ThumbsUp, Lightbulb, Square, CheckSquare, Terminal, ChevronDown, ChevronUp, Copy, StopCircle, Edit3, Save, Upload, FileText, X, Youtube, Eye, FolderOpen, Type } from 'lucide-react';
+import { ArrowLeft, Film, Clock, Monitor, HardDrive, Scissors, Play, Trash2, Download, RefreshCw, Settings, Loader, CheckCircle, AlertCircle, Zap, Hash, Trophy, MessageCircle, Share2, ThumbsUp, Lightbulb, Square, CheckSquare, Terminal, ChevronDown, ChevronUp, Copy, StopCircle, Edit3, Save, Upload, FileText, X, Youtube, Eye, FolderOpen, Type, Sparkles } from 'lucide-react';
 import { io as socketIO } from 'socket.io-client';
 
 const API = 'http://localhost:5000/api';
@@ -94,6 +94,60 @@ export default function ProjectDetail() {
     const [renderETA, setRenderETA] = useState('');
     const [showStyleMenu, setShowStyleMenu] = useState(false);
     const [bulkStyleMsg, setBulkStyleMsg] = useState('');
+
+    // Social Copy Generator state
+    const [socialModal, setSocialModal] = useState(null); // { clipId, loading, data, error, activeTab, hookStyle }
+
+    const hookStyles = [
+        { id: 'drama', label: '🎭 Drama', desc: 'Emosional & bikin nangis' },
+        { id: 'gossip', label: '🗣️ Gossip', desc: 'Viral & heboh' },
+        { id: 'edukasi', label: '📚 Edukasi', desc: 'Informatif & mind-blowing' },
+        { id: 'comedy', label: '😂 Comedy', desc: 'Lucu & relatable' },
+        { id: 'motivasi', label: '🔥 Motivasi', desc: 'Inspiring & powerful' },
+        { id: 'horror', label: '👻 Horror', desc: 'Seram & misteri' },
+        { id: 'storytelling', label: '📖 Storytelling', desc: 'Narasi & kronologis' },
+        { id: 'kontroversial', label: '⚡ Kontroversial', desc: 'Debat & polarisasi' },
+        { id: 'clickbait', label: '🎯 Clickbait', desc: 'Aggressive CTA' },
+        { id: 'aesthetic', label: '✨ Aesthetic', desc: 'Soft & poetic' }
+    ];
+
+    const generateSocialCopy = async (clipId, e, style) => {
+        e?.stopPropagation();
+        const hookStyle = style || socialModal?.hookStyle || 'drama';
+        setSocialModal(prev => ({ ...prev, clipId, loading: true, data: null, error: null, activeTab: prev?.activeTab || 'tiktok', hookStyle }));
+        try {
+            const res = await fetch(`${API}/projects/clips/${clipId}/generate-social`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hook_style: hookStyle })
+            });
+            const result = await res.json();
+            if (result.success) {
+                setSocialModal(prev => ({ ...prev, loading: false, data: result.social }));
+            } else {
+                setSocialModal(prev => ({ ...prev, loading: false, error: result.error }));
+            }
+        } catch (err) {
+            setSocialModal(prev => ({ ...prev, loading: false, error: err.message }));
+        }
+    };
+
+    const copySocialText = (text) => {
+        navigator.clipboard.writeText(text).then(() => {
+            // Brief visual feedback
+            const toast = document.createElement('div');
+            toast.textContent = '✅ Copied!';
+            toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:99999;animation:fadeInOut 1.5s ease forwards;pointer-events:none';
+            if (!document.querySelector('#copy-toast-style')) {
+                const style = document.createElement('style');
+                style.id = 'copy-toast-style';
+                style.textContent = '@keyframes fadeInOut{0%{opacity:0;transform:translateX(-50%) translateY(10px)}15%{opacity:1;transform:translateX(-50%) translateY(0)}85%{opacity:1;transform:translateX(-50%) translateY(0)}100%{opacity:0;transform:translateX(-50%) translateY(-10px)}}';
+                document.head.appendChild(style);
+            }
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 1500);
+        });
+    };
 
     useEffect(() => {
         loadProject();
@@ -191,6 +245,10 @@ export default function ProjectDetail() {
             setClips(data.clips || []);
             setTranscript(data.transcript);
 
+            // Sync selectedClips with is_selected from database
+            const dbSelected = (data.clips || []).filter(c => c.is_selected === 1).map(c => c.id);
+            setSelectedClips(new Set(dbSelected));
+
             // Auto-detect if processing
             if (['transcribing', 'analyzing', 'clipping'].includes(data.project.status)) {
                 setProcessing(true);
@@ -256,6 +314,8 @@ export default function ProjectDetail() {
     const renderSingleClip = async (clipId, e) => {
         e?.stopPropagation();
         setRendering(prev => ({ ...prev, [clipId]: { progress: 0, message: 'Starting...' } }));
+        setProcessLogs([]);
+        setTerminalCollapsed(false);
         try {
             await fetch(`${API}/projects/clips/${clipId}/render`, { method: 'POST' });
         } catch (err) {
@@ -268,9 +328,17 @@ export default function ProjectDetail() {
         setProcessMessage('Starting render of all clips...');
         setProcessProgress(0);
         setRenderETA('');
+        setProcessLogs([]);
+        setTerminalCollapsed(false);
         renderStartTimeRef.current = Date.now();
         try {
-            await fetch(`${API}/projects/${id}/render-all`, { method: 'POST' });
+            const res = await fetch(`${API}/projects/${id}/render-all`, { method: 'POST' });
+            if (res.status === 403) {
+                const data = await res.json();
+                setRenderingAll(false);
+                alert(data.error || 'Batch export tidak tersedia di Free tier.');
+                return;
+            }
         } catch (err) {
             setRenderingAll(false);
             console.error('Render all failed:', err);
@@ -282,12 +350,20 @@ export default function ProjectDetail() {
         setRenderingAll(true);
         setProcessMessage(`Rendering ${selectedClips.size} selected clips...`);
         setProcessProgress(0);
+        setProcessLogs([]);
+        setTerminalCollapsed(false);
         try {
-            await fetch(`${API}/projects/${id}/render-selected`, {
+            const res = await fetch(`${API}/projects/${id}/render-selected`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ clipIds: [...selectedClips] })
             });
+            if (res.status === 403) {
+                const data = await res.json();
+                setRenderingAll(false);
+                alert(data.error || 'Batch export tidak tersedia di Free tier.');
+                return;
+            }
         } catch (err) {
             setRenderingAll(false);
             console.error('Render selected failed:', err);
@@ -340,14 +416,35 @@ export default function ProjectDetail() {
         e.stopPropagation();
         setSelectedClips(prev => {
             const next = new Set(prev);
-            if (next.has(clipId)) next.delete(clipId);
-            else next.add(clipId);
+            const newState = !next.has(clipId);
+            if (newState) next.add(clipId);
+            else next.delete(clipId);
+            // Persist to database
+            fetch(`${API}/projects/${id}/clips/${clipId}/select`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_selected: newState ? 1 : 0 })
+            }).catch(() => { });
             return next;
         });
     };
 
-    const selectAllClips = () => setSelectedClips(new Set(clips.map(c => c.id)));
-    const selectNoneClips = () => setSelectedClips(new Set());
+    const selectAllClips = () => {
+        setSelectedClips(new Set(clips.map(c => c.id)));
+        fetch(`${API}/projects/${id}/clips/select-all`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_selected: 1 })
+        }).catch(() => { });
+    };
+    const selectNoneClips = () => {
+        setSelectedClips(new Set());
+        fetch(`${API}/projects/${id}/clips/select-all`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_selected: 0 })
+        }).catch(() => { });
+    };
 
     const copyLogs = () => {
         const text = processLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.message}`).join('\n');
@@ -568,7 +665,7 @@ export default function ProjectDetail() {
                 </motion.div>
 
                 {/* Processing Terminal */}
-                {(processing || processLogs.length > 0) && (
+                {(processing || renderingAll || processLogs.length > 0) && (
                     <motion.div className="process-terminal" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                         {/* Terminal Header */}
                         <div className="process-terminal-header">
@@ -608,12 +705,12 @@ export default function ProjectDetail() {
                         <div className={`process-terminal-body ${terminalCollapsed ? 'collapsed' : ''}`} ref={terminalBodyRef}>
                             {processLogs.map((log, i) => (
                                 <div key={i} className={`process-terminal-line log-${log.type} ${isSection(log.message) ? 'log-section' : ''}`}>
-                                    <span className="log-time">{log.timestamp.substring(0, 8)}</span>
+                                    <span className="log-time">{(log.timestamp || new Date().toTimeString()).substring(0, 8)}</span>
                                     <span className="log-prefix">{getLogPrefix(log.type)}</span>
                                     <span className="log-message">{log.message}</span>
                                 </div>
                             ))}
-                            {processing && <span className="process-terminal-cursor" />}
+                            {(processing || renderingAll) && <span className="process-terminal-cursor" />}
                         </div>
 
                         {/* Progress bar inside terminal */}
@@ -884,6 +981,20 @@ export default function ProjectDetail() {
                                 <button className="btn btn-ghost btn-sm" onClick={openOutputFolder} style={{ gap: 4, color: 'var(--text-secondary)' }} title="Open output folder">
                                     <FolderOpen size={14} /> Open Folder
                                 </button>
+                                <button className="btn btn-ghost btn-sm" onClick={async () => {
+                                    if (!confirm('Re-transcribe will delete the current transcript and re-process the video. This will improve subtitle sync accuracy. Continue?')) return;
+                                    setProcessing(true);
+                                    setProcessStep('transcribe');
+                                    setProcessMessage('Re-transcribing for word-level timestamps...');
+                                    try {
+                                        await fetch(`${API}/projects/${id}/retranscribe`, { method: 'POST' });
+                                    } catch (err) {
+                                        console.error('Re-transcribe failed:', err);
+                                        setProcessing(false);
+                                    }
+                                }} style={{ gap: 4, color: '#f59e0b' }} title="Re-transcribe to improve subtitle sync accuracy" disabled={processing}>
+                                    🔄 Re-transcribe
+                                </button>
                             </div>
                         )}
                     </div>
@@ -923,10 +1034,16 @@ export default function ProjectDetail() {
                                 {clips.map((clip, i) => {
                                     const isExpanded = expandedClip === clip.id;
                                     const scoreColor = clip.virality_score >= 80 ? '#10b981' : clip.virality_score >= 60 ? '#06b6d4' : '#f59e0b';
+                                    const isLocked = clip.status === 'locked';
                                     return (
                                         <motion.div key={clip.id} className="card" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
-                                            style={{ padding: 0, cursor: 'pointer', overflow: 'hidden', border: isExpanded ? `1px solid ${scoreColor}40` : undefined }}
-                                            onClick={() => setExpandedClip(isExpanded ? null : clip.id)}>
+                                            style={{ padding: 0, cursor: isLocked ? 'default' : 'pointer', overflow: 'hidden', border: isExpanded ? `1px solid ${scoreColor}40` : undefined, opacity: isLocked ? 0.45 : 1, position: 'relative' }}
+                                            onClick={() => !isLocked && setExpandedClip(isExpanded ? null : clip.id)}>
+                                            {isLocked && (
+                                                <div style={{ position: 'absolute', top: 0, right: 0, background: 'linear-gradient(135deg, #f59e0b, #ef4444)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '3px 10px', borderBottomLeftRadius: 8, zIndex: 1 }}>
+                                                    🔒 PRO — Upgrade untuk akses
+                                                </div>
+                                            )}
 
                                             {/* Main row */}
                                             <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '14px 18px' }}>
@@ -996,7 +1113,36 @@ export default function ProjectDetail() {
                                                     </div>
                                                     {clip.hashtags && (
                                                         <div style={{ marginTop: 8 }}>
-                                                            <span className="text-sm" style={{ color: 'var(--accent-cyan)' }}>{clip.hashtags}</span>
+                                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                                                <span className="form-label" style={{ margin: 0, fontSize: 11 }}>🏷️ Hashtags</span>
+                                                                <button
+                                                                    className="btn btn-ghost btn-sm"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        navigator.clipboard.writeText(clip.hashtags);
+                                                                        const btn = e.currentTarget;
+                                                                        btn.textContent = '✅ Copied!';
+                                                                        setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
+                                                                    }}
+                                                                    style={{ padding: '1px 8px', fontSize: 10 }}
+                                                                >
+                                                                    📋 Copy
+                                                                </button>
+                                                            </div>
+                                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                                                {clip.hashtags.split(/\s+/).filter(t => t.startsWith('#')).map((tag, i) => (
+                                                                    <span key={i} style={{
+                                                                        fontSize: 11, padding: '2px 8px', borderRadius: 12,
+                                                                        background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)',
+                                                                        color: 'var(--accent-cyan)', cursor: 'pointer',
+                                                                    }}
+                                                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(tag); }}
+                                                                        title={`Copy ${tag}`}
+                                                                    >
+                                                                        {tag}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
                                                         </div>
                                                     )}
 
@@ -1047,6 +1193,30 @@ export default function ProjectDetail() {
                                                             <Trash2 size={14} />
                                                         </button>
                                                     </div>
+
+                                                    {/* Social Copy Generator Button */}
+                                                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+                                                        <button
+                                                            className="btn btn-ghost btn-sm"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                // Check if clip has saved social copy
+                                                                const savedCopy = clip.social_copy ? JSON.parse(clip.social_copy) : null;
+                                                                setSocialModal({
+                                                                    clipId: clip.id,
+                                                                    loading: false,
+                                                                    data: savedCopy,
+                                                                    error: null,
+                                                                    activeTab: 'tiktok',
+                                                                    hookStyle: 'drama',
+                                                                    hasSaved: !!savedCopy
+                                                                });
+                                                            }}
+                                                            style={{ gap: 6, fontSize: 12, color: '#a78bfa', width: '100%', justifyContent: 'center' }}
+                                                        >
+                                                            <Sparkles size={14} /> Generate Social Media Copy
+                                                        </button>
+                                                    </div>
                                                 </motion.div>
                                             )}
                                         </motion.div>
@@ -1057,6 +1227,232 @@ export default function ProjectDetail() {
                     )}
                 </motion.div>
             </div>
+
+            {/* Social Copy Modal */}
+            <AnimatePresence>
+                {socialModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        style={{
+                            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+                            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+                        }}
+                        onClick={() => setSocialModal(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                background: 'var(--bg-secondary)', borderRadius: 16, width: '100%', maxWidth: 600,
+                                maxHeight: '80vh', overflow: 'auto', border: '1px solid var(--border-subtle)'
+                            }}
+                        >
+                            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <Sparkles size={20} style={{ color: '#a78bfa' }} />
+                                    <span style={{ fontWeight: 700, fontSize: 16 }}>Social Media Copy</span>
+                                </div>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setSocialModal(null)}><X size={18} /></button>
+                            </div>
+
+                            <div style={{ padding: 24 }}>
+                                {/* Hook Style Selector */}
+                                {!socialModal.loading && !socialModal.data && !socialModal.error && (
+                                    <div>
+                                        <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10, display: 'block' }}>
+                                            Pilih Gaya Hook
+                                        </label>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 16 }}>
+                                            {hookStyles.map(s => (
+                                                <div key={s.id} onClick={() => setSocialModal(prev => ({ ...prev, hookStyle: s.id }))}
+                                                    style={{
+                                                        padding: '10px 12px', borderRadius: 10, cursor: 'pointer', transition: 'all 0.2s',
+                                                        background: (socialModal.hookStyle || 'drama') === s.id ? 'rgba(167,139,250,0.15)' : 'rgba(255,255,255,0.03)',
+                                                        border: (socialModal.hookStyle || 'drama') === s.id ? '2px solid #a78bfa' : '1px solid var(--border-subtle)',
+                                                    }}>
+                                                    <div style={{ fontWeight: 600, fontSize: 14 }}>{s.label}</div>
+                                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{s.desc}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <button className="btn btn-primary" style={{ width: '100%', gap: 8 }}
+                                            onClick={(e) => generateSocialCopy(socialModal.clipId, e, socialModal.hookStyle || 'drama')}>
+                                            <Sparkles size={16} /> Generate Hooks
+                                        </button>
+                                    </div>
+                                )}
+
+                                {socialModal.loading && (
+                                    <div style={{ textAlign: 'center', padding: 40 }}>
+                                        <Loader size={32} style={{ color: '#a78bfa', animation: 'spin 1s linear infinite', marginBottom: 12 }} />
+                                        <p style={{ color: 'var(--text-secondary)' }}>AI sedang generate hook {hookStyles.find(s => s.id === socialModal.hookStyle)?.label || '🎭 Drama'}...</p>
+                                    </div>
+                                )}
+
+                                {socialModal.error && (
+                                    <div style={{ textAlign: 'center', padding: 40 }}>
+                                        <AlertCircle size={32} style={{ color: 'var(--color-error)', marginBottom: 12 }} />
+                                        <p style={{ color: 'var(--color-error)' }}>{socialModal.error}</p>
+                                        <button className="btn btn-ghost btn-sm" style={{ marginTop: 12 }}
+                                            onClick={() => setSocialModal(prev => ({ ...prev, error: null, data: null }))}>
+                                            Coba Lagi
+                                        </button>
+                                    </div>
+                                )}
+
+                                {socialModal.data && (() => {
+                                    const tabs = [
+                                        { id: 'tiktok', label: '🎵 TikTok', color: '#ff0050' },
+                                        { id: 'instagram', label: '📸 Instagram', color: '#E1306C' },
+                                        { id: 'youtube', label: '▶️ YouTube', color: '#FF0000' },
+                                        { id: 'twitter', label: '🐦 Twitter/X', color: '#1DA1F2' },
+                                        { id: 'facebook', label: '📘 Facebook', color: '#1877F2' }
+                                    ];
+                                    const activeTab = socialModal.activeTab || 'tiktok';
+                                    const platform = socialModal.data[activeTab];
+
+                                    return (
+                                        <>
+                                            {/* Platform Tabs */}
+                                            <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+                                                {tabs.map(tab => (
+                                                    <button
+                                                        key={tab.id}
+                                                        onClick={() => setSocialModal(prev => ({ ...prev, activeTab: tab.id }))}
+                                                        style={{
+                                                            flex: 1, padding: '10px 12px', borderRadius: 10, border: 'none',
+                                                            cursor: 'pointer', fontSize: 13, fontWeight: 600, transition: 'all 0.2s',
+                                                            background: activeTab === tab.id ? tab.color + '22' : 'rgba(255,255,255,0.03)',
+                                                            color: activeTab === tab.id ? tab.color : 'var(--text-secondary)',
+                                                            outline: activeTab === tab.id ? `2px solid ${tab.color}44` : '1px solid var(--border-subtle)'
+                                                        }}
+                                                    >
+                                                        {tab.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {platform && (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                                    {/* Title */}
+                                                    <div>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                                            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Title</label>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => copySocialText(platform.title)} style={{ fontSize: 11, gap: 4, padding: '2px 8px' }}>
+                                                                <Copy size={12} /> Copy
+                                                            </button>
+                                                        </div>
+                                                        <div style={{
+                                                            background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 14px',
+                                                            fontSize: 14, lineHeight: 1.5, border: '1px solid var(--border-subtle)'
+                                                        }}>{platform.title}</div>
+                                                    </div>
+
+                                                    {/* Description */}
+                                                    <div>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                                            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Description</label>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => copySocialText(platform.description)} style={{ fontSize: 11, gap: 4, padding: '2px 8px' }}>
+                                                                <Copy size={12} /> Copy
+                                                            </button>
+                                                        </div>
+                                                        <div style={{
+                                                            background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 14px',
+                                                            fontSize: 13, lineHeight: 1.6, border: '1px solid var(--border-subtle)', whiteSpace: 'pre-wrap'
+                                                        }}>{platform.description}</div>
+                                                    </div>
+
+                                                    {/* Hashtags */}
+                                                    <div>
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                                            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Hashtags</label>
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => copySocialText(platform.hashtags)} style={{ fontSize: 11, gap: 4, padding: '2px 8px' }}>
+                                                                <Copy size={12} /> Copy
+                                                            </button>
+                                                        </div>
+                                                        <div style={{
+                                                            background: 'rgba(167, 139, 250, 0.06)', borderRadius: 8, padding: '10px 14px',
+                                                            fontSize: 13, lineHeight: 1.6, border: '1px solid rgba(167,139,250,0.15)', color: '#a78bfa'
+                                                        }}>{platform.hashtags}</div>
+                                                    </div>
+
+                                                    {/* Hook Variations */}
+                                                    {platform.hooks && platform.hooks.length > 0 && (
+                                                        <div>
+                                                            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, display: 'block' }}>
+                                                                🪝 Hook Variations
+                                                            </label>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                                {platform.hooks.map((hook, hi) => (
+                                                                    <div key={hi} onClick={() => copySocialText(hook)} style={{
+                                                                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                                                                        background: 'rgba(6,182,212,0.06)', borderRadius: 8,
+                                                                        border: '1px solid rgba(6,182,212,0.15)', cursor: 'pointer',
+                                                                        transition: 'all 0.2s'
+                                                                    }}
+                                                                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(6,182,212,0.12)'; }}
+                                                                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(6,182,212,0.06)'; }}
+                                                                    >
+                                                                        <span style={{ fontWeight: 700, color: '#06b6d4', fontSize: 12, minWidth: 20 }}>#{hi + 1}</span>
+                                                                        <span style={{ fontSize: 13, flex: 1 }}>{hook}</span>
+                                                                        <Copy size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Best Time & Engagement Tip */}
+                                                    {(platform.bestTime || platform.engagementTip) && (
+                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                                            {platform.bestTime && (
+                                                                <div style={{
+                                                                    padding: '10px 12px', borderRadius: 8,
+                                                                    background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)'
+                                                                }}>
+                                                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', marginBottom: 4 }}>⏰ Best Time</div>
+                                                                    <div style={{ fontSize: 12, lineHeight: 1.4 }}>{platform.bestTime}</div>
+                                                                </div>
+                                                            )}
+                                                            {platform.engagementTip && (
+                                                                <div style={{
+                                                                    padding: '10px 12px', borderRadius: 8,
+                                                                    background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)'
+                                                                }}>
+                                                                    <div style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', marginBottom: 4 }}>💡 Tip</div>
+                                                                    <div style={{ fontSize: 12, lineHeight: 1.4 }}>{platform.engagementTip}</div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Copy All */}
+                                                    <button
+                                                        className="btn btn-primary"
+                                                        onClick={() => copySocialText(`${platform.title}\n\n${platform.description}\n\n${platform.hashtags}`)}
+                                                        style={{ gap: 8, marginTop: 4 }}
+                                                    >
+                                                        <Copy size={16} /> Copy All ({tabs.find(t => t.id === activeTab)?.label})
+                                                    </button>
+
+                                                    {/* Regenerate */}
+                                                    <button
+                                                        className="btn btn-ghost"
+                                                        onClick={() => setSocialModal(prev => ({ ...prev, data: null, error: null }))}
+                                                        style={{ gap: 8, fontSize: 13 }}
+                                                    >
+                                                        🔄 Ganti Gaya Hook
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <style>{`
         @keyframes spin {

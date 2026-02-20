@@ -20,13 +20,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Ensure data directories exist
+const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', 'data');
 const dirs = ['uploads', 'outputs', 'thumbnails', 'temp', 'brandkits', 'music', 'sfx'];
 dirs.forEach(dir => {
-  fs.ensureDirSync(path.join(__dirname, '..', 'data', dir));
+  fs.ensureDirSync(path.join(DATA_DIR, dir));
 });
 
 // Static file serving
-app.use('/data', express.static(path.join(__dirname, '..', 'data')));
+app.use('/data', express.static(DATA_DIR));
 
 // Make io accessible to routes
 app.set('io', io);
@@ -68,6 +69,17 @@ async function start() {
     app.use('/api/music', musicRoutes);
     app.use('/api/sfx', sfxRoutes);
 
+    // Serve frontend (for web browser access / admin panel)
+    const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+    if (fs.existsSync(frontendDist)) {
+      app.use(express.static(frontendDist));
+      // SPA fallback — all non-API routes serve index.html
+      app.get('*', (req, res, next) => {
+        if (req.path.startsWith('/api/') || req.path.startsWith('/data/')) return next();
+        res.sendFile(path.join(frontendDist, 'index.html'));
+      });
+    }
+
     // Error handler
     app.use((err, req, res, next) => {
       console.error('[Error]', err.message);
@@ -80,7 +92,7 @@ async function start() {
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
       console.log(`\n⚡ ClipperSkuy Backend running on http://localhost:${PORT}`);
-      console.log(`📁 Data directory: ${path.join(__dirname, '..', 'data')}\n`);
+      console.log(`📁 Data directory: ${DATA_DIR}\n`);
     });
   } catch (err) {
     console.error('[Fatal] Failed to start:', err);

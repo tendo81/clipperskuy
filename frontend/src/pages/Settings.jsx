@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings as SettingsIcon, Cpu, FolderOpen, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Save, Bot, HardDrive, Palette, Plus, Trash2, Key, Image, Upload, Monitor, Moon, Sun, Paintbrush, Database, AlertTriangle } from 'lucide-react';
+import { Settings as SettingsIcon, Cpu, FolderOpen, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Save, Bot, HardDrive, Palette, Plus, Trash2, Key, Image, Upload, Monitor, Moon, Sun, Paintbrush, Database, AlertTriangle, Volume2 } from 'lucide-react';
+import { ThemeContext } from '../App';
 
 const API = 'http://localhost:5000/api';
 
 export default function SettingsPage() {
+    const { setTheme } = useContext(ThemeContext);
     const [groqKeys, setGroqKeys] = useState(['']);
     const [geminiKeys, setGeminiKeys] = useState(['']);
     const [showGroq, setShowGroq] = useState({});
@@ -15,12 +17,19 @@ export default function SettingsPage() {
     const [encoder, setEncoder] = useState('auto');
     const [hwAccel, setHwAccel] = useState('auto');
     const [quality, setQuality] = useState('balanced');
+    const [outputResolution, setOutputResolution] = useState('1080p');
     const [outputDir, setOutputDir] = useState('');
     const [watermarkPath, setWatermarkPath] = useState('');
     const [watermarkPosition, setWatermarkPosition] = useState('bottom-right');
     const [watermarkOpacity, setWatermarkOpacity] = useState(0.5);
     const [watermarkSize, setWatermarkSize] = useState(15);
     const [watermarkEnabled, setWatermarkEnabled] = useState(false);
+    const [watermarkType, setWatermarkType] = useState('image'); // 'image', 'text', 'text-moving'
+    const [watermarkText, setWatermarkText] = useState('');
+    const [watermarkFontSize, setWatermarkFontSize] = useState(24);
+    const [watermarkColor, setWatermarkColor] = useState('#ffffff');
+    const [watermarkMotion, setWatermarkMotion] = useState('corner-hop'); // 'corner-hop', 'scroll', 'bounce'
+    const [watermarkSpeed, setWatermarkSpeed] = useState(4); // seconds per cycle
     const [saved, setSaved] = useState(false);
     const [loaded, setLoaded] = useState(false);
 
@@ -42,10 +51,32 @@ export default function SettingsPage() {
     const [pbOpacity, setPbOpacity] = useState(0.85);
     const [pbPosition, setPbPosition] = useState('bottom');
 
+    // Audio Enhancement state
+    const [noiseReduction, setNoiseReduction] = useState(false);
+    const [noiseLevel, setNoiseLevel] = useState('medium');
+    const [voiceClarity, setVoiceClarity] = useState(false);
+
+    // License tier
+    const [licenseTier, setLicenseTier] = useState('free');
+    const [actualTier, setActualTier] = useState('free');
+
     const fileInputRef = useRef(null);
 
     // Load existing settings on mount
     useEffect(() => {
+        // Fetch license tier
+        fetch(`${API}/license`)
+            .then(r => r.json())
+            .then(data => {
+                const t = data.tier || 'free';
+                // Preview free only works if admin is logged in
+                const isAdmin = !!sessionStorage.getItem('admin_password');
+                const previewFree = isAdmin && localStorage.getItem('previewFreeTier') === 'true';
+                setLicenseTier(previewFree ? 'free' : t);
+                setActualTier(t);
+            })
+            .catch(() => { });
+
         fetch(`${API}/settings`)
             .then(r => r.json())
             .then(data => {
@@ -67,12 +98,19 @@ export default function SettingsPage() {
                 setEncoder(settings.encoder || 'auto');
                 setHwAccel(settings.hw_accel || 'auto');
                 setQuality(settings.quality_preset || 'balanced');
+                setOutputResolution(settings.output_resolution || '1080p');
                 setOutputDir(settings.output_dir || '');
                 setWatermarkPath(settings.watermark_path || '');
                 setWatermarkPosition(settings.watermark_position || 'bottom-right');
                 setWatermarkOpacity(parseFloat(settings.watermark_opacity || '0.5'));
                 setWatermarkSize(parseInt(settings.watermark_size || '15'));
                 setWatermarkEnabled(settings.watermark_enabled === 'true' || settings.watermark_enabled === '1');
+                setWatermarkType(settings.watermark_type || 'image');
+                setWatermarkText(settings.watermark_text || '');
+                setWatermarkFontSize(parseInt(settings.watermark_font_size || '24'));
+                setWatermarkColor(settings.watermark_color || '#ffffff');
+                setWatermarkMotion(settings.watermark_motion || 'corner-hop');
+                setWatermarkSpeed(parseInt(settings.watermark_speed || '4'));
 
                 // App customization
                 setAccentColor(settings.accent_color || '#8b5cf6');
@@ -87,6 +125,11 @@ export default function SettingsPage() {
                 setPbHeight(parseInt(settings.progress_bar_height || '6'));
                 setPbOpacity(parseFloat(settings.progress_bar_opacity || '0.85'));
                 setPbPosition(settings.progress_bar_position || 'bottom');
+
+                // Audio Enhancement
+                setNoiseReduction(settings.noise_reduction === 'true' || settings.noise_reduction === '1');
+                setNoiseLevel(settings.noise_reduction_level || 'medium');
+                setVoiceClarity(settings.voice_clarity === 'true' || settings.voice_clarity === '1');
 
                 setLoaded(true);
             })
@@ -156,12 +199,19 @@ export default function SettingsPage() {
                     encoder,
                     hw_accel: hwAccel,
                     quality_preset: quality,
+                    output_resolution: outputResolution,
                     output_dir: outputDir,
                     watermark_path: watermarkPath,
                     watermark_position: watermarkPosition,
                     watermark_opacity: String(watermarkOpacity),
                     watermark_size: String(watermarkSize),
                     watermark_enabled: watermarkEnabled ? 'true' : 'false',
+                    watermark_type: watermarkType,
+                    watermark_text: watermarkText,
+                    watermark_font_size: String(watermarkFontSize),
+                    watermark_color: watermarkColor,
+                    watermark_motion: watermarkMotion,
+                    watermark_speed: String(watermarkSpeed),
                     // App customization
                     accent_color: accentColor,
                     app_theme: appTheme,
@@ -173,7 +223,11 @@ export default function SettingsPage() {
                     progress_bar_color_end: pbColorEnd,
                     progress_bar_height: String(pbHeight),
                     progress_bar_opacity: String(pbOpacity),
-                    progress_bar_position: pbPosition
+                    progress_bar_position: pbPosition,
+                    // Audio Enhancement
+                    noise_reduction: noiseReduction ? 'true' : 'false',
+                    noise_reduction_level: noiseLevel,
+                    voice_clarity: voiceClarity ? 'true' : 'false'
                 })
             });
             setSaved(true);
@@ -473,6 +527,132 @@ export default function SettingsPage() {
                         </div>
                     </div>
 
+                    {/* Output Resolution */}
+                    <div className="form-group">
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            Output Resolution
+                            {actualTier !== 'free' && sessionStorage.getItem('admin_password') && (
+                                <button
+                                    onClick={() => {
+                                        const newTier = licenseTier === 'free' ? actualTier : 'free';
+                                        setLicenseTier(newTier);
+                                        const isPreview = newTier === 'free';
+                                        if (isPreview) {
+                                            localStorage.setItem('previewFreeTier', 'true');
+                                        } else {
+                                            localStorage.removeItem('previewFreeTier');
+                                        }
+                                        // Also save to backend so rendering respects preview mode
+                                        fetch(`${API}/settings`, {
+                                            method: 'PUT',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ preview_free_tier: isPreview ? 'true' : 'false' })
+                                        }).catch(() => { });
+                                    }}
+                                    style={{
+                                        fontSize: 9, padding: '2px 8px', borderRadius: 6,
+                                        background: licenseTier === 'free' ? 'rgba(239,68,68,0.2)' : 'rgba(139,92,246,0.15)',
+                                        color: licenseTier === 'free' ? '#ef4444' : '#8b5cf6',
+                                        border: 'none', cursor: 'pointer', fontWeight: 600
+                                    }}>
+                                    {licenseTier === 'free' ? '👁 Previewing Free' : '🔧 Preview Free'}
+                                </button>
+                            )}
+                        </label>
+                        <div className="chip-group">
+                            {[
+                                { id: '1080p', label: '🎬 1080p', desc: 'Full HD', pro: true },
+                                { id: '720p', label: '📺 720p', desc: 'HD - Faster', pro: false },
+                                { id: '480p', label: '📱 480p', desc: 'SD - Fastest', pro: false }
+                            ].map((r) => {
+                                const isLocked = r.pro && licenseTier === 'free';
+                                return (
+                                    <button key={r.id}
+                                        className={`chip ${outputResolution === r.id ? 'active' : ''} ${isLocked ? 'locked' : ''}`}
+                                        onClick={() => !isLocked && setOutputResolution(r.id)}
+                                        style={{
+                                            display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 16px',
+                                            position: 'relative',
+                                            opacity: isLocked ? 0.5 : 1,
+                                            cursor: isLocked ? 'not-allowed' : 'pointer'
+                                        }}>
+                                        <span>{r.label}</span>
+                                        <span style={{ fontSize: 10, opacity: 0.6 }}>{r.desc}</span>
+                                        {isLocked && (
+                                            <span style={{
+                                                position: 'absolute', top: -6, right: -6,
+                                                background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                                                color: '#fff', fontSize: 9, fontWeight: 700,
+                                                padding: '1px 6px', borderRadius: 8,
+                                                letterSpacing: 0.5
+                                            }}>🔒 PRO</span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                            {licenseTier === 'free'
+                                ? '🔒 1080p hanya tersedia untuk Pro. 720p cocok untuk TikTok/Reels.'
+                                : 'Resolusi output clip yang di-render. 720p lebih cepat dan cocok untuk TikTok/Reels.'
+                            }
+                        </div>
+                    </div>
+
+                    {/* Audio Enhancement */}
+                    <div style={{ marginTop: 16, padding: '16px', background: 'rgba(139,92,246,0.05)', border: '1px solid rgba(139,92,246,0.15)', borderRadius: 10, position: 'relative', opacity: licenseTier === 'free' ? 0.6 : 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontWeight: 600, fontSize: 14 }}>
+                            <Volume2 size={18} style={{ color: '#8b5cf6' }} /> Audio Enhancement
+                            {licenseTier === 'free' && (
+                                <span style={{
+                                    background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                                    color: '#fff', fontSize: 9, fontWeight: 700,
+                                    padding: '1px 6px', borderRadius: 8
+                                }}>🔒 PRO</span>
+                            )}
+                        </div>
+
+                        {licenseTier === 'free' ? (
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
+                                🔒 Noise Reduction & Voice Clarity hanya tersedia untuk Pro.
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                                <div style={{ flex: 1, minWidth: 200 }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                                        <input type="checkbox" checked={noiseReduction} onChange={(e) => setNoiseReduction(e.target.checked)} style={{ accentColor: '#8b5cf6' }} />
+                                        🔇 Noise Reduction
+                                    </label>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, marginLeft: 24 }}>
+                                        Hilangkan noise AC, kipas, traffic dari audio
+                                    </div>
+                                    {noiseReduction && (
+                                        <div style={{ marginLeft: 24, marginTop: 8 }}>
+                                            <div className="chip-group" style={{ gap: 6 }}>
+                                                {[['light', '🟢 Light'], ['medium', '🟡 Medium'], ['heavy', '🔴 Heavy']].map(([val, label]) => (
+                                                    <button key={val} className={`chip ${noiseLevel === val ? 'active' : ''}`}
+                                                        onClick={() => setNoiseLevel(val)} style={{ fontSize: 11, padding: '4px 10px' }}>
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div style={{ flex: 1, minWidth: 200 }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                                        <input type="checkbox" checked={voiceClarity} onChange={(e) => setVoiceClarity(e.target.checked)} style={{ accentColor: '#8b5cf6' }} />
+                                        🎤 Voice Clarity Boost
+                                    </label>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, marginLeft: 24 }}>
+                                        EQ boost untuk suara lebih jernih dan tajam
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Hardware Detection */}
                     <div className="form-group">
                         <label className="form-label">Hardware Detection</label>
@@ -487,7 +667,25 @@ export default function SettingsPage() {
                                         if (data.success) {
                                             setHwInfo(data.hardware);
                                             if (data.hardware.recommended_encoder) {
-                                                setEncoder(data.hardware.recommended_encoder);
+                                                const recEncoder = data.hardware.recommended_encoder;
+                                                setEncoder(recEncoder);
+                                                // Auto-set GPU acceleration too
+                                                let recHwAccel = 'auto';
+                                                if (recEncoder.includes('amf')) recHwAccel = 'amd';
+                                                else if (recEncoder.includes('nvenc')) recHwAccel = 'nvidia';
+                                                else if (recEncoder.includes('qsv')) recHwAccel = 'intel';
+                                                setHwAccel(recHwAccel);
+
+                                                // Auto-save encoder settings immediately
+                                                await fetch(`${API}/settings`, {
+                                                    method: 'PUT',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        encoder: recEncoder,
+                                                        hw_accel: recHwAccel
+                                                    })
+                                                });
+                                                console.log(`[Settings] Auto-saved encoder: ${recEncoder}, hw_accel: ${recHwAccel}`);
                                             }
                                         }
                                     } catch (e) { console.error(e); }
@@ -669,13 +867,125 @@ export default function SettingsPage() {
 
                     {watermarkEnabled && (
                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                            {/* Watermark Type Toggle */}
                             <div className="form-group">
-                                <label className="form-label">Logo/Image Path</label>
-                                <input type="text" className="input-field" placeholder="C:\\path\\to\\logo.png" value={watermarkPath} onChange={(e) => setWatermarkPath(e.target.value)} />
-                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                                    PNG with transparent background recommended. Supports PNG, JPG, SVG.
+                                <label className="form-label">Type</label>
+                                <div className="chip-group">
+                                    {[
+                                        { id: 'image', label: '🖼️ Image/Logo' },
+                                        { id: 'text', label: '✏️ Text (Static)' },
+                                        { id: 'text-moving', label: '🔄 Text (Moving)' },
+                                    ].map(t => (
+                                        <button key={t.id} className={`chip ${watermarkType === t.id ? 'active' : ''}`} onClick={() => setWatermarkType(t.id)}>
+                                            {t.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
+
+                            {/* Image watermark fields */}
+                            {watermarkType === 'image' && (
+                                <div className="form-group">
+                                    <label className="form-label">Logo/Image Path</label>
+                                    <input type="text" className="input-field" placeholder="C:\\path\\to\\logo.png" value={watermarkPath} onChange={(e) => setWatermarkPath(e.target.value)} />
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                        PNG with transparent background recommended. Supports PNG, JPG, SVG.
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Text watermark fields (static & moving share these) */}
+                            {(watermarkType === 'text' || watermarkType === 'text-moving') && (
+                                <>
+                                    <div className="form-group">
+                                        <label className="form-label">Watermark Text</label>
+                                        <input type="text" className="input-field" placeholder="@YourChannel" value={watermarkText} onChange={(e) => setWatermarkText(e.target.value)} />
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                            Your channel name, brand, or any custom text.
+                                        </div>
+                                    </div>
+                                    <div className="form-group" style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                                        <div style={{ flex: 1, minWidth: 140 }}>
+                                            <label className="form-label">Font Size: {watermarkFontSize}px</label>
+                                            <input type="range" min="12" max="72" step="2" value={watermarkFontSize}
+                                                onChange={(e) => setWatermarkFontSize(parseInt(e.target.value))}
+                                                style={{ width: '100%', accentColor: 'var(--accent-primary)' }} />
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 140 }}>
+                                            <label className="form-label">Font Color</label>
+                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                <input type="color" value={watermarkColor} onChange={(e) => setWatermarkColor(e.target.value)}
+                                                    style={{ width: 36, height: 36, border: 'none', borderRadius: 8, cursor: 'pointer', background: 'transparent' }} />
+                                                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{watermarkColor}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Motion settings (only for text-moving) */}
+                                    {watermarkType === 'text-moving' && (
+                                        <>
+                                            <div className="form-group">
+                                                <label className="form-label">Motion Style</label>
+                                                <div className="chip-group">
+                                                    {[
+                                                        { id: 'corner-hop', label: '📐 Corner Hop', desc: 'Pindah pojok setiap beberapa detik' },
+                                                        { id: 'scroll', label: '➡️ Scroll', desc: 'Geser horizontal terus-menerus' },
+                                                        { id: 'bounce', label: '⚡ Bounce', desc: 'Mantul-mantul di layar' },
+                                                    ].map(m => (
+                                                        <button key={m.id} className={`chip ${watermarkMotion === m.id ? 'active' : ''}`}
+                                                            onClick={() => setWatermarkMotion(m.id)}
+                                                            title={m.desc}>
+                                                            {m.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                                                    {watermarkMotion === 'corner-hop' && '⬡ Text berpindah ke 4 sudut layar secara bergantian (mirip DVD screensaver)'}
+                                                    {watermarkMotion === 'scroll' && '→ Text bergeser dari kiri ke kanan secara terus-menerus'}
+                                                    {watermarkMotion === 'bounce' && '◇ Text memantul-mantul di dalam layar secara diagonal'}
+                                                </div>
+                                            </div>
+                                            <div className="form-group">
+                                                <label className="form-label">Speed: {watermarkSpeed}s per cycle</label>
+                                                <input type="range" min="2" max="10" step="1" value={watermarkSpeed}
+                                                    onChange={(e) => setWatermarkSpeed(parseInt(e.target.value))}
+                                                    style={{ width: '100%', maxWidth: 300, accentColor: 'var(--accent-primary)' }} />
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', maxWidth: 300, fontSize: 11, color: 'var(--text-muted)' }}>
+                                                    <span>Cepat</span><span>Lambat</span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {/* Text Preview */}
+                                    {watermarkText && (
+                                        <div style={{
+                                            padding: '16px 20px', borderRadius: 10,
+                                            background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.08)',
+                                            textAlign: 'center', marginBottom: 16, position: 'relative', overflow: 'hidden', minHeight: 60
+                                        }}>
+                                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Preview</div>
+                                            <span style={{
+                                                fontSize: `${Math.min(watermarkFontSize, 40)}px`,
+                                                color: watermarkColor,
+                                                opacity: watermarkOpacity,
+                                                fontWeight: 600,
+                                                display: 'inline-block',
+                                                animation: watermarkType === 'text-moving'
+                                                    ? (watermarkMotion === 'scroll' ? `wmScroll ${watermarkSpeed}s linear infinite`
+                                                        : watermarkMotion === 'bounce' ? `wmBounce ${watermarkSpeed}s ease-in-out infinite`
+                                                            : `wmCornerHop ${watermarkSpeed * 4}s steps(1) infinite`)
+                                                    : 'none'
+                                            }}>{watermarkText}</span>
+                                            <style>{`
+                                                @keyframes wmScroll { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+                                                @keyframes wmBounce { 0%,100% { transform: translate(-30px,-5px); } 25% { transform: translate(30px,5px); } 50% { transform: translate(30px,-5px); } 75% { transform: translate(-30px,5px); } }
+                                                @keyframes wmCornerHop { 0% { transform: translate(40px,0); } 25% { transform: translate(-40px,10px); } 50% { transform: translate(-40px,0); } 75% { transform: translate(40px,10px); } }
+                                            `}</style>
+                                        </div>
+                                    )}
+                                </>
+                            )}
 
                             <div className="form-group">
                                 <label className="form-label">Position</label>
@@ -701,12 +1011,14 @@ export default function SettingsPage() {
                                         onChange={(e) => setWatermarkOpacity(parseFloat(e.target.value))}
                                         style={{ width: '100%', accentColor: 'var(--accent-primary)' }} />
                                 </div>
-                                <div style={{ flex: 1, minWidth: 180 }}>
-                                    <label className="form-label">Size: {watermarkSize}% of video width</label>
-                                    <input type="range" min="5" max="40" step="1" value={watermarkSize}
-                                        onChange={(e) => setWatermarkSize(parseInt(e.target.value))}
-                                        style={{ width: '100%', accentColor: 'var(--accent-primary)' }} />
-                                </div>
+                                {watermarkType === 'image' && (
+                                    <div style={{ flex: 1, minWidth: 180 }}>
+                                        <label className="form-label">Size: {watermarkSize}% of video width</label>
+                                        <input type="range" min="5" max="40" step="1" value={watermarkSize}
+                                            onChange={(e) => setWatermarkSize(parseInt(e.target.value))}
+                                            style={{ width: '100%', accentColor: 'var(--accent-primary)' }} />
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     )}
@@ -739,7 +1051,7 @@ export default function SettingsPage() {
                                     <button
                                         key={t.id}
                                         className={`chip ${appTheme === t.id ? 'active' : ''}`}
-                                        onClick={() => setAppTheme(t.id)}
+                                        onClick={() => { setAppTheme(t.id); setTheme(t.id); }}
                                     >
                                         <Icon size={14} /> {t.label}
                                     </button>

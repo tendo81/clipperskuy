@@ -1,21 +1,100 @@
 /**
  * ClipperSkuy — Admin Routes
  * License key management, stats, and administration
+ * Protected by admin password
  */
 const express = require('express');
 const router = express.Router();
 const { get, run, all } = require('../database');
 const crypto = require('crypto');
 
-// ===== Helper: Generate random license key =====
-function generateKey() {
+// ===== Admin Password =====
+const DEFAULT_ADMIN_PASSWORD = 'clipperskuy-admin-2026';
+
+function getAdminPassword() {
+    const row = get('SELECT value FROM settings WHERE key = ?', ['admin_password']);
+    return row?.value || DEFAULT_ADMIN_PASSWORD;
+}
+
+// Verify password endpoint (not protected by middleware)
+router.post('/verify', (req, res) => {
+    const { password } = req.body;
+    if (password === getAdminPassword()) {
+        res.json({ success: true });
+    } else {
+        res.status(401).json({ success: false, error: 'Wrong admin password' });
+    }
+});
+
+// Change password endpoint
+router.post('/change-password', (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (currentPassword !== getAdminPassword()) {
+        return res.status(401).json({ success: false, error: 'Current password is wrong' });
+    }
+    if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ success: false, error: 'New password must be at least 6 characters' });
+    }
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+        ['admin_password', newPassword]);
+    res.json({ success: true });
+});
+
+// ===== Middleware: check admin password on all other routes =====
+router.use((req, res, next) => {
+    // Skip verify & change-password (already handled above)
+    if (req.path === '/verify' || req.path === '/change-password') return next();
+
+    const password = req.headers['x-admin-password'];
+    if (password !== getAdminPassword()) {
+        return res.status(401).json({ error: 'Admin authentication required' });
+    }
+    next();
+});
+
+// ===== Signed License Key Generator =====
+// Key format: AAAA-BBBB-TCMD-SSSS
+//   AAAA-BBBB = random payload
+//   T = tier (P=pro, E=enterprise)
+//   C = duration (L=lifetime, 1=30d, 3=90d, 6=180d, Y=365d)
+//   M = creation month (A=Jan..L=Dec)
+//   D = random char
+//   SSSS = HMAC-SHA256 signature of first 3 groups
+const LICENSE_SECRET = 'ClipperSkuy-2026-LicenseKey-Secret';
+
+const TIER_CHAR = { 'pro': 'P', 'enterprise': 'E' };
+const DURATION_CHAR = { 0: 'L', 3: 'D', 7: 'W', 14: 'F', 30: '1', 90: '3', 180: '6', 365: 'Y' };
+
+function generateKey(tier = 'pro', durationDays = 0) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    const segment = () => {
-        let s = '';
-        for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
-        return s;
-    };
-    return `${segment()}-${segment()}-${segment()}-${segment()}`;
+    const randChar = () => chars[Math.floor(Math.random() * chars.length)];
+    const segment = () => { let s = ''; for (let i = 0; i < 4; i++) s += randChar(); return s; };
+
+    // Build first 2 random groups
+    const g1 = segment();
+    const g2 = segment();
+
+    // Build 3rd group with encoded data
+    const tChar = TIER_CHAR[tier] || 'P';
+    // Find the closest matching duration (Lifetime only if explicitly 0)
+    let closestDur = 0;
+    if (durationDays > 0) {
+        const durKeys = Object.keys(DURATION_CHAR).map(Number).filter(d => d > 0).sort((a, b) => a - b);
+        closestDur = durKeys[0]; // default to smallest non-zero
+        for (const d of durKeys) {
+            if (durationDays >= d) closestDur = d;
+        }
+    }
+    const dChar = DURATION_CHAR[closestDur] || 'L';
+    const monthChar = String.fromCharCode('A'.charCodeAt(0) + new Date().getMonth()); // A=Jan..L=Dec
+    const g3 = `${tChar}${dChar}${monthChar}${randChar()}`;
+
+    // Build signature (4th group)
+    const payload = `${g1}-${g2}-${g3}`;
+    const hmac = crypto.createHmac('sha256', LICENSE_SECRET).update(payload).digest('hex');
+    const g4 = hmac.substring(0, 4).toUpperCase();
+
+    return `${g1}-${g2}-${g3}-${g4}`;
 }
 
 // ===== GET /api/admin/licenses — List all license keys =====
@@ -25,7 +104,12 @@ router.get('/licenses', (req, res) => {
         // Add activation count to each key
         const keysWithCount = (keys || []).map(k => {
             const count = get('SELECT COUNT(*) as count FROM license_activations WHERE license_key_id = ?', [k.id]);
-            return { ...k, activation_count: count?.count || (k.machine_id ? 1 : 0) };
+            let activationCount = count?.count || 0;
+            // If key was manually marked as used but no local activations, show max
+            if (k.status === 'used' && activationCount === 0) {
+                activationCount = k.max_activations || 1;
+            }
+            return { ...k, activation_count: activationCount || (k.machine_id ? 1 : 0) };
         });
         res.json({ keys: keysWithCount });
     } catch (err) {
@@ -49,7 +133,7 @@ router.post('/licenses/generate', (req, res) => {
 
         for (let i = 0; i < numKeys; i++) {
             const id = crypto.randomUUID();
-            const key = (customKey && numKeys === 1) ? customKey.toUpperCase() : generateKey();
+            const key = (customKey && numKeys === 1) ? customKey.toUpperCase() : generateKey(tier, durDays);
 
             // Check for duplicate
             const existing = get('SELECT id FROM license_keys WHERE license_key = ?', [key]);
@@ -124,12 +208,34 @@ router.put('/licenses/:id/reset', (req, res) => {
         run('DELETE FROM license_activations WHERE license_key_id = ?', [key.id]);
 
         // Reset machine binding and status
-        run(`UPDATE license_keys SET machine_id = NULL, activated_at = NULL, activated_by = NULL, status = 'active' WHERE id = ?`,
+        run(`UPDATE license_keys SET machine_id = NULL, activated_at = NULL, activated_by = NULL, status = 'active', activation_count = 0 WHERE id = ?`,
             [key.id]);
 
         res.json({
             message: `Aktivasi key ${key.license_key} direset. Key bisa dipakai di perangkat baru.`,
             key: { ...key, status: 'active', machine_id: null, activation_count: 0 }
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ===== PUT /api/admin/licenses/:id/mark-used — Manually mark key as used =====
+router.put('/licenses/:id/mark-used', (req, res) => {
+    try {
+        const key = get('SELECT * FROM license_keys WHERE id = ?', [req.params.id]);
+        if (!key) return res.status(404).json({ error: 'License key not found' });
+
+        const now = new Date().toISOString();
+        const { machine_name } = req.body || {};
+
+        run(`UPDATE license_keys SET status = 'used', activated_at = ?, activated_by = ?, activation_count = max_activations WHERE id = ?`,
+            [now, machine_name || 'Manual (remote)', req.params.id]);
+
+        const updated = get('SELECT * FROM license_keys WHERE id = ?', [req.params.id]);
+        res.json({
+            message: `Key ${key.license_key} ditandai sudah digunakan`,
+            key: updated
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -162,6 +268,63 @@ router.put('/licenses/:id', (req, res) => {
 
         const updated = get('SELECT * FROM license_keys WHERE id = ?', [req.params.id]);
         res.json({ message: 'Key updated', key: updated });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ===== PUT /api/admin/licenses/:id/upgrade — Upgrade tier/duration of existing key =====
+router.put('/licenses/:id/upgrade', (req, res) => {
+    try {
+        const oldKey = get('SELECT * FROM license_keys WHERE id = ?', [req.params.id]);
+        if (!oldKey) return res.status(404).json({ error: 'License key not found' });
+
+        const { tier, duration_days } = req.body;
+        const newTier = tier || oldKey.tier;
+        const newDuration = parseInt(duration_days) ?? oldKey.duration_days ?? 0;
+
+        // Generate a NEW signed key with the updated tier/duration
+        const newLicenseKey = generateKey(newTier, newDuration);
+
+        // Calculate new expiry from NOW
+        let newExpiresAt = null;
+        if (newDuration > 0) {
+            newExpiresAt = new Date(Date.now() + newDuration * 24 * 60 * 60 * 1000).toISOString();
+        }
+
+        // Update the key record
+        run(`UPDATE license_keys SET 
+            license_key = ?, tier = ?, duration_days = ?, expires_at = ?, 
+            status = 'active', notes = COALESCE(notes, '') || ? 
+            WHERE id = ?`, [
+            newLicenseKey, newTier, newDuration, newExpiresAt,
+            `\n[Upgraded ${new Date().toISOString()}] ${oldKey.tier}→${newTier}, ${oldKey.duration_days || 0}d→${newDuration}d`,
+            req.params.id
+        ]);
+
+        // If this key was already activated on a machine, update local settings too
+        if (oldKey.machine_id) {
+            // Update settings for the activated instance (will take effect on next app restart)
+            const settingsKey = get("SELECT value FROM settings WHERE key = 'license_key'");
+            if (settingsKey && settingsKey.value === oldKey.license_key) {
+                run("UPDATE settings SET value = ? WHERE key = 'license_key'", [newLicenseKey]);
+                run("UPDATE settings SET value = ? WHERE key = 'license_tier'", [newTier]);
+                if (newExpiresAt) {
+                    run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('license_expires_at', ?, datetime('now'))", [newExpiresAt]);
+                } else {
+                    run("DELETE FROM settings WHERE key = 'license_expires_at'");
+                }
+                run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('license_duration_days', ?, datetime('now'))", [String(newDuration)]);
+            }
+        }
+
+        const updated = get('SELECT * FROM license_keys WHERE id = ?', [req.params.id]);
+        res.json({
+            message: `Key upgraded: ${oldKey.tier}→${newTier}, ${newDuration > 0 ? newDuration + ' days' : 'Lifetime'}`,
+            oldKey: oldKey.license_key,
+            newKey: newLicenseKey,
+            key: updated
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

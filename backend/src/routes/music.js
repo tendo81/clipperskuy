@@ -8,9 +8,10 @@ const path = require('path');
 const fs = require('fs-extra');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
-const { getDb, saveDb } = require('../database');
+const { getDb, saveDatabase } = require('../database');
 
-const MUSIC_DIR = path.join(__dirname, '..', '..', 'data', 'music');
+const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
+const MUSIC_DIR = path.join(DATA_DIR, 'music');
 fs.ensureDirSync(MUSIC_DIR);
 
 // Multer storage for music uploads
@@ -105,7 +106,7 @@ router.post('/', upload.single('file'), (req, res) => {
             [id, name || path.parse(req.file.originalname).name, filePath, req.file.originalname,
                 category || 'general', mood || 'neutral', parseInt(bpm) || 0, duration, req.file.size]
         );
-        saveDb();
+        saveDatabase();
 
         const stmt = db.prepare('SELECT * FROM music_tracks WHERE id = ?');
         stmt.bind([id]);
@@ -128,7 +129,7 @@ router.put('/:id', (req, res) => {
             `UPDATE music_tracks SET name = ?, category = ?, mood = ?, bpm = ? WHERE id = ?`,
             [name, category, mood, parseInt(bpm) || 0, req.params.id]
         );
-        saveDb();
+        saveDatabase();
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -150,7 +151,7 @@ router.delete('/:id', (req, res) => {
         stmt.free();
 
         db.run('DELETE FROM music_tracks WHERE id = ?', [req.params.id]);
-        saveDb();
+        saveDatabase();
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });

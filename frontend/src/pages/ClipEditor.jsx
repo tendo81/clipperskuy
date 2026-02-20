@@ -182,6 +182,7 @@ export default function ClipEditor() {
     // SFX state
     const [showSfxSelector, setShowSfxSelector] = useState(false);
     const [sfxCount, setSfxCount] = useState(0);
+    const [copiedHashtags, setCopiedHashtags] = useState(false);
 
     // Load data
     useEffect(() => {
@@ -1335,8 +1336,36 @@ export default function ClipEditor() {
                             )}
                             {clip.hashtags && (
                                 <div>
-                                    <div className="form-label">Hashtags</div>
-                                    <div className="text-sm" style={{ color: 'var(--accent-cyan)' }}>{clip.hashtags}</div>
+                                    <div className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            <Hash size={12} /> Hashtags
+                                        </span>
+                                        <button
+                                            className="btn btn-ghost btn-sm"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(clip.hashtags);
+                                                setCopiedHashtags(true);
+                                                setTimeout(() => setCopiedHashtags(false), 2000);
+                                            }}
+                                            style={{ padding: '2px 8px', fontSize: 10, gap: 3 }}
+                                        >
+                                            {copiedHashtags ? <><CheckCircle size={10} /> Copied!</> : <><Share2 size={10} /> Copy</>}
+                                        </button>
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                        {clip.hashtags.split(/\s+/).filter(t => t.startsWith('#')).map((tag, i) => (
+                                            <span key={i} style={{
+                                                fontSize: 11, padding: '2px 8px', borderRadius: 12,
+                                                background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)',
+                                                color: 'var(--accent-cyan)', cursor: 'pointer', transition: 'all 0.15s',
+                                            }}
+                                                onClick={() => { navigator.clipboard.writeText(tag); }}
+                                                title={`Click to copy ${tag}`}
+                                            >
+                                                {tag}
+                                            </span>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                             {clip.improvement_tips && (

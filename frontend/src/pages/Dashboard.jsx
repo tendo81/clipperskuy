@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FolderOpen, Scissors, Clock, Plus, ArrowRight, Sparkles, TrendingUp, Zap, Trash2, Film, Download, Music } from 'lucide-react';
+import { FolderOpen, Scissors, Clock, Plus, ArrowRight, Sparkles, TrendingUp, Zap, Trash2, Film, Download, Music, BarChart3, Target, Timer, Award, Flame, Star } from 'lucide-react';
 
 const API = 'http://localhost:5000/api';
 
@@ -50,11 +50,27 @@ const statusConfig = {
     failed: { label: 'Failed', cls: 'badge-error' },
 };
 
+const reframeModeLabels = {
+    center: '🎯 Center',
+    fit: '🔲 Fit',
+    face_track: '👤 Face Track',
+    split: '📱 Split Screen'
+};
+
+const platformLabels = {
+    tiktok: '🎵 TikTok',
+    instagram: '📸 Instagram',
+    youtube: '▶️ YouTube'
+};
+
 export default function Dashboard() {
     const [stats, setStats] = useState({
         totalProjects: 0, totalClips: 0, completedProjects: 0,
         totalDuration: 0, exportedClips: 0, clipsDuration: 0,
-        favCaptionStyle: 'hormozi', musicTracks: 0
+        favCaptionStyle: 'hormozi', musicTracks: 0,
+        avgVirality: 0, topReframingMode: 'center', topPlatform: 'tiktok',
+        timeSavedMinutes: 0, topClips: [], dailyActivity: [],
+        viralityDistribution: { low: 0, medium: 0, high: 0, viral: 0 }
     });
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -96,9 +112,19 @@ export default function Dashboard() {
         { icon: FolderOpen, label: 'Projects', value: stats.totalProjects, color: 'purple' },
         { icon: Scissors, label: 'Clips Generated', value: stats.totalClips, color: 'cyan' },
         { icon: Download, label: 'Exported', value: stats.exportedClips, color: 'green' },
-        { icon: Clock, label: 'Clips Duration', value: formatDuration(stats.clipsDuration), color: 'amber' },
-        { icon: TrendingUp, label: 'Completed', value: stats.completedProjects, color: 'purple' },
-        { icon: Music, label: 'Music Tracks', value: stats.musicTracks, color: 'cyan' },
+        { icon: Target, label: 'Avg Virality', value: `${stats.avgVirality}/100`, color: 'amber' },
+        { icon: Timer, label: 'Time Saved', value: stats.timeSavedMinutes >= 60 ? `${Math.round(stats.timeSavedMinutes / 60)}h` : `${stats.timeSavedMinutes}m`, color: 'green' },
+        { icon: Clock, label: 'Content Duration', value: formatDuration(stats.clipsDuration), color: 'purple' },
+    ];
+
+    // Virality distribution bar chart
+    const viralDist = stats.viralityDistribution || { low: 0, medium: 0, high: 0, viral: 0 };
+    const viralTotal = viralDist.low + viralDist.medium + viralDist.high + viralDist.viral || 1;
+    const viralBars = [
+        { label: 'Low', value: viralDist.low, pct: (viralDist.low / viralTotal * 100), color: '#6b7280' },
+        { label: 'Medium', value: viralDist.medium, pct: (viralDist.medium / viralTotal * 100), color: '#f59e0b' },
+        { label: 'High', value: viralDist.high, pct: (viralDist.high / viralTotal * 100), color: '#10b981' },
+        { label: '🔥 Viral', value: viralDist.viral, pct: (viralDist.viral / viralTotal * 100), color: '#ef4444' },
     ];
 
     return (
@@ -128,6 +154,102 @@ export default function Dashboard() {
                         );
                     })}
                 </div>
+
+                {/* Analytics Section */}
+                {!loading && stats.totalClips > 0 && (
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+                        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginBottom: 20 }}>
+
+                        {/* Virality Distribution */}
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontWeight: 700, fontSize: 14 }}>
+                                <BarChart3 size={18} style={{ color: 'var(--color-accent)' }} />
+                                Virality Distribution
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {viralBars.map(bar => (
+                                    <div key={bar.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <span style={{ fontSize: 12, width: 60, color: 'var(--text-muted)' }}>{bar.label}</span>
+                                        <div style={{ flex: 1, height: 22, background: 'var(--bg-secondary)', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+                                            <motion.div
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${Math.max(bar.pct, 2)}%` }}
+                                                transition={{ duration: 0.8, delay: 0.5 }}
+                                                style={{ height: '100%', background: bar.color, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6 }}
+                                            >
+                                                {bar.value > 0 && <span style={{ fontSize: 11, fontWeight: 600, color: '#fff' }}>{bar.value}</span>}
+                                            </motion.div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Quick Insights */}
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontWeight: 700, fontSize: 14 }}>
+                                <Sparkles size={18} style={{ color: 'var(--color-accent)' }} />
+                                Quick Insights
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Favorite Platform</span>
+                                    <span style={{ fontSize: 13, fontWeight: 600 }}>{platformLabels[stats.topPlatform] || stats.topPlatform}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Top Reframing</span>
+                                    <span style={{ fontSize: 13, fontWeight: 600 }}>{reframeModeLabels[stats.topReframingMode] || stats.topReframingMode}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Caption Style</span>
+                                    <span style={{ fontSize: 13, fontWeight: 600, textTransform: 'capitalize' }}>{stats.favCaptionStyle}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 8 }}>
+                                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Export Rate</span>
+                                    <span style={{ fontSize: 13, fontWeight: 600 }}>
+                                        {stats.totalClips > 0 ? Math.round((stats.exportedClips / stats.totalClips) * 100) : 0}%
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+
+                {/* Top Clips */}
+                {!loading && stats.topClips?.length > 0 && (
+                    <motion.div className="section" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
+                        <div className="section-title"><Award size={18} /> Top Viral Clips</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {stats.topClips.map((clip, i) => (
+                                <div key={clip.id} style={{
+                                    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                                    background: 'var(--bg-secondary)', borderRadius: 10,
+                                    borderLeft: `3px solid ${clip.virality_score >= 85 ? '#ef4444' : clip.virality_score >= 65 ? '#10b981' : '#f59e0b'}`
+                                }}>
+                                    <span style={{ fontWeight: 700, color: 'var(--text-muted)', fontSize: 14, width: 20 }}>#{i + 1}</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            {clip.title}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                            {clip.project_name?.substring(0, 40)} · {formatDuration(clip.duration)}
+                                        </div>
+                                    </div>
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+                                        borderRadius: 20, fontWeight: 700, fontSize: 13,
+                                        background: clip.virality_score >= 85 ? 'rgba(239,68,68,0.15)' : clip.virality_score >= 65 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)',
+                                        color: clip.virality_score >= 85 ? '#ef4444' : clip.virality_score >= 65 ? '#10b981' : '#f59e0b'
+                                    }}>
+                                        {clip.virality_score >= 85 && <Flame size={14} />}
+                                        {clip.virality_score >= 65 && clip.virality_score < 85 && <Star size={14} />}
+                                        {clip.virality_score}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
 
                 {/* Quick actions */}
                 <motion.div className="section" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>

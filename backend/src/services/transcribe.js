@@ -61,6 +61,9 @@ async function _groqTranscribe(audioPath, apiKey, language) {
     formData.append('timestamp_granularities[]', 'segment');
     if (language && language !== 'auto') {
         formData.append('language', language);
+        console.log(`[Groq] Language hint: ${language}`);
+    } else {
+        console.log(`[Groq] No language hint (auto-detect)`);
     }
 
     const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {

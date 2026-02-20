@@ -3,7 +3,32 @@ const path = require('path');
 const fs = require('fs-extra');
 const { v4: uuidv4 } = require('uuid');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
+
+// Resolve yt-dlp binary path (bundled in Electron or system PATH)
+function findYtDlp() {
+    if (process.env.YTDLP_PATH) return process.env.YTDLP_PATH;
+
+    const os = require('os');
+    // Common locations for yt-dlp on Windows
+    const candidates = [
+        'yt-dlp',  // system PATH
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'Scripts', 'yt-dlp.exe'),
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'Scripts', 'yt-dlp.exe'),
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python313', 'Scripts', 'yt-dlp.exe'),
+        path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'Scripts', 'yt-dlp.exe'),
+        'C:\\yt-dlp\\yt-dlp.exe',
+        path.join(os.homedir(), 'scoop', 'shims', 'yt-dlp.exe'),
+    ];
+    for (const p of candidates) {
+        if (p !== 'yt-dlp' && fs.existsSync(p)) {
+            console.log(`[yt-dlp] Found at: ${p}`);
+            return p;
+        }
+    }
+    return 'yt-dlp'; // fallback to PATH
+}
+const YTDLP_BIN = findYtDlp();
 
 // User agent to match a real browser
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -38,17 +63,23 @@ function getInstalledBrowsers() {
 
 /**
  * Get base anti-bot yt-dlp args (without cookies)
+ * @param {string|null} playerClient - specific player client, or null for yt-dlp default
  */
-function getBaseArgs() {
-    return [
+function getBaseArgs(playerClient = null) {
+    const args = [
         '--user-agent', USER_AGENT,
-        '--js-runtimes', 'node',
-        '--extractor-args', 'youtube:player_client=web',
-        '--sleep-requests', '1',
-        '--sleep-interval', '1',
-        '--max-sleep-interval', '3',
+        '--sleep-requests', '0.5',
+        '--sleep-interval', '0.5',
+        '--max-sleep-interval', '2',
         '--no-check-certificates',
+        '--no-warnings',
     ];
+    // Only force player_client when explicitly needed (fallback strategies)
+    // Default yt-dlp client selection gets ALL formats including HD via JS solver
+    if (playerClient) {
+        args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+    }
+    return args;
 }
 
 /**
@@ -66,36 +97,58 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
     const cookiesPath = path.join(DATA_DIR, 'cookies.txt');
     const hasCookiesFile = fs.existsSync(cookiesPath);
 
-    // Build list of cookie strategies to try
-    const strategies = [
-        { name: 'no-cookies (EJS only)', args: [] },
-    ];
+    // Player clients to try (different ones bypass different blocks)
+    const playerClients = ['web', 'mweb', 'android', 'ios'];
 
-    // cookies.txt has highest priority
-    if (hasCookiesFile) {
-        strategies.splice(0, 0, { name: 'cookies.txt', args: ['--cookies', cookiesPath] });
-    }
-
-    // Then try each installed browser
-    for (const browser of installedBrowsers) {
-        strategies.push({ name: `browser: ${browser}`, args: ['--cookies-from-browser', browser] });
-    }
+    // Build list of strategies to try
+    // IMPORTANT: Browser cookies are needed for HD formats (720p+)!
+    // YouTube now requires PO Token for HD; without cookies only 360p is available.
+    // So we try WITH cookies first, then fall back to no-cookies (360p only).
+    const strategies = [];
 
     // Check if user has a preferred browser in settings
+    let preferredBrowser = null;
     try {
         const { get } = require('../database');
         const setting = get('SELECT value FROM settings WHERE key = ?', ['yt_cookie_browser']);
         if (setting && setting.value && setting.value !== 'auto' && setting.value !== 'none') {
-            // Move user's preferred browser to the top (after cookies.txt)
-            const insertIdx = hasCookiesFile ? 1 : 0;
-            strategies.splice(insertIdx, 0, {
-                name: `browser: ${setting.value} (preferred)`,
-                args: ['--cookies-from-browser', setting.value]
-            });
+            preferredBrowser = setting.value;
         }
     } catch (e) { /* ignore */ }
 
+    // 1. Default yt-dlp (no forced player_client, no cookies) — gets HD via JS solver
+    strategies.push({ name: 'default (auto)', args: [], client: null });
+
+    // 2. cookies.txt (manual export = most reliable for HD)
+    if (hasCookiesFile) {
+        strategies.push({ name: 'cookies.txt', args: ['--cookies', cookiesPath], client: null });
+    }
+
+    // 3. Preferred browser cookies
+    if (preferredBrowser) {
+        strategies.push({
+            name: `browser: ${preferredBrowser} (preferred)`,
+            args: ['--cookies-from-browser', preferredBrowser],
+            client: null
+        });
+    }
+
+    // 4. All installed browsers with cookies (for HD access with PO token)
+    for (const browser of installedBrowsers) {
+        strategies.push({
+            name: `browser: ${browser}`,
+            args: ['--cookies-from-browser', browser],
+            client: null
+        });
+    }
+
+    // 5. Forced player_clients as LAST fallback (likely only 360p)
+    for (const client of playerClients) {
+        strategies.push({ name: `fallback (${client})`, args: [], client });
+    }
+
     let strategyIdx = 0;
+    let lastStderr = '';
 
     function tryStrategy() {
         return new Promise((resolve, reject) => {
@@ -103,6 +156,7 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
                 return reject(new Error(
                     'YouTube download failed with all strategies!\n' +
                     'Tried: ' + strategies.map(s => s.name).join(', ') + '\n' +
+                    'Last error: ' + (lastStderr || 'unknown').slice(-200) + '\n' +
                     'Suggestions:\n' +
                     '1. Close ALL browsers, then try again\n' +
                     '2. Export cookies.txt manually → place in backend/data/\n' +
@@ -111,10 +165,21 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
             }
 
             const strategy = strategies[strategyIdx];
-            const allArgs = [...getBaseArgs(), ...strategy.args, ...extraArgs];
+            const allArgs = [...getBaseArgs(strategy.client), ...strategy.args, ...extraArgs];
             console.log(`[yt-dlp] Strategy ${strategyIdx + 1}/${strategies.length}: ${strategy.name}`);
+            console.log(`[yt-dlp] Args: ${YTDLP_BIN} ${allArgs.join(' ').substring(0, 200)}...`);
 
-            const proc = spawn('yt-dlp', allArgs);
+            // Emit strategy info to frontend
+            if (opts.io) opts.io.emit('youtube:log', { message: `Trying: ${strategy.name} (${strategyIdx + 1}/${strategies.length})...` });
+
+            // Ensure Deno is in PATH for yt-dlp JS challenge solving
+            const denoDir = path.join(require('os').homedir(), '.deno', 'bin');
+            const spawnEnv = { ...process.env };
+            if (!spawnEnv.PATH?.includes('.deno')) {
+                spawnEnv.PATH = `${denoDir};${spawnEnv.PATH || ''}`;
+            }
+
+            const proc = spawn(YTDLP_BIN, allArgs, { windowsHide: true, env: spawnEnv });
             let stdout = '';
             let stderr = '';
 
@@ -130,23 +195,38 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
             });
 
             proc.on('close', (code) => {
-                const errLower = stderr.toLowerCase();
-                const isBotDetected = errLower.includes('sign in') || errLower.includes('bot') || errLower.includes('confirm your age');
-                const isCookieError = errLower.includes('could not copy') || errLower.includes('cookie database');
+                // yt-dlp sometimes exits with code 1 due to warnings (e.g., PO Token)
+                // even though the download succeeded. Check stdout for success indicators
+                // before deciding to retry.
+                const hasDownloaded = stdout.includes('[download] 100%') ||
+                    stdout.includes('has already been downloaded') ||
+                    stdout.includes('Merging formats into');
 
-                // If cookie copy failed or bot detected, try next strategy
-                if (code !== 0 && (isBotDetected || isCookieError)) {
-                    console.log(`[yt-dlp] Strategy "${strategy.name}" failed (${isCookieError ? 'cookie locked' : 'bot detected'}), trying next...`);
+                if (code !== 0 && !hasDownloaded) {
+                    const errLower = stderr.toLowerCase();
+                    const reason = errLower.includes('sign in') || errLower.includes('bot') ? 'bot detected'
+                        : errLower.includes('could not copy') || errLower.includes('cookie database') ? 'cookie locked'
+                            : errLower.includes('http error') ? 'HTTP error'
+                                : errLower.includes('unsupported url') ? 'unsupported URL'
+                                    : 'unknown error';
+                    console.log(`[yt-dlp] Strategy "${strategy.name}" failed (${reason})`);
+                    console.log(`[yt-dlp] stderr tail: ${stderr.slice(-500)}`);
+                    lastStderr = stderr;
                     strategyIdx++;
                     tryStrategy().then(resolve).catch(reject);
                     return;
                 }
 
-                resolve({ stdout, stderr, code });
+                if (code !== 0 && hasDownloaded) {
+                    console.log(`[yt-dlp] Strategy "${strategy.name}" exited with code ${code} but download completed successfully`);
+                }
+
+                resolve({ stdout, stderr, code: 0 });
             });
 
             proc.on('error', (err) => {
                 console.log(`[yt-dlp] Strategy "${strategy.name}" error: ${err.message}, trying next...`);
+                lastStderr = err.message;
                 strategyIdx++;
                 tryStrategy().then(resolve).catch(reject);
             });
@@ -191,8 +271,12 @@ function getYoutubeInfo(url) {
 
 /**
  * Download YouTube video with progress callback (with anti-bot + retry)
+ * @param {string} url
+ * @param {string} outputDir
+ * @param {Function} onProgress
+ * @param {object} io - Socket.IO instance for real-time logs
  */
-function downloadYoutube(url, outputDir, onProgress) {
+function downloadYoutube(url, outputDir, onProgress, io) {
     return new Promise(async (resolve, reject) => {
         try {
             fs.ensureDirSync(outputDir);
@@ -201,15 +285,30 @@ function downloadYoutube(url, outputDir, onProgress) {
 
             let outputFile = null;
 
+            // Format priority (more aggressive about getting HD):
+            // 1. Best MP4 video ≤1080p + best M4A audio (ideal)
+            // 2. Best ANY video ≤1080p + best audio (allows webm/av01 which have more formats)
+            // 3. Best combined MP4 (single stream, often 720p)
+            // 4. Best anything available
+            const formatStr = [
+                'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]',
+                'bestvideo[height<=1080]+bestaudio',
+                'best[ext=mp4][height>=720]',
+                'best[ext=mp4]',
+                'best'
+            ].join('/');
+
             console.log('[yt-dlp] Downloading:', url);
+            console.log('[yt-dlp] Format selector:', formatStr);
             const result = await runYtDlpWithRetry([
-                '-f', 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '-f', formatStr,
                 '--merge-output-format', 'mp4',
                 '-o', outputTemplate,
                 '--no-playlist',
                 '--newline',
                 url
             ], {
+                io,
                 onStdout: (data) => {
                     const line = data.trim();
                     // Parse progress
@@ -243,10 +342,33 @@ function downloadYoutube(url, outputDir, onProgress) {
             }
 
             const stats = fs.statSync(outputFile);
+
+            // Post-download: check actual resolution and warn if low
+            let resolution = null;
+            try {
+                const { execSync } = require('child_process');
+                const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+                const probe = execSync(
+                    `"${ffprobePath}" -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${outputFile}"`,
+                    { encoding: 'utf-8', timeout: 10000 }
+                ).trim();
+                const [w, h] = probe.split(',').map(Number);
+                resolution = { width: w, height: h };
+                if (w && h) {
+                    const maxDim = Math.max(w, h);
+                    if (maxDim < 720) {
+                        console.warn(`[yt-dlp] ⚠️ LOW RESOLUTION: Downloaded video is only ${w}x${h} (${maxDim < 480 ? '360p' : '480p'}). Output quality will be poor.`);
+                    } else {
+                        console.log(`[yt-dlp] ✅ Resolution: ${w}x${h}`);
+                    }
+                }
+            } catch (e) { /* ignore probe errors */ }
+
             resolve({
                 filePath: outputFile,
                 fileSize: stats.size,
-                fileName: path.basename(outputFile)
+                fileName: path.basename(outputFile),
+                resolution
             });
         } catch (e) {
             reject(e);

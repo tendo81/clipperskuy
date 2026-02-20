@@ -7,10 +7,11 @@ const path = require('path');
 const fs = require('fs-extra');
 const { getVideoInfo, generateThumbnail, formatDuration } = require('../services/ffmpeg');
 const { getYoutubeInfo, downloadYoutube, getYoutubeCaptions, downloadYoutubeCaptions } = require('../services/youtube');
-const { processProject, cancelProject, addToQueue, removeFromQueue, getQueueStatus } = require('../services/pipeline');
+const { processProject, cancelProject, addToQueue, removeFromQueue, getQueueStatus, retranscribeProject } = require('../services/pipeline');
 const { renderClip, renderAllClips } = require('../services/clipRenderer');
+const { canCreateProject, incrementProjectCount, getRenderLimits } = require('../services/license');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 
 // File upload config
 const storage = multer.diskStorage({
@@ -66,6 +67,52 @@ router.get('/stats/overview', (req, res) => {
             musicCount = mc?.count || 0;
         } catch (e) { /* table may not exist */ }
 
+        // === Enhanced analytics ===
+        // Average virality score
+        const avgVirality = get('SELECT COALESCE(AVG(virality_score), 0) as avg FROM clips WHERE virality_score > 0');
+
+        // Most used reframing mode
+        const topReframe = get("SELECT reframing_mode, COUNT(*) as cnt FROM projects GROUP BY reframing_mode ORDER BY cnt DESC LIMIT 1");
+
+        // Most used platform
+        const topPlatform = get("SELECT platform, COUNT(*) as cnt FROM projects GROUP BY platform ORDER BY cnt DESC LIMIT 1");
+
+        // Time saved estimate (assume 10x manual: 30min manual per clip avg)
+        const timeSavedMin = (totalClips?.count || 0) * 30;
+
+        // Top 5 clips by virality
+        let topClips = [];
+        try {
+            topClips = all("SELECT c.id, c.title, c.virality_score, c.duration, c.status, p.name as project_name FROM clips c LEFT JOIN projects p ON c.project_id = p.id WHERE c.virality_score > 0 ORDER BY c.virality_score DESC LIMIT 5");
+        } catch (e) { }
+
+        // Daily activity (last 7 days)
+        let dailyActivity = [];
+        try {
+            dailyActivity = all(`
+                SELECT date(created_at) as day, COUNT(*) as count 
+                FROM projects 
+                WHERE created_at >= datetime('now', '-7 days')
+                GROUP BY date(created_at) 
+                ORDER BY day ASC
+            `);
+        } catch (e) { }
+
+        // Virality distribution
+        let viralityDist = { low: 0, medium: 0, high: 0, viral: 0 };
+        try {
+            const low = get("SELECT COUNT(*) as c FROM clips WHERE virality_score > 0 AND virality_score < 40");
+            const med = get("SELECT COUNT(*) as c FROM clips WHERE virality_score >= 40 AND virality_score < 65");
+            const high = get("SELECT COUNT(*) as c FROM clips WHERE virality_score >= 65 AND virality_score < 85");
+            const viral = get("SELECT COUNT(*) as c FROM clips WHERE virality_score >= 85");
+            viralityDist = {
+                low: low?.c || 0,
+                medium: med?.c || 0,
+                high: high?.c || 0,
+                viral: viral?.c || 0
+            };
+        } catch (e) { }
+
         res.json({
             totalProjects: totalProjects?.count || 0,
             totalClips: totalClips?.count || 0,
@@ -74,7 +121,15 @@ router.get('/stats/overview', (req, res) => {
             exportedClips: exportedClips?.count || 0,
             clipsDuration: clipsDuration?.total || 0,
             favCaptionStyle: favCaptionStyle?.caption_style || 'hormozi',
-            musicTracks: musicCount
+            musicTracks: musicCount,
+            // Enhanced
+            avgVirality: Math.round(avgVirality?.avg || 0),
+            topReframingMode: topReframe?.reframing_mode || 'center',
+            topPlatform: topPlatform?.platform || 'tiktok',
+            timeSavedMinutes: timeSavedMin,
+            topClips,
+            dailyActivity,
+            viralityDistribution: viralityDist
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -115,6 +170,14 @@ router.get('/:id', (req, res) => {
 router.post('/upload', upload.single('video'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No video file uploaded' });
+
+        // Check project limit (Free tier = max 3)
+        const limitCheck = canCreateProject();
+        if (!limitCheck.allowed) {
+            // Delete uploaded file since we're rejecting
+            fs.removeSync(req.file.path);
+            return res.status(403).json({ error: limitCheck.message });
+        }
 
         const id = uuidv4();
         const { platform, aspect_ratio, reframing_mode, language, clip_count_target, min_duration, max_duration } = req.body;
@@ -162,6 +225,9 @@ router.post('/upload', upload.single('video'), async (req, res) => {
         ]);
 
         const project = get('SELECT * FROM projects WHERE id = ?', [id]);
+
+        // Track total projects for free tier limit
+        incrementProjectCount();
 
         // Emit socket event
         const io = req.app.get('io');
@@ -224,6 +290,37 @@ router.post('/:id/process', async (req, res) => {
                     if (io) io.emit('project:updated', { id: project.id, status: 'cancelled' });
                 } else {
                     console.error(`[Process] Failed: ${err.message}`);
+                    if (io) io.emit('project:updated', { id: project.id, status: 'failed', error: err.message });
+                }
+            });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/:id/retranscribe — Re-transcribe to get word-level timestamps
+router.post('/:id/retranscribe', async (req, res) => {
+    try {
+        const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        if (['transcribing', 'analyzing', 'clipping'].includes(project.status)) {
+            return res.status(400).json({ error: 'Project is already being processed' });
+        }
+
+        const io = req.app.get('io');
+        res.json({ message: 'Re-transcription started', projectId: project.id });
+
+        retranscribeProject(project.id, io)
+            .then(result => {
+                console.log(`[Retranscribe] Complete: ${result.clips} clips detected`);
+                if (io) io.emit('project:updated', { id: project.id, status: 'completed' });
+            })
+            .catch(err => {
+                if (err.message === 'CANCELLED') {
+                    if (io) io.emit('project:updated', { id: project.id, status: 'cancelled' });
+                } else {
+                    console.error(`[Retranscribe] Failed: ${err.message}`);
                     if (io) io.emit('project:updated', { id: project.id, status: 'failed', error: err.message });
                 }
             });
@@ -429,6 +526,28 @@ router.put('/:id/clips/bulk-style', (req, res) => {
     }
 });
 
+// PUT /api/projects/:id/clips/:clipId/select — Toggle clip selection
+router.put('/:id/clips/:clipId/select', (req, res) => {
+    try {
+        const { is_selected } = req.body;
+        run('UPDATE clips SET is_selected = ? WHERE id = ?', [is_selected ? 1 : 0, req.params.clipId]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PUT /api/projects/:id/clips/select-all — Select or deselect all clips
+router.put('/:id/clips/select-all', (req, res) => {
+    try {
+        const { is_selected } = req.body;
+        run('UPDATE clips SET is_selected = ? WHERE project_id = ?', [is_selected ? 1 : 0, req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // DELETE /api/projects/clips/:clipId — Delete a single clip
 router.delete('/clips/:clipId', (req, res) => {
     try {
@@ -567,6 +686,33 @@ router.delete('/:id', (req, res) => {
     }
 });
 
+// Shared progress store for YouTube downloads
+const ytProgress = {};
+
+// SSE endpoint for YouTube download progress
+router.get('/youtube/progress', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*'
+    });
+
+    const interval = setInterval(() => {
+        const data = ytProgress.current || { step: 'waiting', progress: 0, message: 'Waiting...' };
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+        if (data.step === 'done' || data.step === 'error') {
+            clearInterval(interval);
+            setTimeout(() => res.end(), 500);
+        }
+    }, 300);
+
+    req.on('close', () => {
+        clearInterval(interval);
+    });
+});
+
 // POST /api/projects/youtube — Download from YouTube URL
 router.post('/youtube', async (req, res) => {
     const { url, platform, reframing_mode, language, clip_count_target, min_duration, max_duration } = req.body;
@@ -576,32 +722,43 @@ router.post('/youtube', async (req, res) => {
     const id = uuidv4();
     const io = req.app.get('io');
 
+    // Progress emitter: writes to both Socket.IO and shared store
+    const emitProgress = (step, progress, message) => {
+        const data = { id, step, progress, message };
+        ytProgress.current = data;
+        if (io) io.emit('youtube:progress', data);
+        console.log(`[YouTube] ${message}`);
+    };
+
+    // Check project limit (Free tier = max 3)
+    const limitCheck = canCreateProject();
+    if (!limitCheck.allowed) {
+        return res.status(403).json({ error: limitCheck.message });
+    }
+
     try {
         // Step 1: Get video info
-        if (io) io.emit('youtube:progress', { id, step: 'info', progress: 0, message: 'Getting video info...' });
-        console.log(`[YouTube] Getting info for: ${url}`);
+        emitProgress('info', 5, 'Getting video info...');
 
         let ytInfo;
         try {
             ytInfo = await getYoutubeInfo(url);
         } catch (e) {
+            emitProgress('error', 0, `Failed: ${e.message}`);
             return res.status(400).json({ error: `Could not get YouTube video info: ${e.message}` });
         }
 
-        console.log(`[YouTube] Title: ${ytInfo.title} (${formatDuration(ytInfo.duration)})`);
+        emitProgress('info', 10, `Found: ${ytInfo.title} (${formatDuration(ytInfo.duration)})`);
 
         // Step 2: Download video
-        if (io) io.emit('youtube:progress', { id, step: 'download', progress: 0, message: `Downloading: ${ytInfo.title}` });
+        emitProgress('download', 10, `Downloading: ${ytInfo.title}`);
 
         const uploadDir = path.join(DATA_DIR, 'uploads');
         const downloadResult = await downloadYoutube(url, uploadDir, (progress, line) => {
-            if (io) io.emit('youtube:progress', { id, step: 'download', progress: Math.round(progress), message: `Downloading... ${Math.round(progress)}%` });
-        });
+            emitProgress('download', Math.round(10 + progress * 0.75), `Downloading... ${Math.round(progress)}%`);
+        }, io);
 
-        console.log(`[YouTube] Downloaded: ${downloadResult.fileName} (${formatDuration(ytInfo.duration)})`);
-
-        // Step 3: Get video info from downloaded file
-        if (io) io.emit('youtube:progress', { id, step: 'metadata', progress: 90, message: 'Extracting metadata...' });
+        emitProgress('metadata', 90, `Downloaded! Extracting metadata...`);
 
         let videoInfo = { duration: ytInfo.duration, width: ytInfo.width, height: ytInfo.height, fps: ytInfo.fps };
         try {
@@ -611,7 +768,7 @@ router.post('/youtube', async (req, res) => {
         }
 
         // Step 4: Generate thumbnail
-        if (io) io.emit('youtube:progress', { id, step: 'thumbnail', progress: 95, message: 'Generating thumbnail...' });
+        emitProgress('thumbnail', 95, `Creating thumbnail... (${videoInfo.width}x${videoInfo.height})`);
 
         let thumbnailPath = null;
         try {
@@ -648,16 +805,16 @@ router.post('/youtube', async (req, res) => {
         ]);
 
         const project = get('SELECT * FROM projects WHERE id = ?', [id]);
-        if (io) {
-            io.emit('youtube:progress', { id, step: 'done', progress: 100, message: 'Done!' });
-            io.emit('project:created', project);
-        }
+        incrementProjectCount();
+
+        emitProgress('done', 100, `Done! ${videoInfo.width}x${videoInfo.height}`);
+        if (io) io.emit('project:created', project);
 
         console.log(`[YouTube] Project created: ${ytInfo.title}`);
         res.json({ project });
     } catch (err) {
         console.error('[YouTube] Error:', err.message);
-        if (io) io.emit('youtube:progress', { id, step: 'error', progress: 0, message: err.message });
+        emitProgress('error', 0, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -687,6 +844,12 @@ router.post('/clips/:clipId/render', async (req, res) => {
 // POST /api/projects/:id/render-all — Render all selected clips
 router.post('/:id/render-all', async (req, res) => {
     try {
+        // Check batch export permission (Free tier = blocked)
+        const renderLimits = getRenderLimits();
+        if (!renderLimits.batchExportAllowed) {
+            return res.status(403).json({ error: 'Batch export hanya tersedia untuk Pro. Upgrade untuk export semua sekaligus.' });
+        }
+
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
 
@@ -709,6 +872,12 @@ router.post('/:id/render-all', async (req, res) => {
 // POST /api/projects/:id/render-selected — Render only selected clips
 router.post('/:id/render-selected', async (req, res) => {
     try {
+        // Check batch export permission (Free tier = blocked)
+        const renderLimits = getRenderLimits();
+        if (!renderLimits.batchExportAllowed) {
+            return res.status(403).json({ error: 'Batch export hanya tersedia untuk Pro. Export satu-satu di Free tier.' });
+        }
+
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
 
@@ -723,7 +892,10 @@ router.post('/:id/render-selected', async (req, res) => {
         // Render only selected clips sequentially
         (async () => {
             const emit = (progress, message) => {
-                if (io) io.emit('render:progress', { projectId: project.id, progress, message });
+                if (io) {
+                    io.emit('render:progress', { projectId: project.id, progress, message });
+                    io.emit('process:log', { projectId: project.id, type: 'info', message: `[RenderSelected] ${message}`, timestamp: new Date().toTimeString() });
+                }
             };
 
             emit(0, `Starting render of ${clipIds.length} clips...`);
@@ -783,7 +955,7 @@ router.post('/:id/open-folder', (req, res) => {
         if (!project) return res.status(404).json({ error: 'Project not found' });
 
         const { exec } = require('child_process');
-        const clipsDir = path.join(__dirname, '..', '..', 'data', 'clips', project.id);
+        const clipsDir = path.join(DATA_DIR, 'clips', project.id);
 
         // Check if custom output dir is set
         const outputDirSetting = get('SELECT value FROM settings WHERE key = ?', ['output_dir']);
@@ -838,8 +1010,11 @@ router.put('/:id/transcript', (req, res) => {
             }
             if (segment_data !== undefined) {
                 const segStr = typeof segment_data === 'string' ? segment_data : JSON.stringify(segment_data);
-                run(`UPDATE transcripts SET segment_data = ?, updated_at = datetime('now') WHERE project_id = ?`,
+                // Clear word_data when segments are manually edited, so renderer
+                // uses the edited segment text instead of stale word-level timestamps
+                run(`UPDATE transcripts SET segment_data = ?, word_data = '[]', updated_at = datetime('now') WHERE project_id = ?`,
                     [segStr, req.params.id]);
+                console.log(`[Transcript] segment_data updated + word_data cleared for project ${req.params.id}`);
             }
         } else {
             if (!full_text || !full_text.trim()) {
@@ -1115,7 +1290,7 @@ router.post('/:id/captions/import', async (req, res) => {
 
 // POST /api/projects/clear-cache — Clear temp and thumbnail files
 router.post('/clear-cache', (req, res) => {
-    const dataDir = path.join(__dirname, '..', '..', 'data');
+    const dataDir = DATA_DIR;
     let cleared = 0;
     try {
         ['thumbnails', 'temp'].forEach(dir => {
@@ -1130,6 +1305,254 @@ router.post('/clear-cache', (req, res) => {
         });
         res.json({ success: true, cleared, message: `Cleared ${cleared} cached files` });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/clips/:clipId/generate-social — AI-generate social media copy
+router.post('/clips/:clipId/generate-social', async (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        const project = get('SELECT * FROM projects WHERE id = ?', [clip.project_id]);
+        const transcript = get('SELECT * FROM transcripts WHERE project_id = ?', [clip.project_id]);
+
+        // Get clip's transcript portion
+        let clipText = clip.hook_text || clip.title || '';
+        if (transcript) {
+            const parsed = typeof transcript.content === 'string' ? JSON.parse(transcript.content) : transcript.content;
+            const segments = parsed?.segments || [];
+            clipText = segments
+                .filter(s => s.start >= clip.start_time && s.end <= clip.end_time + 2)
+                .map(s => s.text)
+                .join(' ')
+                .trim() || clipText;
+        }
+        // Sanitize: remove control chars that break JSON/template literals
+        clipText = clipText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[`$\\]/g, ' ');
+
+        // Get AI settings
+        const settingsRows = all('SELECT key, value FROM settings');
+        const settings = {};
+        (settingsRows || []).forEach(s => { settings[s.key] = s.value; });
+
+        const { platform, hook_style } = req.body || {};
+        const targetPlatform = platform || project?.platform || 'tiktok';
+        const hookStyle = hook_style || 'drama'; // drama, edukasi, comedy, motivasi, gossip, horror, storytelling, kontroversial, clickbait, aesthetic
+
+        // Few-shot examples per style
+        const hookExamples = {
+            drama: `CONTOH HOOK GAYA DRAMA (pelajari polanya, JANGAN copy):
+- "Dia bilang 'AKU HAMIL'... tapi suaminya udah 3 tahun meninggal 😱"
+- "Ibunya NANGIS di depan rumah... ternyata anaknya yang bikin 💔"
+- "Detik 0:45 dia JATUH dari panggung... reaksi penonton bikin merinding"
+- "Pacarnya selingkuh sama SAHABATNYA sendiri... pas ketemu langsung..."
+- "Dia kerja 15 tahun difitnah korupsi... BUKTI CCTV membuktikan semuanya"`,
+            edukasi: `CONTOH HOOK GAYA EDUKASI (pelajari polanya, JANGAN copy):
+- "Dokter bilang JANGAN makan ini sebelum tidur... 90% orang masih lakuin 🤯"
+- "Ternyata cara cuci muka kita SELAMA INI SALAH... dermatolog jelaskan"
+- "Gaji 5 juta tapi bisa nabung 2 juta? Ini RUMUS-nya yang gak diajarin sekolah"
+- "Kenapa orang Jepang UMUR PANJANG? Rahasianya cuma 3 kebiasaan ini..."
+- "HP kamu DISADAP kalau muncul tanda ini... cek sekarang!"`,
+            comedy: `CONTOH HOOK GAYA COMEDY (pelajari polanya, JANGAN copy):
+- "Bapak gue nyamar jadi OJOL buat ngecek pacar gue 😂💀"
+- "Gue prank istri bilang DIPECAT... reaksinya DILUAR EKSPEKTASI 🤣"
+- "Kucing gue masuk interview kerja... dan DITERIMA?! 😹"
+- "Guru nanya 'siapa presiden pertama?'... jawabannya bikin satu kelas DIAM 💀"
+- "Emak gue review makanan Michelin star... 'mending warteg' 😭"`,
+            motivasi: `CONTOH HOOK GAYA MOTIVASI (pelajari polanya, JANGAN copy):
+- "Dari jualan GORENGAN di pinggir jalan... sekarang punya 15 cabang resto 🔥"
+- "Dulu dibuang keluarga... sekarang yang NGEMIS balik ke dia 💪"
+- "Ditolak 47 perusahaan, tapi perusahaan ke-48 MENGUBAH hidupnya selamanya..."
+- "Dia BUTA dari lahir tapi jadi programmer di Google... cara belajarnya GILA"
+- "IPK 1.9, diragukan semua dosen... 5 tahun kemudian JADI DOSEN di kampus yang sama"`,
+            gossip: `CONTOH HOOK GAYA GOSSIP/VIRAL (pelajari polanya, JANGAN copy):
+- "Tetangga DENGAR suara aneh dari rumah sebelah... pas diintip ternyata 😱"
+- "Chat WA SUAMINYA kepegang istri... isinya bikin langsung GUGAT CERAI"  
+- "Ibu mertua DIAM-DIAM kasih racun ke menantunya... alasannya bikin semua syok"
+- "Karyawan REKAM bosnya lagi... VIDEO-nya sekarang viral 10 juta views"
+- "RT sebelah GEMPAR... ternyata pak ustadz yang selama ini..."`,
+            horror: `CONTOH HOOK GAYA HORROR/MISTERI (pelajari polanya, JANGAN copy):
+- "Jam 3 pagi CCTV rumahnya rekam SOSOK yang berdiri di pojok kamar... 😨"
+- "Dia upload foto selfie... tapi di MIRROR ada wajah ORANG LAIN 👻"
+- "Desa ini KOSONG sejak 1998... warga yang kembali ceritakan hal yang MUSTAHIL"
+- "Suara ketawa anak kecil dari LOTENG... padahal dia tinggal SENDIRI 💀"
+- "Pintu kamar hotelnya TERBUKA sendiri jam 2 pagi... rekaman CCTV-nya viral"`,
+            storytelling: `CONTOH HOOK GAYA STORYTELLING/CERITA (pelajari polanya, JANGAN copy):
+- "Jadi ceritanya, gue ketemu MANTAN di nikahan TEMEN... dan ini yang terjadi 🍿"
+- "2 tahun lalu gue hampir BANGKRUT... ini timeline lengkap bagaimana gue BANGKIT"
+- "Kisah cinta mereka dimulai dari SALAH KIRIM CHAT... sekarang udah punya 2 anak 🥹"
+- "Waktu itu gue cuma punya Rp50.000 di rekening... terus gue lakuin ini..."
+- "Ini kronologinya: hari pertama masuk kerja, bos gue bilang sesuatu yang MENGUBAH hidup gue"`,
+            kontroversial: `CONTOH HOOK GAYA KONTROVERSIAL/DEBAT (pelajari polanya, JANGAN copy):
+- "Maaf tapi FAKTA-nya: sekolah TIDAK menjamin kesuksesan ⚡"
+- "Unpopular opinion: orang yang kerja 12 jam sehari itu BUKAN pekerja keras, tapi..."
+- "Semua bilang dia SALAH... tapi coba lihat dari sudut pandang INI 🤔"
+- "Gue bakal di-CANCEL abis ini... tapi SESEORANG harus bilang yang sebenarnya"
+- "Data menunjukkan 70% orang Indonesia SALAH tentang ini... termasuk kamu?"`,
+            clickbait: `CONTOH HOOK GAYA CLICKBAIT AGRESIF (pelajari polanya, JANGAN copy):
+- "JANGAN skip video ini kalau kamu masih mau HIDUP lama 🚨"
+- "Video ini akan di-DELETE dalam 24 jam... makanya TONTON sekarang"
+- "Ini RAHASIA yang gak mau kamu tau... tapi gue tetap BONGKAR 🔓"
+- "Stop SCROLL! Kamu WAJIB tau ini sebelum terlambat ⚠️"
+- "1 dari 5 orang yang nonton ini akan langsung CEK HP-nya... kamu yang mana?"`,
+            aesthetic: `CONTOH HOOK GAYA AESTHETIC/SOFT (pelajari polanya, JANGAN copy):
+- "sometimes the universe sends you exactly what you need ✨"
+- "pov: kamu akhirnya HEALING setelah 3 tahun 🌿"
+- "this is your sign to start over 🦋"
+- "quiet moments like this > everything else 🌙"
+- "note to self: it's okay to take it slow 🤍"`
+        };
+
+        const styleExamples = hookExamples[hookStyle] || hookExamples.drama;
+
+        const prompt = `You are a viral social media copywriter. You create hooks that are SPECIFIC to the video content — NOT generic.
+
+LANGUAGE RULE: Detect the language of the clip text below, and write ALL output in the SAME language.
+
+CLIP TITLE: "${clip.title}"
+CLIP TEXT (this is the actual transcript — STUDY IT THOROUGHLY, extract names, events, emotions, conflicts):
+"""
+${clipText.substring(0, 3000)}
+"""
+VIRALITY SCORE: ${clip.virality_score || 70}/100
+CONTENT TYPE: ${clip.content_type || 'insight'}
+PLATFORM: ${targetPlatform}
+HOOK STYLE: ${hookStyle.toUpperCase()}
+
+${styleExamples}
+
+CRITICAL HOOK RULES:
+1. STUDY the transcript above. Identify: WHO is involved, WHAT happened, the EMOTIONAL peak, and the TWIST/REVELATION
+2. Each hook MUST use REAL details from the transcript — actual names, events, quotes, or situations
+3. BANNED generic phrases: "Tunggu sampai akhir", "Ini yang gak pernah diberitahu", "Ternyata...", "Yang terjadi selanjutnya..."
+4. Write hooks like the examples above — SHORT, PUNCHY, with specific details that create a CURIOSITY GAP
+5. The viewer must think: "WAIT WHAT? I need to see this!" — hook them with a SPECIFIC detail, then cut off with "..."
+6. Use CAPS for 1-2 key emotional words. Use emoji sparingly (1-2 max per hook)
+7. Each hook MAX 20 words. Each must use a DIFFERENT angle on the same content
+8. Hooks should feel like someone GOSSIPING a crazy story to their friend
+
+Generate social media copy for ALL platforms. Return ONLY a JSON object (no markdown):
+{
+  "tiktok": {
+    "title": "clickbait title that teases the ACTUAL content, under 100 chars, with emoji",
+    "description": "engaging description referencing clip content, 150-300 chars, with CTA",
+    "hashtags": "#relevant #trending #hashtags (8-12)",
+    "hooks": [
+      "hook that teases the BIGGEST revelation/twist using SPECIFIC details from transcript",
+      "hook that references a SPECIFIC moment, person, or quote from the clip",
+      "hook that creates OUTRAGE or SYMPATHY using real details from the clip",
+      "hook that uses the most SHOCKING FACT or DETAIL from the clip",
+      "hook phrased as a PROVOCATIVE QUESTION using specifics from the clip"
+    ],
+    "bestTime": "best posting time and day for this content type",
+    "engagementTip": "specific actionable engagement tip"
+  },
+  "instagram": {
+    "title": "clickbait title referencing actual content",
+    "description": "longer caption with story elements from clip, 200-500 chars, with CTA",
+    "hashtags": "#hashtags (15-20 including niche and broad)",
+    "hooks": ["content-specific hook 1", "hook 2", "hook 3", "hook 4", "hook 5"],
+    "bestTime": "best posting time",
+    "engagementTip": "engagement tip"
+  },
+  "youtube": {
+    "title": "SEO clickbait title with real content keywords, 60-80 chars",
+    "description": "description with content details and CTA, 300-500 chars",
+    "hashtags": "#tags (5-8)",
+    "hooks": ["content-specific hook 1", "hook 2", "hook 3", "hook 4", "hook 5"],
+    "bestTime": "best posting time",
+    "engagementTip": "engagement tip"
+  },
+  "twitter": {
+    "title": "punchy tweet text, max 280 chars, with hook that drives engagement",
+    "description": "follow-up tweet or thread starter, 200-280 chars",
+    "hashtags": "#trending #hashtags (3-5 max for Twitter)",
+    "hooks": ["tweet-hook 1 under 200 chars", "hook 2", "hook 3", "hook 4", "hook 5"],
+    "bestTime": "best posting time",
+    "engagementTip": "engagement tip for Twitter/X"
+  },
+  "facebook": {
+    "title": "attention-grabbing share text that makes people STOP scrolling, 80-120 chars",
+    "description": "longer story-style caption optimized for Facebook feed, 300-600 chars, with emotional hook and CTA to share/comment",
+    "hashtags": "#hashtags (3-5 max, Facebook prefers fewer)",
+    "hooks": ["share-worthy hook 1 that triggers COMMENTS", "hook 2", "hook 3", "hook 4", "hook 5"],
+    "bestTime": "best posting time for Facebook",
+    "engagementTip": "engagement tip optimized for Facebook algorithm (shares, comments, reactions)"
+  }
+}`;
+
+        // Try Groq first, then Gemini
+        let aiResult = null;
+        const primary = settings.ai_provider_primary || 'groq';
+
+        if (primary === 'groq' && settings.groq_api_key) {
+            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'llama-3.3-70b-versatile',
+                            messages: [
+                                { role: 'system', content: 'You are a viral content copywriter. Return ONLY valid JSON. No markdown, no explanation. Write hooks that reference SPECIFIC details from the transcript.' },
+                                { role: 'user', content: prompt }
+                            ],
+                            temperature: 0.85,
+                            max_tokens: 3000
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.choices?.[0]?.message?.content;
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        if (!aiResult && settings.gemini_api_key) {
+            const keys = settings.gemini_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text;
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        if (!aiResult) {
+            return res.status(500).json({ error: 'AI provider not available. Check API keys in Settings.' });
+        }
+
+        // Parse AI response
+        const cleaned = aiResult.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            return res.status(500).json({ error: 'AI returned invalid response' });
+        }
+
+        const socialCopy = JSON.parse(jsonMatch[0]);
+
+        // Save to clip (optional — store last generated copy)
+        run('UPDATE clips SET social_copy = ? WHERE id = ?', [JSON.stringify(socialCopy), req.params.clipId]);
+
+        res.json({ success: true, social: socialCopy });
+    } catch (err) {
+        console.error('[SocialCopy] Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

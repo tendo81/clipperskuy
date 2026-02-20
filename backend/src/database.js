@@ -2,8 +2,9 @@ const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs-extra');
 
-const dbPath = path.join(__dirname, '..', 'data', 'clipperskuy.db');
-fs.ensureDirSync(path.dirname(dbPath));
+const dataDir = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', 'data');
+const dbPath = path.join(dataDir, 'clipperskuy.db');
+fs.ensureDirSync(dataDir);
 
 let db = null;
 
@@ -263,6 +264,16 @@ async function initDatabase() {
     if (!clipColNames2.includes('music_volume')) {
       db.run('ALTER TABLE clips ADD COLUMN music_volume INTEGER DEFAULT 20');
       console.log('[DB] Migration: added music_volume to clips');
+    }
+  } catch (e) { /* ignore */ }
+
+  // Add social_copy column to clips if missing
+  try {
+    const clipCols3 = db.exec("PRAGMA table_info(clips)")[0];
+    const clipColNames3 = clipCols3 ? clipCols3.values.map(r => r[1]) : [];
+    if (!clipColNames3.includes('social_copy')) {
+      db.run('ALTER TABLE clips ADD COLUMN social_copy TEXT');
+      console.log('[DB] Migration: added social_copy to clips');
     }
   } catch (e) { /* ignore */ }
 
