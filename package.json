@@ -1,6 +1,6 @@
 {
     "name": "clipperskuy",
-    "version": "1.1.4",
+    "version": "1.1.5",
     "description": "AI-Powered Video Clip Engine — Auto-detect viral moments from long videos",
     "main": "electron/main.js",
     "author": "ClipperSkuy",
