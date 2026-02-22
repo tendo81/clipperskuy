@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload as UploadIcon, Link2, Film, Smartphone, Crosshair, User, Columns, Maximize, Clock, Sparkles, Globe, Rocket, CheckCircle, Loader, X, FileVideo } from 'lucide-react';
+import { Upload as UploadIcon, Link2, Film, Smartphone, Crosshair, User, Users, Columns, Maximize, Clock, Sparkles, Globe, Rocket, CheckCircle, Loader, X, FileVideo } from 'lucide-react';
 
 const API = 'http://localhost:5000/api';
 
@@ -15,8 +15,10 @@ const platforms = [
 const reframingModes = [
     { id: 'center', label: 'Center Crop', icon: Crosshair, desc: 'Simple center crop' },
     { id: 'face_track', label: 'Face Track', icon: User, desc: 'AI follows speaker' },
+    { id: 'face_track_blur', label: 'Face + Blur', icon: User, desc: 'Face track + blur BG' },
     { id: 'split', label: 'Split Screen', icon: Columns, desc: 'Speaker + content' },
     { id: 'fit', label: 'Fit (Blur)', icon: Maximize, desc: 'Full video + blur BG' },
+    { id: 'podcast', label: 'Podcast', icon: Users, desc: '2 speakers auto-split' },
 ];
 
 const durationModes = [

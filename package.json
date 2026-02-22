@@ -8,7 +8,7 @@
     "private": true,
     "scripts": {
         "dev": "concurrently \"cd backend && node src/server.js\" \"cd frontend && npx vite --port 5173\"",
-        "dev:electron": "concurrently \"cd backend && node src/server.js\" \"cd frontend && npx vite --port 5173\" \"wait-on http://localhost:5173 && set ELECTRON_RUN_AS_NODE= && electron .\"",
+        "dev:electron": "concurrently \"cd backend && node src/server.js\" \"cd frontend && npx vite --port 5173\" \"wait-on http://localhost:5173 && node electron-launcher.js\"",
         "build:frontend": "cd frontend && npx vite build",
         "build": "npm run build:frontend && electron-builder --win",
         "build:portable": "npm run build:frontend && electron-builder --win portable",

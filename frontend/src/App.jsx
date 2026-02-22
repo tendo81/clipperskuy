@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import About from './pages/About';
 import License from './pages/License';
 import Admin from './pages/Admin';
+import AudioLibrary from './pages/AudioLibrary';
 
 const API = 'http://localhost:5000/api';
 
@@ -107,6 +108,7 @@ function App() {
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/projects/:id/clips/:clipId" element={<ClipEditor />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/audio" element={<AudioLibrary />} />
               <Route path="/license" element={<License />} />
               {/* Admin route only available in web browser, NOT in Electron app */}
               {!isElectron && <Route path="/admin" element={<Admin />} />}

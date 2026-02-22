@@ -348,7 +348,7 @@
   - Logo path + position selector
   - Opacity & size controls
   - 5 position options (4 corners + center)
-- [ ] Remove watermark (premium/licensed feature)
+- [x] Remove watermark (premium/licensed feature) ✅ — Pro/Enterprise skip watermark automatically
 
 **✅ Deliverable Phase 5**: Clips di-render sebagai video HD, siap upload ke platform.
 
@@ -447,7 +447,7 @@
 - [ ] Analytics dashboard (views, engagement)
 
 ### v1.2 — Advanced Editing
-- [ ] B-roll auto-insert (stock footage)
+- [x] B-roll search (Pexels stock footage) ✅
 - [ ] Background music library
 - [ ] Sound effects library
 - [ ] Transition effects between scenes
@@ -458,10 +458,10 @@
 - [ ] Cloud sync
 
 ### v1.4 — AI Enhancements
-- [ ] GPT-powered title/description generator
-- [ ] Hashtag suggestions
-- [ ] Trend analysis
-- [ ] A/B thumbnail generator
+- [x] GPT-powered title/description generator ✅
+- [x] Hashtag suggestions ✅
+- [x] Trend analysis ✅
+- [x] A/B thumbnail generator ✅
 
 ### v1.5 — Subtitle & Caption (Completed Features) ✅
 - [x] 10 caption style presets with per-style font, color, outline, highlight
@@ -472,6 +472,15 @@
 - [x] Font fallback system (Montserrat, Arial, Impact, Georgia)
 - [x] Re-transcribe endpoint for improving subtitle sync on old projects
 - [x] Thicker outline (6px) and shadow (3px) for bold caption styles
+- [x] 4 NEW box-style captions: raymond, clean_box, neon_box, pastel_box
+- [x] BorderStyle:3 (opaque box) support in ASS subtitle generation
+- [x] Per-style highlightScale for dramatic word sizing (raymond=160%)
+- [x] Social Caption Generator (per-platform hooks, titles, descriptions, hashtags)
+- [x] Thumbnail Generator (6 strategic frames extracted from clip)
+- [x] A/B Thumbnail viewer with download support
+- [x] Trend Analysis (AI-powered viral potential, predicted views, suggestions)
+- [x] B-Roll Stock Footage Search (Pexels API integration)
+- [x] Pexels API key field in Settings page
 
 ---
 

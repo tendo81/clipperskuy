@@ -462,7 +462,7 @@ router.put('/clips/:clipId', (req, res) => {
         const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
         if (!clip) return res.status(404).json({ error: 'Clip not found' });
 
-        const { start_time, end_time, duration, title, caption_style, caption_settings, music_track_id, music_volume } = req.body;
+        const { start_time, end_time, duration, title, caption_style, caption_settings, music_track_id, music_volume, hook_text, hook_settings } = req.body;
 
         if (start_time !== undefined) {
             run('UPDATE clips SET start_time = ? WHERE id = ?', [start_time, req.params.clipId]);
@@ -491,10 +491,37 @@ router.put('/clips/:clipId', (req, res) => {
         if (music_volume !== undefined) {
             run('UPDATE clips SET music_volume = ? WHERE id = ?', [music_volume, req.params.clipId]);
         }
+        if (hook_text !== undefined) {
+            run('UPDATE clips SET hook_text = ? WHERE id = ?', [hook_text, req.params.clipId]);
+        }
+        if (hook_settings !== undefined) {
+            run('UPDATE clips SET hook_settings = ? WHERE id = ?', [
+                typeof hook_settings === 'string' ? hook_settings : JSON.stringify(hook_settings),
+                req.params.clipId
+            ]);
+        }
 
         // If times changed, reset render status (clip needs re-render)
         if (start_time !== undefined || end_time !== undefined) {
             run("UPDATE clips SET status = 'detected', output_path = NULL WHERE id = ?", [req.params.clipId]);
+        }
+
+        const updated = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        res.json({ clip: updated });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/clips/:clipId/reset-render — Reset stuck rendering status
+router.post('/clips/:clipId/reset-render', (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        if (clip.status === 'rendering') {
+            run("UPDATE clips SET status = 'detected', output_path = NULL WHERE id = ?", [req.params.clipId]);
+            console.log(`[Render] Reset stuck clip ${req.params.clipId} from rendering -> detected`);
         }
 
         const updated = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
@@ -521,6 +548,30 @@ router.put('/:id/clips/bulk-style', (req, res) => {
         }
 
         res.json({ message: `Caption style "${caption_style}" applied to ${updated} clips`, updated });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PUT /api/projects/:id/clips/bulk-hook — Set hook title settings for multiple clips
+router.put('/:id/clips/bulk-hook', (req, res) => {
+    try {
+        const { clipIds, hook_settings } = req.body;
+
+        const ids = clipIds && clipIds.length > 0
+            ? clipIds
+            : all('SELECT id FROM clips WHERE project_id = ?', [req.params.id]).map(c => c.id);
+
+        const settingsStr = hook_settings ? (typeof hook_settings === 'string' ? hook_settings : JSON.stringify(hook_settings)) : null;
+
+        let updated = 0;
+        for (const cid of ids) {
+            run('UPDATE clips SET hook_settings = ? WHERE id = ?', [settingsStr, cid]);
+            updated++;
+        }
+
+        const action = hook_settings ? 'applied' : 'removed';
+        res.json({ message: `Hook settings ${action} for ${updated} clips`, updated });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1545,7 +1596,22 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
             return res.status(500).json({ error: 'AI returned invalid response' });
         }
 
-        const socialCopy = JSON.parse(jsonMatch[0]);
+        // Smart sanitize: only escape newlines inside JSON string values
+        const raw = jsonMatch[0].replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+        let sanitized = '';
+        let inStr = false;
+        let esc = false;
+        for (let i = 0; i < raw.length; i++) {
+            const c = raw[i];
+            if (esc) { sanitized += c; esc = false; continue; }
+            if (c === '\\' && inStr) { sanitized += c; esc = true; continue; }
+            if (c === '"') { inStr = !inStr; sanitized += c; continue; }
+            if (inStr && c === '\n') { sanitized += '\\n'; continue; }
+            if (inStr && c === '\r') { continue; }
+            if (inStr && c === '\t') { sanitized += ' '; continue; }
+            sanitized += c;
+        }
+        const socialCopy = JSON.parse(sanitized);
 
         // Save to clip (optional — store last generated copy)
         run('UPDATE clips SET social_copy = ? WHERE id = ?', [JSON.stringify(socialCopy), req.params.clipId]);
@@ -1553,6 +1619,299 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
         res.json({ success: true, social: socialCopy });
     } catch (err) {
         console.error('[SocialCopy] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========================================
+// Thumbnail Generator — Extract best frames
+// ========================================
+router.post('/clips/:clipId/thumbnails', async (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        const project = get('SELECT * FROM projects WHERE id = ?', [clip.project_id]);
+        if (!project || !project.source_path) return res.status(404).json({ error: 'Project video not found' });
+
+        const fs = require('fs-extra');
+        const { execSync } = require('child_process');
+
+        if (!fs.existsSync(project.source_path)) {
+            return res.status(404).json({ error: 'Source video file not found on disk' });
+        }
+
+        const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
+        const thumbDir = path.join(DATA_DIR, 'thumbnails', clip.id);
+        fs.ensureDirSync(thumbDir);
+
+        const clipDuration = (clip.end_time || 0) - (clip.start_time || 0);
+        if (clipDuration <= 0) return res.status(400).json({ error: 'Invalid clip duration' });
+
+        // Pick 6 strategic timestamps
+        const timestamps = [
+            { t: clip.start_time + 0.5, label: 'Opening' },
+            { t: clip.start_time + Math.min(3, clipDuration * 0.1), label: 'Hook' },
+            { t: clip.start_time + clipDuration * 0.25, label: '25%' },
+            { t: clip.start_time + clipDuration * 0.5, label: 'Middle' },
+            { t: clip.start_time + clipDuration * 0.75, label: '75%' },
+            { t: clip.end_time - 1, label: 'Ending' },
+        ];
+
+        const thumbnails = [];
+        for (let i = 0; i < timestamps.length; i++) {
+            const { t, label } = timestamps[i];
+            const outFile = path.join(thumbDir, `thumb_${i + 1}.jpg`);
+            try {
+                execSync(
+                    `ffmpeg -y -ss ${t.toFixed(2)} -i "${project.source_path}" -vframes 1 -q:v 2 "${outFile}"`,
+                    { timeout: 10000, stdio: 'ignore' }
+                );
+                if (fs.existsSync(outFile)) {
+                    thumbnails.push({
+                        url: `http://localhost:5000/api/projects/clips/${clip.id}/thumbnail/${i + 1}`,
+                        label,
+                        index: i + 1
+                    });
+                }
+            } catch (e) {
+                console.warn(`[Thumbnail] Frame ${i + 1} failed:`, e.message);
+            }
+        }
+
+        res.json({ success: true, thumbnails });
+    } catch (err) {
+        console.error('[Thumbnail] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Serve individual thumbnail images
+router.get('/clips/:clipId/thumbnail/:index', (req, res) => {
+    const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
+    const thumbPath = path.join(DATA_DIR, 'thumbnails', req.params.clipId, `thumb_${req.params.index}.jpg`);
+    const fs = require('fs-extra');
+    if (fs.existsSync(thumbPath)) {
+        res.sendFile(thumbPath);
+    } else {
+        res.status(404).json({ error: 'Thumbnail not found' });
+    }
+});
+
+// ========================================
+// Trend Analysis — AI analyzes trending potential
+// ========================================
+router.post('/clips/:clipId/trend-analysis', async (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        const project = get('SELECT * FROM projects WHERE id = ?', [clip.project_id]);
+        const transcript = get('SELECT * FROM transcripts WHERE project_id = ?', [clip.project_id]);
+
+        let clipText = clip.title || '';
+        if (transcript && transcript.full_text) {
+            const segments = JSON.parse(transcript.segment_data || '[]');
+            clipText = segments
+                .filter(s => s.start >= clip.start_time && s.end <= clip.end_time + 2)
+                .map(s => s.text)
+                .join(' ')
+                .trim() || clipText;
+        }
+        clipText = clipText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[`$\\]/g, ' ');
+
+        const settingsRows = all('SELECT key, value FROM settings');
+        const settings = {};
+        (settingsRows || []).forEach(s => { settings[s.key] = s.value; });
+
+        const prompt = `You are a viral content analyst. Analyze this clip's trending potential.
+
+CLIP TITLE: "${clip.title}"
+CONTENT TYPE: ${clip.content_type || 'general'}
+VIRALITY SCORE: ${clip.virality_score || 0}/100
+PLATFORM: ${project?.platform || 'tiktok'}
+TRANSCRIPT:
+"""
+${clipText.substring(0, 3000)}
+"""
+
+Analyze and return ONLY valid JSON (no markdown):
+{
+  "trendScore": 85,
+  "trendingTopics": ["topic1", "topic2", "topic3"],
+  "contentStrengths": ["strength1", "strength2", "strength3"],
+  "contentWeaknesses": ["weakness1", "weakness2"],
+  "improvementSuggestions": ["suggestion1", "suggestion2", "suggestion3"],
+  "predictedViews": { "low": 1000, "mid": 5000, "high": 25000 },
+  "bestPlatform": "tiktok",
+  "targetAudience": "description of ideal audience",
+  "competitorInsight": "what top creators do differently with similar content",
+  "viralPotential": "high/medium/low with specific reasoning",
+  "suggestedSeries": "how to turn this into a content series",
+  "soundTrend": "trending audio/sound recommendation if applicable"
+}`;
+
+        let aiResult = null;
+        const primary = settings.ai_provider_primary || 'groq';
+
+        if (primary === 'groq' && settings.groq_api_key) {
+            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'llama-3.3-70b-versatile',
+                            messages: [
+                                { role: 'system', content: 'You are a viral content analyst. Return ONLY valid JSON.' },
+                                { role: 'user', content: prompt }
+                            ],
+                            temperature: 0.7, max_tokens: 2000
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.choices?.[0]?.message?.content;
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        if (!aiResult && settings.gemini_api_key) {
+            const keys = settings.gemini_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { temperature: 0.5, maxOutputTokens: 2048 }
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text;
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        if (!aiResult) {
+            return res.status(500).json({ error: 'AI provider not available' });
+        }
+
+        // Parse with sanitization
+        const cleaned = aiResult.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) return res.status(500).json({ error: 'AI returned invalid response' });
+
+        const raw = jsonMatch[0].replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+        let sanitized = '';
+        let inStr = false, esc2 = false;
+        for (let i = 0; i < raw.length; i++) {
+            const c = raw[i];
+            if (esc2) { sanitized += c; esc2 = false; continue; }
+            if (c === '\\' && inStr) { sanitized += c; esc2 = true; continue; }
+            if (c === '"') { inStr = !inStr; sanitized += c; continue; }
+            if (inStr && c === '\n') { sanitized += '\\n'; continue; }
+            if (inStr && c === '\r') continue;
+            if (inStr && c === '\t') { sanitized += ' '; continue; }
+            sanitized += c;
+        }
+
+        const analysis = JSON.parse(sanitized);
+        res.json({ success: true, analysis });
+    } catch (err) {
+        console.error('[TrendAnalysis] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========================================
+// B-Roll Search — Find stock footage from Pexels
+// ========================================
+router.post('/clips/:clipId/broll-search', async (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        const settingsRows = all('SELECT key, value FROM settings');
+        const settings = {};
+        (settingsRows || []).forEach(s => { settings[s.key] = s.value; });
+
+        const pexelsKeysRaw = settings.pexels_api_key || req.body.pexels_key || '';
+        const pexelsKeys = pexelsKeysRaw.split(',').map(k => k.trim()).filter(k => k);
+        const keywords = req.body.keywords || clip.title || '';
+        const orientation = req.body.orientation || 'portrait'; // portrait for 9:16
+
+        if (pexelsKeys.length === 0) {
+            return res.status(400).json({
+                error: 'Pexels API key required. Get free key at pexels.com/api and add it in Settings.',
+                needsKey: true
+            });
+        }
+
+        // Search Pexels for relevant videos — try each key until one works
+        const query = encodeURIComponent(keywords.substring(0, 100));
+        const pexelsUrl = `https://api.pexels.com/videos/search?query=${query}&per_page=12&orientation=${orientation}`;
+
+        let lastError = null;
+        let data = null;
+
+        for (const pexelsKey of pexelsKeys) {
+            try {
+                const resp = await fetch(pexelsUrl, {
+                    headers: { 'Authorization': pexelsKey }
+                });
+
+                if (resp.status === 429) {
+                    console.log(`[BRoll] Pexels key ${pexelsKey.substring(0, 8)}... rate limited, trying next...`);
+                    lastError = 'Rate limited';
+                    continue; // try next key
+                }
+
+                if (!resp.ok) {
+                    lastError = `Pexels API error: ${resp.statusText}`;
+                    continue;
+                }
+
+                data = await resp.json();
+                break; // success, stop trying
+            } catch (err) {
+                lastError = err.message;
+                continue;
+            }
+        }
+
+        if (!data) {
+            return res.status(429).json({ error: `All ${pexelsKeys.length} Pexels key(s) failed. ${lastError}` });
+        }
+
+        const videos = (data.videos || []).map(v => {
+            // Get best quality file (HD or SD)
+            const hdFile = v.video_files?.find(f => f.quality === 'hd' && f.width >= 720);
+            const sdFile = v.video_files?.find(f => f.quality === 'sd');
+            const file = hdFile || sdFile || v.video_files?.[0];
+            return {
+                id: v.id,
+                url: v.url,
+                image: v.image,
+                duration: v.duration,
+                width: file?.width || 0,
+                height: file?.height || 0,
+                downloadUrl: file?.link || '',
+                user: v.user?.name || 'Unknown',
+                userUrl: v.user?.url || ''
+            };
+        });
+
+        res.json({ success: true, videos, total: data.total_results || 0, query: keywords });
+    } catch (err) {
+        console.error('[BRoll] Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

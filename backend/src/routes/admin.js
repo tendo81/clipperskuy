@@ -177,6 +177,10 @@ router.put('/licenses/:id/revoke', (req, res) => {
         run(`UPDATE license_keys SET status = 'revoked', revoked_at = datetime('now') WHERE id = ?`,
             [req.params.id]);
 
+        // Audit log
+        run(`INSERT INTO admin_audit_log (action, license_key_id, machine_id, details) VALUES (?, ?, ?, ?)`,
+            ['admin_revoke', key.id, key.machine_id, JSON.stringify({ key: key.license_key, previous_status: key.status })]);
+
         res.json({ message: `Key ${key.license_key} revoked`, key: { ...key, status: 'revoked' } });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -191,6 +195,10 @@ router.put('/licenses/:id/activate', (req, res) => {
 
         run(`UPDATE license_keys SET status = 'active', revoked_at = NULL WHERE id = ?`,
             [req.params.id]);
+
+        // Audit log
+        run(`INSERT INTO admin_audit_log (action, license_key_id, machine_id, details) VALUES (?, ?, ?, ?)`,
+            ['reactivate', key.id, key.machine_id, JSON.stringify({ key: key.license_key, previous_status: key.status })]);
 
         res.json({ message: `Key ${key.license_key} re-activated`, key: { ...key, status: 'active' } });
     } catch (err) {
@@ -208,8 +216,12 @@ router.put('/licenses/:id/reset', (req, res) => {
         run('DELETE FROM license_activations WHERE license_key_id = ?', [key.id]);
 
         // Reset machine binding and status
-        run(`UPDATE license_keys SET machine_id = NULL, activated_at = NULL, activated_by = NULL, status = 'active', activation_count = 0 WHERE id = ?`,
+        run(`UPDATE license_keys SET machine_id = NULL, activated_at = NULL, activated_by = NULL, status = 'active' WHERE id = ?`,
             [key.id]);
+
+        // Audit log
+        run(`INSERT INTO admin_audit_log (action, license_key_id, machine_id, details) VALUES (?, ?, ?, ?)`,
+            ['admin_unbind', key.id, key.machine_id, JSON.stringify({ key: key.license_key, unbound_machine: key.machine_id })]);
 
         res.json({
             message: `Aktivasi key ${key.license_key} direset. Key bisa dipakai di perangkat baru.`,
@@ -229,10 +241,15 @@ router.put('/licenses/:id/mark-used', (req, res) => {
         const now = new Date().toISOString();
         const { machine_name } = req.body || {};
 
-        run(`UPDATE license_keys SET status = 'used', activated_at = ?, activated_by = ?, activation_count = max_activations WHERE id = ?`,
+        run(`UPDATE license_keys SET status = 'used', activated_at = ?, activated_by = ? WHERE id = ?`,
             [now, machine_name || 'Manual (remote)', req.params.id]);
 
         const updated = get('SELECT * FROM license_keys WHERE id = ?', [req.params.id]);
+
+        // Audit log
+        run(`INSERT INTO admin_audit_log (action, license_key_id, details) VALUES (?, ?, ?)`,
+            ['mark_used', key.id, JSON.stringify({ key: key.license_key })]);
+
         res.json({
             message: `Key ${key.license_key} ditandai sudah digunakan`,
             key: updated
@@ -249,6 +266,10 @@ router.delete('/licenses/:id', (req, res) => {
         if (!key) return res.status(404).json({ error: 'License key not found' });
 
         run('DELETE FROM license_keys WHERE id = ?', [req.params.id]);
+
+        // Audit log
+        run(`INSERT INTO admin_audit_log (action, license_key_id, machine_id, details) VALUES (?, ?, ?, ?)`,
+            ['delete', key.id, key.machine_id, JSON.stringify({ key: key.license_key, tier: key.tier })]);
 
         res.json({ message: `Key ${key.license_key} deleted` });
     } catch (err) {
@@ -347,6 +368,50 @@ router.get('/stats', (req, res) => {
             licenses: { total: totalKeys, active: activeKeys, used: usedKeys, revoked: revokedKeys, expired: expiredKeys, lifetime: lifetimeKeys },
             tiers: { pro: proKeys, enterprise: enterpriseKeys },
             projects: totalProjects
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ===== GET /api/admin/logs — Audit log =====
+router.get('/logs', (req, res) => {
+    try {
+        const { action, limit = 100 } = req.query;
+        const maxLimit = Math.min(parseInt(limit) || 100, 500);
+
+        let logs;
+        if (action) {
+            logs = all(
+                `SELECT al.*, lk.license_key, lk.tier 
+                 FROM admin_audit_log al 
+                 LEFT JOIN license_keys lk ON al.license_key_id = lk.id 
+                 WHERE al.action = ? 
+                 ORDER BY al.created_at DESC LIMIT ?`,
+                [action, maxLimit]
+            );
+        } else {
+            logs = all(
+                `SELECT al.*, lk.license_key, lk.tier 
+                 FROM admin_audit_log al 
+                 LEFT JOIN license_keys lk ON al.license_key_id = lk.id 
+                 ORDER BY al.created_at DESC LIMIT ?`,
+                [maxLimit]
+            );
+        }
+
+        res.json({
+            count: (logs || []).length,
+            logs: (logs || []).map(log => ({
+                id: log.id,
+                action: log.action,
+                licenseKey: log.license_key || null,
+                tier: log.tier || null,
+                machineId: log.machine_id || null,
+                ipAddress: log.ip_address || null,
+                details: log.details ? (() => { try { return JSON.parse(log.details); } catch { return log.details; } })() : null,
+                createdAt: log.created_at
+            }))
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

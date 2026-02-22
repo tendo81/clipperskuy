@@ -1,0 +1,12 @@
+{
+    "name": "clipperskuy-license-server",
+    "version": "1.0.0",
+    "description": "ClipperSkuy Online License Server — Vercel + Supabase",
+    "private": true,
+    "engines": {
+        "node": ">=18"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.49.0"
+    }
+}

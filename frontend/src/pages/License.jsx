@@ -232,9 +232,14 @@ export default function License() {
                             }}
                         />
                         {isLicensed ? (
-                            <button className="btn btn-secondary" onClick={handleDeactivate} style={{ whiteSpace: 'nowrap' }}>
-                                Deactivate
-                            </button>
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '8px 16px', borderRadius: 8,
+                                background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)',
+                                color: '#22c55e', fontSize: 12, whiteSpace: 'nowrap', fontWeight: 600
+                            }}>
+                                🔒 Terikat
+                            </div>
                         ) : (
                             <button
                                 className="btn btn-primary"
@@ -262,7 +267,7 @@ export default function License() {
                                 const expDate = new Date(licenseData.expiresAt).toLocaleDateString();
                                 const color = days <= 7 ? '#ef4444' : days <= 30 ? '#f59e0b' : '#22c55e';
                                 return (
-                                    <p style={{ fontSize: 12, color, display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}>
+                                    <p style={{ fontSize: 12, color, display: 'flex', alignItems: 'center', gap: 4, margin: '0 0 6px' }}>
                                         {days <= 7 ? <AlertTriangle size={12} /> : <Clock size={12} />}
                                         {days <= 0
                                             ? `License expired on ${expDate}`
@@ -271,10 +276,19 @@ export default function License() {
                                     </p>
                                 );
                             })() : (
-                                <p style={{ fontSize: 12, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}>
+                                <p style={{ fontSize: 12, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4, margin: '0 0 6px' }}>
                                     ♾️ Lifetime license — never expires
                                 </p>
                             )}
+                            {/* Machine Binding Info */}
+                            <div style={{
+                                marginTop: 8, padding: '8px 12px', borderRadius: 6,
+                                background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                                fontSize: 11, color: 'rgba(255,255,255,0.4)'
+                            }}>
+                                🔒 License ini terikat permanen ke perangkat ini (Machine ID: <code style={{ color: 'rgba(255,255,255,0.6)' }}>{licenseData?.machineId?.substring(0, 12)}...</code>).
+                                <br />Perlu pindah? Hubungi admin untuk unbind.
+                            </div>
                         </div>
                     )}
                 </div>

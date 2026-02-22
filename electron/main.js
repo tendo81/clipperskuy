@@ -1,4 +1,7 @@
 // ClipperSkuy — Electron Main Process
+// IMPORTANT: concurrently sets ELECTRON_RUN_AS_NODE=1 which breaks Electron modules
+// Must delete BEFORE require('electron')
+delete process.env.ELECTRON_RUN_AS_NODE;
 console.log('[ClipperSkuy] Loading main process...');
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain, shell, nativeImage, Notification } = require('electron');
 console.log('[ClipperSkuy] Electron modules loaded, app exists:', !!app);
@@ -319,12 +322,16 @@ function startBackend() {
                 process.env.FFMPEG_PATH = path.join(rp, 'ffmpeg.exe');
                 process.env.FFPROBE_PATH = path.join(rp, 'ffprobe.exe');
                 process.env.YTDLP_PATH = path.join(rp, 'yt-dlp.exe');
-                process.env.CLIPPERSKUY_DATA = path.join(userDataPath, 'data');
                 // Add bundled deno to PATH
                 const denoDir = path.join(rp, 'deno');
                 if (fs.existsSync(denoDir)) {
                     process.env.PATH = `${denoDir};${process.env.PATH}`;
                 }
+            }
+
+            // Always set data directory to AppData (both dev & production)
+            if (!process.env.CLIPPERSKUY_DATA) {
+                process.env.CLIPPERSKUY_DATA = path.join(userDataPath, 'data');
             }
 
             // Also check user's deno installation

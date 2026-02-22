@@ -180,6 +180,31 @@ async function initDatabase() {
     )
   `);
 
+  // Track license transfers (deactivation → reactivation on different machine)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS license_transfers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      license_key TEXT NOT NULL,
+      from_machine_id TEXT,
+      to_machine_id TEXT,
+      action TEXT NOT NULL,
+      transferred_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Admin audit log — tracks all admin actions
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      license_key_id TEXT,
+      machine_id TEXT,
+      ip_address TEXT,
+      details TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Music library
   db.run(`
     CREATE TABLE IF NOT EXISTS music_tracks (
@@ -240,6 +265,14 @@ async function initDatabase() {
       db.run('ALTER TABLE license_keys ADD COLUMN max_activations INTEGER DEFAULT 1');
       console.log('[DB] Migration: added max_activations to license_keys');
     }
+    if (!lkColNames.includes('deactivation_count')) {
+      db.run('ALTER TABLE license_keys ADD COLUMN deactivation_count INTEGER DEFAULT 0');
+      console.log('[DB] Migration: added deactivation_count to license_keys');
+    }
+    if (!lkColNames.includes('max_transfers')) {
+      db.run('ALTER TABLE license_keys ADD COLUMN max_transfers INTEGER DEFAULT 2');
+      console.log('[DB] Migration: added max_transfers to license_keys');
+    }
   } catch (e) { /* table may not exist yet */ }
 
   // Add caption_settings column if missing
@@ -274,6 +307,10 @@ async function initDatabase() {
     if (!clipColNames3.includes('social_copy')) {
       db.run('ALTER TABLE clips ADD COLUMN social_copy TEXT');
       console.log('[DB] Migration: added social_copy to clips');
+    }
+    if (!clipColNames3.includes('hook_settings')) {
+      db.run("ALTER TABLE clips ADD COLUMN hook_settings TEXT");
+      console.log('[DB] Migration: added hook_settings to clips');
     }
   } catch (e) { /* ignore */ }
 

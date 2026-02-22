@@ -6,6 +6,12 @@
 const { get, run, all } = require('../database');
 const crypto = require('crypto');
 const os = require('os');
+const http = require('http');
+const https = require('https');
+
+// Online license server URL (set in .env)
+const LICENSE_SERVER_URL = process.env.LICENSE_SERVER_URL || '';
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 
 const TRIAL_DAYS = 14;
 const MAX_FREE_PROJECTS = 3;
@@ -282,9 +288,10 @@ function verifyKeySignature(key) {
         duration_days: durationDays || 0
     };
 }
-
 /**
- * Activate a license key (with multi-activation support)
+ * Activate a license key
+ * Transfer protection is enforced by the ONLINE server (single source of truth).
+ * Local DB is only used for offline fallback validation.
  */
 function activateLicense(key) {
     const validation = validateLicenseKey(key);
@@ -293,10 +300,9 @@ function activateLicense(key) {
     const machineId = getMachineId();
     const now = new Date().toISOString();
 
-    // Check max activations limit — if key not in local DB, insert it first
+    // Track in local DB for offline reference
     let dbKey = get('SELECT * FROM license_keys WHERE license_key = ?', [key.toUpperCase()]);
 
-    // Key validated via signature but not in local DB — insert it so we can track activations
     if (!dbKey && validation.source === 'signature') {
         const keyId = require('crypto').randomUUID();
         const durationDays = validation.duration_days || 0;
@@ -311,32 +317,15 @@ function activateLicense(key) {
     }
 
     if (dbKey) {
-        const maxAct = dbKey.max_activations || 1;
-        const currentCount = get('SELECT COUNT(*) as count FROM license_activations WHERE license_key_id = ?', [dbKey.id])?.count || 0;
+        // Record activation locally
+        run('INSERT OR IGNORE INTO license_activations (license_key_id, machine_id, activated_at) VALUES (?, ?, ?)',
+            [dbKey.id, machineId, now]);
 
-        // Check if this machine is already activated
-        const alreadyActivated = get('SELECT * FROM license_activations WHERE license_key_id = ? AND machine_id = ?', [dbKey.id, machineId]);
-
-        if (!alreadyActivated && currentCount >= maxAct) {
-            return {
-                valid: false,
-                reason: `License key sudah dipakai di ${currentCount}/${maxAct} perangkat. Batas aktivasi tercapai.`
-            };
-        }
-
-        // Record activation
-        if (!alreadyActivated) {
-            run('INSERT OR IGNORE INTO license_activations (license_key_id, machine_id, activated_at) VALUES (?, ?, ?)',
-                [dbKey.id, machineId, now]);
-        }
-
-        // Update the license_keys record
-        const newStatus = (currentCount + (alreadyActivated ? 0 : 1)) >= maxAct ? 'used' : 'active';
-        run(`UPDATE license_keys SET machine_id = ?, activated_at = ?, activated_by = ?, status = ? WHERE license_key = ?`,
-            [machineId, now, require('os').hostname(), newStatus, key.toUpperCase()]);
+        run(`UPDATE license_keys SET machine_id = ?, activated_at = ?, activated_by = ?, status = 'active' WHERE license_key = ?`,
+            [machineId, now, require('os').hostname(), key.toUpperCase()]);
     }
 
-    // Calculate expiry from ACTIVATION date (not key creation date)
+    // Calculate expiry from ACTIVATION date
     let expiresAt = null;
     const durationDays = validation.duration_days || 0;
     if (durationDays > 0) {
@@ -362,6 +351,9 @@ function activateLicense(key) {
     run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
         ['license_duration_days', String(durationDays)]);
 
+    // Sync to online server — server enforces transfer limits, cooldown, max activations
+    syncActivationOnline(key.toUpperCase(), machineId);
+
     return {
         valid: true,
         tier: validation.tier,
@@ -374,14 +366,14 @@ function activateLicense(key) {
 }
 
 /**
- * Deactivate a license
+ * Deactivate a license — BLOCKED for users.
+ * 1 License = 1 Machine ID. Only admin can unbind.
  */
 function deactivateLicense() {
-    ['license_key', 'license_tier', 'license_activated_at', 'license_machine_id', 'license_expires_at', 'license_duration_days']
-        .forEach(k => {
-            run('DELETE FROM settings WHERE key = ?', [k]);
-        });
-    return { success: true };
+    return {
+        success: false,
+        message: 'License tidak bisa di-deactivate sendiri. 1 license = 1 perangkat (terikat ke Machine ID). Hubungi admin jika perlu pindah ke perangkat lain.'
+    };
 }
 
 /**
@@ -456,6 +448,141 @@ function getRenderLimits() {
     };
 }
 
+// ============================================================
+// Online License Server Sync
+// ============================================================
+
+/**
+ * Send request to online license server (fire-and-forget for sync, await for critical)
+ */
+function serverRequest(path, method = 'POST', body = null, isAdmin = false) {
+    if (!LICENSE_SERVER_URL) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+        try {
+            const url = new URL('/api/' + path, LICENSE_SERVER_URL);
+            const isHttps = url.protocol === 'https:';
+            const lib = isHttps ? https : http;
+
+            const headers = { 'Content-Type': 'application/json' };
+            if (isAdmin && ADMIN_API_KEY) headers['x-admin-key'] = ADMIN_API_KEY;
+
+            const req = lib.request({
+                hostname: url.hostname,
+                port: url.port || (isHttps ? 443 : 80),
+                path: url.pathname + url.search,
+                method,
+                headers,
+                timeout: 10000
+            }, (res) => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => {
+                    try { resolve(JSON.parse(data)); }
+                    catch { resolve(null); }
+                });
+            });
+
+            req.on('error', (err) => {
+                console.warn(`[License] Online sync failed (${path}): ${err.message}`);
+                resolve(null);
+            });
+            req.on('timeout', () => { req.destroy(); resolve(null); });
+
+            if (body) req.write(JSON.stringify(body));
+            req.end();
+        } catch (err) {
+            console.warn(`[License] Online sync error: ${err.message}`);
+            resolve(null);
+        }
+    });
+}
+
+/**
+ * Sync activation to online server (background, non-blocking)
+ */
+function syncActivationOnline(key, machineId) {
+    if (!LICENSE_SERVER_URL) return;
+    serverRequest('activate', 'POST', {
+        key,
+        machine_id: machineId,
+        machine_name: os.hostname(),
+        app_version: require('../../package.json').version || '1.0.0'
+    }).then(result => {
+        if (result) {
+            console.log(`[License] Online sync: activation reported for ${key.substring(0, 9)}...`);
+        }
+    }).catch(() => { });
+}
+
+/**
+ * Sync deactivation to online server (background)
+ */
+function syncDeactivationOnline(key, machineId) {
+    if (!LICENSE_SERVER_URL) return;
+    serverRequest('deactivate', 'POST', {
+        key,
+        machine_id: machineId
+    }).then(result => {
+        if (result) {
+            console.log(`[License] Online sync: deactivation reported`);
+        }
+    }).catch(() => { });
+}
+
+/**
+ * Validate license against online server (heartbeat)
+ * Called periodically to check for revocation / expiry updates
+ * @returns {object|null} server response or null if offline
+ */
+async function validateOnline() {
+    if (!LICENSE_SERVER_URL) return null;
+
+    const licenseKey = get('SELECT value FROM settings WHERE key = ?', ['license_key']);
+    if (!licenseKey?.value) return null;
+
+    const machineId = getMachineId();
+    const result = await serverRequest('validate', 'POST', {
+        key: licenseKey.value,
+        machine_id: machineId
+    });
+
+    if (!result) {
+        console.log('[License] Online validation: server unreachable (offline mode)');
+        return null;
+    }
+
+    if (result.valid === false) {
+        // Key revoked or expired on server — deactivate locally
+        if (result.revoked || result.expired) {
+            console.warn(`[License] Online: key ${result.revoked ? 'REVOKED' : 'EXPIRED'} — deactivating locally`);
+            deactivateLicense();
+            return { valid: false, reason: result.reason };
+        }
+    }
+
+    if (result.valid === true) {
+        console.log(`[License] Online validation: OK (${result.tier}, ${result.daysRemaining === -1 ? 'lifetime' : result.daysRemaining + 'd remaining'})`);
+    }
+
+    return result;
+}
+
+/**
+ * Start periodic online validation (every 6 hours)
+ */
+let heartbeatInterval = null;
+function startHeartbeat() {
+    if (!LICENSE_SERVER_URL || heartbeatInterval) return;
+
+    // Initial check after 30 seconds
+    setTimeout(() => validateOnline(), 30000);
+
+    // Then every 6 hours
+    heartbeatInterval = setInterval(() => validateOnline(), 6 * 60 * 60 * 1000);
+    console.log('[License] Heartbeat started (every 6 hours)');
+}
+
 module.exports = {
     getMachineId,
     getTrialInfo,
@@ -467,5 +594,8 @@ module.exports = {
     canCreateProject,
     incrementProjectCount,
     getRenderLimits,
+    validateOnline,
+    startHeartbeat,
+    serverRequest,
     TIER_LIMITS
 };

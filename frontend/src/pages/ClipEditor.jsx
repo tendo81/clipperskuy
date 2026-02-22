@@ -10,7 +10,7 @@ import {
     Zap, Trophy, Hash, MessageCircle, ThumbsUp, Lightbulb, Share2,
     Settings, Film, Eye, Type, Check, Monitor, Smartphone, Tablet,
     Subtitles, SlidersHorizontal, ChevronDown, ChevronUp, Palette,
-    GitBranch, GitMerge
+    GitBranch, GitMerge, TrendingUp, BarChart2, Search
 } from 'lucide-react';
 
 const FONT_OPTIONS = [
@@ -87,6 +87,26 @@ const CAPTION_STYLES = [
         id: 'tiktok_og', name: 'TikTok OG', emoji: '📱',
         desc: 'White bold, outline shadow, center',
         preview: { bg: '#000', color: '#fff', highlight: '#fe2c55', font: 'Outfit, sans-serif', weight: 800, size: 15, transform: 'none', outline: true }
+    },
+    {
+        id: 'raymond', name: 'Raymond', emoji: '🎯',
+        desc: 'Big yellow highlight, sentence case',
+        preview: { bg: '#000', color: '#fff', highlight: '#FFD700', font: 'Montserrat, sans-serif', weight: 800, size: 13, transform: 'none', outline: true, highlightScale: 1.6 }
+    },
+    {
+        id: 'clean_box', name: 'Clean Box', emoji: '🔲',
+        desc: 'Dark box, cyan highlight, modern',
+        preview: { bg: '#000', color: '#fff', highlight: '#00E5FF', font: 'Inter, sans-serif', weight: 700, size: 14, transform: 'none', outline: false, boxBg: true, boxColor: 'rgba(26,26,46,0.85)' }
+    },
+    {
+        id: 'neon_box', name: 'Neon Box', emoji: '💚',
+        desc: 'Neon green on dark box, bold',
+        preview: { bg: '#000', color: '#fff', highlight: '#39FF14', font: 'Montserrat, sans-serif', weight: 800, size: 15, transform: 'uppercase', outline: true, boxBg: true, boxColor: 'rgba(0,0,0,0.6)' }
+    },
+    {
+        id: 'pastel_box', name: 'Pastel Box', emoji: '🌸',
+        desc: 'White box, dark text, soft colors',
+        preview: { bg: '#eee', color: '#2D2D2D', highlight: '#FF6B6B', font: 'Inter, sans-serif', weight: 600, size: 13, transform: 'none', outline: false, boxBg: true, boxColor: 'rgba(255,255,255,0.9)' }
     },
 ];
 
@@ -184,6 +204,36 @@ export default function ClipEditor() {
     const [sfxCount, setSfxCount] = useState(0);
     const [copiedHashtags, setCopiedHashtags] = useState(false);
 
+    // Social Caption Generator state
+    const [socialData, setSocialData] = useState(null);
+    const [loadingSocial, setLoadingSocial] = useState(false);
+    const [hookStyle, setHookStyle] = useState('drama');
+    const [socialPlatform, setSocialPlatform] = useState('tiktok');
+
+    // Thumbnail Generator state
+    const [thumbnails, setThumbnails] = useState([]);
+    const [loadingThumbnails, setLoadingThumbnails] = useState(false);
+
+    // Trend Analysis state
+    const [trendData, setTrendData] = useState(null);
+    const [loadingTrend, setLoadingTrend] = useState(false);
+
+    // B-Roll Search state
+    const [brollVideos, setBrollVideos] = useState([]);
+    const [loadingBroll, setLoadingBroll] = useState(false);
+    const [brollQuery, setBrollQuery] = useState('');
+
+    // Hook Title state
+    const [hookText, setHookText] = useState('');
+    const [hookSettings, setHookSettings] = useState({
+        duration: 5,       // 0 = permanent, 3, 5
+        position: 'top',   // top, bottom
+        fontSize: 48,
+        textColor: '#FFFFFF',
+        bgColor: '#FF0000',
+        bgOpacity: '0.85'
+    });
+
     // Load data
     useEffect(() => {
         loadData();
@@ -212,6 +262,13 @@ export default function ClipEditor() {
                             setCustomCaption({ ...DEFAULT_CUSTOM, ...JSON.parse(thisClip.caption_settings) });
                         } catch (e) { /* ignore parse errors */ }
                     }
+                    // Load hook title data
+                    if (thisClip.hook_text) setHookText(thisClip.hook_text);
+                    if (thisClip.hook_settings) {
+                        try {
+                            setHookSettings(prev => ({ ...prev, ...JSON.parse(thisClip.hook_settings) }));
+                        } catch (e) { /* ignore */ }
+                    }
                 }
                 // Load transcript segments for subtitle preview
                 if (data.transcript && data.transcript.segment_data) {
@@ -221,6 +278,14 @@ export default function ClipEditor() {
                     } catch (e) {
                         console.warn('Failed to parse segments:', e);
                     }
+                }
+
+                // If clip is currently rendering, resume polling (don't reset!)
+                const thisClip2 = (data.clips || []).find(c => c.id === clipId);
+                if (thisClip2 && thisClip2.status === 'rendering') {
+                    // Resume polling — render is still running server-side
+                    setExporting(true);
+                    setSaveMsg('🎬 Render sedang berjalan... menunggu selesai');
                 }
             }
         } catch (err) {
@@ -285,6 +350,82 @@ export default function ClipEditor() {
             setActiveCaption(null);
         }
     }, [currentTime, subtitlesEnabled, segments, getActiveCaption]);
+
+    // Auto-poll for render completion when exporting
+    useEffect(() => {
+        if (!exporting || !clipId) return;
+        let cancelled = false;
+        let attempts = 0;
+
+        const poll = async () => {
+            while (!cancelled && attempts < 400) {
+                await new Promise(r => setTimeout(r, 3000));
+                if (cancelled) return;
+                attempts++;
+                try {
+                    // Check download availability
+                    const checkRes = await fetch(`${API}/projects/clips/${clipId}/download`, { method: 'HEAD' });
+                    if (checkRes.ok) {
+                        const a = document.createElement('a');
+                        a.href = `${API}/projects/clips/${clipId}/download`;
+                        a.download = `clip_${clip?.clip_number || 'export'}.mp4`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setSaveMsg('✅ Export selesai! File terdownload.');
+                        setTimeout(() => setSaveMsg(''), 5000);
+                        setExporting(false);
+                        loadData();
+                        return;
+                    }
+                } catch (e) { /* still rendering */ }
+                // Check render status
+                try {
+                    const statusRes = await fetch(`${API}/projects/${projectId}`);
+                    const statusData = await statusRes.json();
+                    const thisClip = (statusData.clips || []).find(c => c.id === clipId);
+                    if (thisClip?.status === 'failed') {
+                        setSaveMsg('❌ Render gagal. Coba export ulang.');
+                        setExporting(false);
+                        return;
+                    }
+                    if (thisClip?.status === 'rendered' && thisClip?.output_path) {
+                        const a = document.createElement('a');
+                        a.href = `${API}/projects/clips/${clipId}/download`;
+                        a.download = `clip_${clip?.clip_number || 'export'}.mp4`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setSaveMsg('✅ Export selesai! File terdownload.');
+                        setTimeout(() => setSaveMsg(''), 5000);
+                        setExporting(false);
+                        loadData();
+                        return;
+                    }
+                    if (thisClip?.status !== 'rendering') {
+                        // Not rendering anymore (maybe reset)
+                        setExporting(false);
+                        setSaveMsg('');
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+                const mins = Math.floor((attempts * 3) / 60);
+                const secs = (attempts * 3) % 60;
+                setSaveMsg(`🎬 Rendering... ${mins > 0 ? mins + 'm ' : ''}${secs}s`);
+            }
+            if (!cancelled) {
+                // Timed out — render likely stuck, auto-reset
+                try {
+                    await fetch(`${API}/projects/clips/${clipId}/reset-render`, { method: 'POST' });
+                } catch (e) { /* ignore */ }
+                setSaveMsg('⏱️ Render timeout. Status di-reset. Klik Export untuk coba lagi.');
+                setExporting(false);
+            }
+        };
+
+        poll();
+        return () => { cancelled = true; };
+    }, [exporting, clipId]);
 
     // Video event handlers
     useEffect(() => {
@@ -482,7 +623,9 @@ export default function ClipEditor() {
                 body: JSON.stringify({
                     start_time: trimStart,
                     end_time: trimEnd,
-                    duration: trimEnd - trimStart
+                    duration: trimEnd - trimStart,
+                    hook_text: hookText,
+                    hook_settings: hookSettings
                 })
             });
             const data = await res.json();
@@ -503,59 +646,58 @@ export default function ClipEditor() {
     // Export (render + download) clip
     const exportClip = async () => {
         try {
+            // If already rendering/polling, just resume showing progress
+            if (exporting) {
+                setSaveMsg('🎬 Render masih berjalan...');
+                return;
+            }
+
+            // Check if clip is already rendering server-side
+            const checkRes = await fetch(`${API}/projects/${projectId}`);
+            const checkData = await checkRes.json();
+            const currentClip = (checkData.clips || []).find(c => c.id === clipId);
+            if (currentClip && currentClip.status === 'rendering') {
+                // Already rendering — just resume polling, don't start new render
+                setExporting(true);
+                setSaveMsg('🎬 Render masih berjalan... melanjutkan tracking');
+                return;
+            }
+
+            // If clip was already rendered, reset it first
+            if (currentClip && currentClip.status === 'rendered') {
+                // Re-render: reset status first
+                await fetch(`${API}/projects/clips/${clipId}/reset-render`, { method: 'POST' });
+            }
+
             setExporting(true);
             setSaveMsg('');
 
-            // Auto-save changes first
-            if (hasChanges) {
-                await fetch(`${API}/projects/clips/${clipId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        start_time: trimStart,
-                        end_time: trimEnd,
-                        duration: trimEnd - trimStart
-                    })
-                });
-                setOriginalStart(trimStart);
-                setOriginalEnd(trimEnd);
-                setHasChanges(false);
-            }
+            // Save hook data + trim before rendering
+            await fetch(`${API}/projects/clips/${clipId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start_time: trimStart,
+                    end_time: trimEnd,
+                    duration: trimEnd - trimStart,
+                    hook_text: hookText,
+                    hook_settings: hookSettings
+                })
+            });
+            setOriginalStart(trimStart);
+            setOriginalEnd(trimEnd);
+            setHasChanges(false);
 
-            // Start render
-            setSaveMsg('🎬 Rendering clip...');
+            // Start render (server-side, continues even if user navigates away)
+            setSaveMsg('🎬 Starting render...');
             const renderRes = await fetch(`${API}/projects/clips/${clipId}/render`, { method: 'POST' });
             const renderData = await renderRes.json();
             if (!renderRes.ok) throw new Error(renderData.error);
 
-            // Poll for completion (check every 2s, max 5 min)
-            let attempts = 0;
-            const maxAttempts = 150;
-            while (attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 2000));
-                attempts++;
-                try {
-                    const checkRes = await fetch(`${API}/projects/clips/${clipId}/download`, { method: 'HEAD' });
-                    if (checkRes.ok) {
-                        // Download the file
-                        const a = document.createElement('a');
-                        a.href = `${API}/projects/clips/${clipId}/download`;
-                        a.download = `clip_${clip.clip_number || 'export'}.mp4`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        setSaveMsg('✅ Export selesai! File terdownload.');
-                        setTimeout(() => setSaveMsg(''), 5000);
-                        loadData();
-                        return;
-                    }
-                } catch (e) { /* still rendering */ }
-                setSaveMsg(`🎬 Rendering clip... (${attempts * 2}s)`);
-            }
-            throw new Error('Render timeout — coba lagi nanti');
+            // Polling is handled by the useEffect above (auto-poll when exporting=true)
+            setSaveMsg('🎬 Rendering... (bisa klik Back, render tetap jalan)');
         } catch (err) {
             setSaveMsg(`❌ Export error: ${err.message}`);
-        } finally {
             setExporting(false);
         }
     };
@@ -601,6 +743,98 @@ export default function ClipEditor() {
         }, 600);
     };
 
+    // Generate Social Copy (description, hooks, hashtags per platform)
+    const generateSocialCopy = async () => {
+        if (!clip?.id || loadingSocial) return;
+        setLoadingSocial(true);
+        setSocialData(null);
+        try {
+            const res = await fetch(`${API}/projects/clips/${clip.id}/generate-social`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform: socialPlatform, hook_style: hookStyle })
+            });
+            const data = await res.json();
+            if (res.ok && data.social) {
+                setSocialData(data.social);
+            } else {
+                setSaveMsg(`❌ Gagal generate: ${data.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            setSaveMsg(`❌ Error: ${err.message}`);
+        } finally {
+            setLoadingSocial(false);
+        }
+    };
+
+    // Generate Thumbnails (extract best frames from clip)
+    const generateThumbnails = async () => {
+        if (!clip?.id || loadingThumbnails) return;
+        setLoadingThumbnails(true);
+        setThumbnails([]);
+        try {
+            const res = await fetch(`${API}/projects/clips/${clip.id}/thumbnails`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok && data.thumbnails) {
+                setThumbnails(data.thumbnails);
+            } else {
+                setSaveMsg(`❌ Thumbnail error: ${data.error || 'Unknown'}`);
+            }
+        } catch (err) {
+            setSaveMsg(`❌ Thumbnail error: ${err.message}`);
+        } finally {
+            setLoadingThumbnails(false);
+        }
+    };
+
+    // Trend Analysis (AI-powered)
+    const analyzeTrend = async () => {
+        if (!clip?.id || loadingTrend) return;
+        setLoadingTrend(true);
+        setTrendData(null);
+        try {
+            const res = await fetch(`${API}/projects/clips/${clip.id}/trend-analysis`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok && data.analysis) {
+                setTrendData(data.analysis);
+            } else {
+                setSaveMsg(`❌ Trend error: ${data.error || 'Unknown'}`);
+            }
+        } catch (err) {
+            setSaveMsg(`❌ Trend error: ${err.message}`);
+        } finally {
+            setLoadingTrend(false);
+        }
+    };
+
+    // B-Roll Search (Pexels)
+    const searchBroll = async () => {
+        if (!clip?.id || loadingBroll) return;
+        setLoadingBroll(true);
+        setBrollVideos([]);
+        try {
+            const query = brollQuery || clip?.title || '';
+            const res = await fetch(`${API}/projects/clips/${clip.id}/broll-search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keywords: query, orientation: 'portrait' })
+            });
+            const data = await res.json();
+            if (data.needsKey) {
+                setSaveMsg('⚠️ Pexels API key belum diisi. Buka Settings → AI Configuration → Pexels API Key');
+            } else if (res.ok && data.videos) {
+                setBrollVideos(data.videos);
+                if (data.videos.length === 0) setSaveMsg('ℹ️ Tidak ada B-Roll ditemukan untuk keyword ini');
+            } else {
+                setSaveMsg(`❌ B-Roll error: ${data.error || 'Unknown'}`);
+            }
+        } catch (err) {
+            setSaveMsg(`❌ B-Roll error: ${err.message}`);
+        } finally {
+            setLoadingBroll(false);
+        }
+    };
+
     // Get effective caption style (template + custom overrides)
     const getEffectiveStyle = () => {
         const template = CAPTION_STYLES.find(s => s.id === captionStyle) || CAPTION_STYLES[0];
@@ -616,6 +850,9 @@ export default function ClipEditor() {
             italic: customCaption.italic !== null ? customCaption.italic : (p.italic || false),
             position: customCaption.position || 'bottom',
             bgOpacity: customCaption.bgOpacity ?? 0.6,
+            boxBg: p.boxBg || false,
+            boxColor: p.boxColor || null,
+            highlightScale: p.highlightScale || 1.1,
         };
     };
 
@@ -845,6 +1082,38 @@ export default function ClipEditor() {
                                         </div>
                                     </div>
                                 )}
+                                {/* Hook Title preview overlay */}
+                                {hookText && hookText.trim() && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        left: '5%', right: '5%',
+                                        [hookSettings.position === 'bottom' ? 'bottom' : 'top']: hookSettings.position === 'bottom' ? '20%' : '4%',
+                                        display: 'flex', justifyContent: 'center',
+                                        pointerEvents: 'none', zIndex: 15,
+                                    }}>
+                                        <div style={{
+                                            background: hookSettings.bgColor || '#FF0000',
+                                            opacity: parseFloat(hookSettings.bgOpacity || 0.85),
+                                            padding: `${Math.max(6, hookSettings.fontSize / 6)}px ${Math.max(12, hookSettings.fontSize / 3)}px`,
+                                            borderRadius: 4,
+                                            maxWidth: '90%',
+                                            textAlign: 'center',
+                                        }}>
+                                            <span style={{
+                                                color: hookSettings.textColor || '#FFFFFF',
+                                                fontWeight: 800,
+                                                fontSize: Math.max(10, hookSettings.fontSize / 4),
+                                                textTransform: 'uppercase',
+                                                letterSpacing: 1,
+                                                lineHeight: 1.3,
+                                                display: 'block',
+                                                textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+                                            }}>
+                                                {hookText}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Subtitle overlay */}
                                 {subtitlesEnabled && activeCaption && activeCaption.length > 0 && (() => {
@@ -869,11 +1138,13 @@ export default function ClipEditor() {
                                         >
                                             <div style={{
                                                 display: 'inline-block',
-                                                padding: '6px 14px',
-                                                borderRadius: 8,
+                                                padding: es.boxBg ? '10px 20px' : '6px 14px',
+                                                borderRadius: es.boxBg ? 12 : 8,
                                                 background: captionStyle === 'news'
                                                     ? 'linear-gradient(90deg, rgba(26,26,62,0.9), rgba(45,27,105,0.9))'
-                                                    : `rgba(0,0,0,${es.bgOpacity})`,
+                                                    : es.boxBg && es.boxColor
+                                                        ? es.boxColor
+                                                        : `rgba(0,0,0,${es.bgOpacity})`,
                                                 backdropFilter: 'blur(4px)',
                                             }}>
                                                 {activeCaption.map((w, i) => (
@@ -891,7 +1162,7 @@ export default function ClipEditor() {
                                                                 : '0 1px 4px rgba(0,0,0,0.7)',
                                                             transition: 'color 0.1s, transform 0.15s, font-weight 0.1s',
                                                             display: 'inline-block',
-                                                            transform: w.active ? 'scale(1.1)' : 'scale(1)',
+                                                            transform: w.active ? `scale(${es.highlightScale || 1.1})` : 'scale(1)',
                                                             marginRight: 6,
                                                             letterSpacing: es.transform === 'uppercase' ? '0.5px' : '0',
                                                         }}
@@ -1379,6 +1650,386 @@ export default function ClipEditor() {
                         </div>
                     </motion.div>
 
+                    {/* Social Caption Generator */}
+                    <motion.div className="card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.12 }}>
+                        <div className="card-header" style={{ marginBottom: 12 }}>
+                            <div className="card-title" style={{ fontSize: 14 }}>
+                                <MessageCircle size={14} /> Social Caption Generator
+                            </div>
+                        </div>
+                        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <select
+                                    value={hookStyle}
+                                    onChange={e => setHookStyle(e.target.value)}
+                                    className="form-select"
+                                    style={{ flex: 1, fontSize: 11, padding: '4px 8px' }}
+                                >
+                                    <option value="drama">🎭 Drama</option>
+                                    <option value="edukasi">📚 Edukasi</option>
+                                    <option value="comedy">😂 Comedy</option>
+                                    <option value="motivasi">💪 Motivasi</option>
+                                    <option value="gossip">👀 Gossip</option>
+                                    <option value="horror">👻 Horror</option>
+                                    <option value="storytelling">📖 Story</option>
+                                    <option value="kontroversial">⚡ Kontroversial</option>
+                                    <option value="clickbait">🚨 Clickbait</option>
+                                    <option value="aesthetic">✨ Aesthetic</option>
+                                </select>
+                                <button
+                                    className="btn btn-primary btn-sm"
+                                    onClick={generateSocialCopy}
+                                    disabled={loadingSocial}
+                                    style={{ fontSize: 11, padding: '4px 12px', whiteSpace: 'nowrap' }}
+                                >
+                                    {loadingSocial ? <><Loader size={12} className="spin" /> Generating...</> : <><Zap size={12} /> Generate</>}
+                                </button>
+                            </div>
+
+                            {socialData && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    {/* Platform tabs */}
+                                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                        {['tiktok', 'instagram', 'youtube', 'twitter', 'facebook'].map(p => (
+                                            <button
+                                                key={p}
+                                                className={`btn btn-sm ${socialPlatform === p ? 'btn-primary' : 'btn-ghost'}`}
+                                                onClick={() => setSocialPlatform(p)}
+                                                style={{ fontSize: 10, padding: '2px 8px', textTransform: 'capitalize' }}
+                                            >
+                                                {p === 'tiktok' ? '📱' : p === 'instagram' ? '📸' : p === 'youtube' ? '▶️' : p === 'twitter' ? '🐦' : '👥'} {p}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Platform content */}
+                                    {(() => {
+                                        const pd = socialData[socialPlatform];
+                                        if (!pd) return <div className="text-sm text-muted">No data for this platform</div>;
+                                        return (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                {/* Title */}
+                                                {pd.title && (
+                                                    <div>
+                                                        <div className="form-label" style={{ fontSize: 10, marginBottom: 2 }}>📌 Title</div>
+                                                        <div
+                                                            style={{ fontSize: 12, padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 6, cursor: 'pointer', lineHeight: 1.4 }}
+                                                            onClick={() => { navigator.clipboard.writeText(pd.title); setSaveMsg('✅ Title copied!'); }}
+                                                            title="Click to copy"
+                                                        >{pd.title}</div>
+                                                    </div>
+                                                )}
+                                                {/* Description */}
+                                                {pd.description && (
+                                                    <div>
+                                                        <div className="form-label" style={{ fontSize: 10, marginBottom: 2 }}>📝 Description</div>
+                                                        <div
+                                                            style={{ fontSize: 11, padding: '6px 10px', background: 'var(--bg-secondary)', borderRadius: 6, cursor: 'pointer', lineHeight: 1.5, maxHeight: 120, overflow: 'auto' }}
+                                                            onClick={() => { navigator.clipboard.writeText(pd.description); setSaveMsg('✅ Description copied!'); }}
+                                                            title="Click to copy"
+                                                        >{pd.description}</div>
+                                                    </div>
+                                                )}
+                                                {/* Hooks */}
+                                                {pd.hooks && pd.hooks.length > 0 && (
+                                                    <div>
+                                                        <div className="form-label" style={{ fontSize: 10, marginBottom: 2 }}>🎣 Hooks ({pd.hooks.length})</div>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                                            {pd.hooks.map((h, i) => (
+                                                                <div
+                                                                    key={i}
+                                                                    style={{
+                                                                        fontSize: 11, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 6,
+                                                                        cursor: 'pointer', lineHeight: 1.4, borderLeft: '3px solid var(--accent-purple)',
+                                                                        transition: 'background 0.15s'
+                                                                    }}
+                                                                    onClick={() => { navigator.clipboard.writeText(h); setSaveMsg(`✅ Hook ${i + 1} copied!`); }}
+                                                                    title="Click to copy"
+                                                                >{h}</div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {/* Hashtags */}
+                                                {pd.hashtags && (
+                                                    <div>
+                                                        <div className="form-label" style={{ fontSize: 10, marginBottom: 2 }}># Hashtags</div>
+                                                        <div
+                                                            style={{ fontSize: 11, padding: '5px 10px', background: 'var(--bg-secondary)', borderRadius: 6, cursor: 'pointer', color: 'var(--accent-cyan)' }}
+                                                            onClick={() => { navigator.clipboard.writeText(pd.hashtags); setSaveMsg('✅ Hashtags copied!'); }}
+                                                            title="Click to copy"
+                                                        >{pd.hashtags}</div>
+                                                    </div>
+                                                )}
+                                                {/* Best Time + Tip */}
+                                                <div style={{ display: 'flex', gap: 6 }}>
+                                                    {pd.bestTime && (
+                                                        <div style={{ flex: 1, fontSize: 10, padding: '4px 8px', background: 'rgba(6,182,212,0.1)', borderRadius: 6, color: 'var(--accent-cyan)' }}>
+                                                            🕐 {pd.bestTime}
+                                                        </div>
+                                                    )}
+                                                    {pd.engagementTip && (
+                                                        <div style={{ flex: 1, fontSize: 10, padding: '4px 8px', background: 'rgba(124,58,237,0.1)', borderRadius: 6, color: 'var(--accent-purple)' }}>
+                                                            💡 {pd.engagementTip}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {/* Copy all button */}
+                                                <button
+                                                    className="btn btn-secondary btn-sm"
+                                                    onClick={() => {
+                                                        const all = `${pd.title || ''}\n\n${pd.description || ''}\n\n${pd.hashtags || ''}`;
+                                                        navigator.clipboard.writeText(all);
+                                                        setSaveMsg('✅ All copied to clipboard!');
+                                                    }}
+                                                    style={{ fontSize: 11 }}
+                                                >
+                                                    <Share2 size={12} /> Copy All ({socialPlatform})
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+                        </div>
+                    </motion.div>
+
+                    {/* Thumbnail Generator */}
+                    <motion.div className="card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.13 }}>
+                        <div className="card-header" style={{ marginBottom: 12 }}>
+                            <div className="card-title" style={{ fontSize: 14 }}>
+                                <Film size={14} /> Thumbnail Generator
+                            </div>
+                        </div>
+                        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={generateThumbnails}
+                                disabled={loadingThumbnails}
+                                style={{ fontSize: 12 }}
+                            >
+                                {loadingThumbnails ? <><Loader size={12} className="spin" /> Extracting frames...</> : <><Eye size={12} /> Generate Thumbnails</>}
+                            </button>
+                            {thumbnails.length > 0 && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                                    {thumbnails.map((thumb, i) => (
+                                        <div
+                                            key={i}
+                                            style={{
+                                                position: 'relative', borderRadius: 8, overflow: 'hidden',
+                                                border: '2px solid var(--border-subtle)', cursor: 'pointer',
+                                                transition: 'border-color 0.15s, transform 0.15s',
+                                            }}
+                                            onClick={() => {
+                                                // Download thumbnail
+                                                const a = document.createElement('a');
+                                                a.href = thumb.url;
+                                                a.download = `thumbnail_${i + 1}.jpg`;
+                                                a.click();
+                                                setSaveMsg(`✅ Thumbnail ${i + 1} downloaded!`);
+                                            }}
+                                            title={`${thumb.label || `Frame ${i + 1}`} — Click to download`}
+                                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-purple)'; e.currentTarget.style.transform = 'scale(1.03)'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.transform = 'scale(1)'; }}
+                                        >
+                                            <img src={thumb.url} alt={thumb.label} style={{ width: '100%', aspectRatio: '9/16', objectFit: 'cover' }} />
+                                            <div style={{
+                                                position: 'absolute', bottom: 0, left: 0, right: 0,
+                                                background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                                                padding: '12px 6px 4px', fontSize: 9, color: '#fff', textAlign: 'center'
+                                            }}>
+                                                {thumb.label || `Frame ${i + 1}`}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </motion.div>
+
+                    {/* Trend Analysis */}
+                    <motion.div className="card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.18 }}>
+                        <div className="card-title" style={{ marginBottom: 12, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <TrendingUp size={14} /> Trend Analysis
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <button
+                                className="btn btn-primary btn-sm"
+                                onClick={analyzeTrend}
+                                disabled={loadingTrend}
+                                style={{ gap: 6 }}
+                            >
+                                {loadingTrend ? <><Loader size={12} className="spin" /> Analyzing...</> : <><BarChart2 size={12} /> Analyze Trend</>}
+                            </button>
+                            {trendData && (
+                                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    {/* Score Badge */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, background: `linear-gradient(135deg, ${trendData.trendScore >= 75 ? 'rgba(34,197,94,0.1)' : trendData.trendScore >= 50 ? 'rgba(234,179,8,0.1)' : 'rgba(239,68,68,0.1)'}, transparent)`, border: `1px solid ${trendData.trendScore >= 75 ? 'rgba(34,197,94,0.2)' : trendData.trendScore >= 50 ? 'rgba(234,179,8,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
+                                        <div style={{ fontSize: 28, fontWeight: 800, color: trendData.trendScore >= 75 ? '#22c55e' : trendData.trendScore >= 50 ? '#eab308' : '#ef4444' }}>
+                                            {trendData.trendScore}
+                                        </div>
+                                        <div>
+                                            <div style={{ fontWeight: 600, fontSize: 12 }}>Trend Score</div>
+                                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{trendData.viralPotential}</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Predicted Views */}
+                                    {trendData.predictedViews && (
+                                        <div style={{ padding: '8px 12px', background: 'rgba(139,92,246,0.06)', borderRadius: 8, border: '1px solid rgba(139,92,246,0.12)' }}>
+                                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>📊 Predicted Views</div>
+                                            <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
+                                                <span>Low: <b>{(trendData.predictedViews.low || 0).toLocaleString()}</b></span>
+                                                <span>Mid: <b style={{ color: '#eab308' }}>{(trendData.predictedViews.mid || 0).toLocaleString()}</b></span>
+                                                <span>High: <b style={{ color: '#22c55e' }}>{(trendData.predictedViews.high || 0).toLocaleString()}</b></span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Best Platform */}
+                                    {trendData.bestPlatform && (
+                                        <div style={{ fontSize: 12, padding: '6px 10px', background: 'rgba(59,130,246,0.08)', borderRadius: 6 }}>
+                                            🏆 Best Platform: <b style={{ color: 'var(--accent-cyan)' }}>{trendData.bestPlatform}</b>
+                                        </div>
+                                    )}
+
+                                    {/* Trending Topics */}
+                                    {trendData.trendingTopics?.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🔥 Trending Topics</div>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                                {trendData.trendingTopics.map((t, i) => (
+                                                    <span key={i} style={{ padding: '2px 8px', borderRadius: 10, background: 'rgba(234,179,8,0.12)', fontSize: 11, color: '#eab308' }}>{t}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Strengths */}
+                                    {trendData.contentStrengths?.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>✅ Strengths</div>
+                                            {trendData.contentStrengths.map((s, i) => (
+                                                <div key={i} style={{ fontSize: 11, color: '#22c55e', paddingLeft: 8, marginBottom: 2 }}>• {s}</div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Weaknesses */}
+                                    {trendData.contentWeaknesses?.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>⚠️ Weaknesses</div>
+                                            {trendData.contentWeaknesses.map((w, i) => (
+                                                <div key={i} style={{ fontSize: 11, color: '#f59e0b', paddingLeft: 8, marginBottom: 2 }}>• {w}</div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Suggestions */}
+                                    {trendData.improvementSuggestions?.length > 0 && (
+                                        <div>
+                                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>💡 Improvements</div>
+                                            {trendData.improvementSuggestions.map((s, i) => (
+                                                <div key={i} style={{ fontSize: 11, color: 'var(--text-secondary)', paddingLeft: 8, marginBottom: 2 }}>• {s}</div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Target Audience & Series */}
+                                    {trendData.targetAudience && (
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 6 }}>
+                                            🎯 <b>Target:</b> {trendData.targetAudience}
+                                        </div>
+                                    )}
+                                    {trendData.suggestedSeries && (
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 6 }}>
+                                            📺 <b>Series Idea:</b> {trendData.suggestedSeries}
+                                        </div>
+                                    )}
+                                    {trendData.soundTrend && (
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 6 }}>
+                                            🎵 <b>Sound:</b> {trendData.soundTrend}
+                                        </div>
+                                    )}
+                                </motion.div>
+                            )}
+                        </div>
+                    </motion.div>
+
+                    {/* B-Roll Stock Footage Search */}
+                    <motion.div className="card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}>
+                        <div className="card-title" style={{ marginBottom: 12, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Film size={14} /> B-Roll Stock Footage
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <input
+                                    className="input-field"
+                                    placeholder={clip?.title || 'Search keywords...'}
+                                    value={brollQuery}
+                                    onChange={(e) => setBrollQuery(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && searchBroll()}
+                                    style={{ flex: 1, fontSize: 12, padding: '6px 10px' }}
+                                />
+                                <button
+                                    className="btn btn-primary btn-sm"
+                                    onClick={searchBroll}
+                                    disabled={loadingBroll}
+                                    style={{ gap: 4, whiteSpace: 'nowrap' }}
+                                >
+                                    {loadingBroll ? <Loader size={12} className="spin" /> : <Search size={12} />}
+                                    Search
+                                </button>
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                Powered by Pexels — free stock footage for your clips
+                            </div>
+                            {brollVideos.length > 0 && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, maxHeight: 300, overflowY: 'auto' }}>
+                                    {brollVideos.map((v, i) => (
+                                        <div key={v.id} style={{
+                                            position: 'relative', borderRadius: 8, overflow: 'hidden',
+                                            border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                                            transition: 'all 0.2s'
+                                        }}
+                                            onClick={() => window.open(v.url, '_blank')}
+                                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-cyan)'; e.currentTarget.style.transform = 'scale(1.02)'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.transform = 'scale(1)'; }}
+                                            title={`By ${v.user} — Click to view on Pexels`}
+                                        >
+                                            <img src={v.image} alt="B-Roll" style={{ width: '100%', aspectRatio: '9/16', objectFit: 'cover' }} />
+                                            <div style={{
+                                                position: 'absolute', bottom: 0, left: 0, right: 0,
+                                                background: 'linear-gradient(transparent, rgba(0,0,0,0.85))',
+                                                padding: '16px 6px 4px', fontSize: 9, color: '#fff'
+                                            }}>
+                                                <div>{v.duration}s • {v.width}×{v.height}</div>
+                                                <div style={{ opacity: 0.6 }}>by {v.user}</div>
+                                            </div>
+                                            {v.downloadUrl && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const a = document.createElement('a');
+                                                        a.href = v.downloadUrl;
+                                                        a.target = '_blank';
+                                                        a.rel = 'noopener noreferrer';
+                                                        a.click();
+                                                    }}
+                                                    style={{
+                                                        position: 'absolute', top: 4, right: 4,
+                                                        background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: 6,
+                                                        padding: '3px 6px', color: '#fff', fontSize: 10, cursor: 'pointer'
+                                                    }}
+                                                >⬇</button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </motion.div>
+
                     {/* Caption Style Selector */}
                     <motion.div className="card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }}>
                         <div className="card-header" style={{ marginBottom: 12 }}>
@@ -1417,27 +2068,35 @@ export default function ClipEditor() {
                                             justifyContent: 'center',
                                             position: 'relative',
                                         }}>
-                                            <span style={{
-                                                fontFamily: p.font,
-                                                fontWeight: p.weight,
-                                                fontSize: p.size,
-                                                color: p.highlight,
-                                                textTransform: p.transform,
-                                                fontStyle: p.italic ? 'italic' : 'normal',
-                                                textShadow: p.outline ? `1px 1px 0 ${p.color === '#fff' ? '#000' : 'rgba(0,0,0,0.8)'}, -1px -1px 0 ${p.color === '#fff' ? '#000' : 'rgba(0,0,0,0.8)'}` : '1px 1px 3px rgba(0,0,0,0.5)',
-                                                letterSpacing: p.transform === 'uppercase' ? '0.5px' : '0',
-                                            }}>Sample</span>
-                                            <span style={{
-                                                fontFamily: p.font,
-                                                fontWeight: p.weight,
-                                                fontSize: p.size,
-                                                color: p.color,
-                                                textTransform: p.transform,
-                                                fontStyle: p.italic ? 'italic' : 'normal',
-                                                textShadow: p.outline ? '1px 1px 0 #000, -1px -1px 0 #000' : '1px 1px 3px rgba(0,0,0,0.5)',
-                                                marginLeft: 5,
-                                                letterSpacing: p.transform === 'uppercase' ? '0.5px' : '0',
-                                            }}> Text</span>
+                                            <div style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                padding: p.boxBg ? '4px 12px' : '0',
+                                                borderRadius: p.boxBg ? 6 : 0,
+                                                background: p.boxBg ? (p.boxColor || 'rgba(0,0,0,0.75)') : 'transparent',
+                                            }}>
+                                                <span style={{
+                                                    fontFamily: p.font,
+                                                    fontWeight: p.weight,
+                                                    fontSize: p.highlightScale ? p.size * p.highlightScale : p.size,
+                                                    color: p.highlight,
+                                                    textTransform: p.transform,
+                                                    fontStyle: p.italic ? 'italic' : 'normal',
+                                                    textShadow: p.outline ? `1px 1px 0 ${p.color === '#fff' ? '#000' : 'rgba(0,0,0,0.8)'}, -1px -1px 0 ${p.color === '#fff' ? '#000' : 'rgba(0,0,0,0.8)'}` : (p.boxBg ? 'none' : '1px 1px 3px rgba(0,0,0,0.5)'),
+                                                    letterSpacing: p.transform === 'uppercase' ? '0.5px' : '0',
+                                                }}>Sample</span>
+                                                <span style={{
+                                                    fontFamily: p.font,
+                                                    fontWeight: p.weight,
+                                                    fontSize: p.size,
+                                                    color: p.color,
+                                                    textTransform: p.transform,
+                                                    fontStyle: p.italic ? 'italic' : 'normal',
+                                                    textShadow: p.outline ? '1px 1px 0 #000, -1px -1px 0 #000' : (p.boxBg ? 'none' : '1px 1px 3px rgba(0,0,0,0.5)'),
+                                                    marginLeft: 5,
+                                                    letterSpacing: p.transform === 'uppercase' ? '0.5px' : '0',
+                                                }}> Text</span>
+                                            </div>
                                             {isActive && (
                                                 <div style={{
                                                     position: 'absolute', top: 4, right: 4,
@@ -1639,6 +2298,175 @@ export default function ClipEditor() {
                                     <RefreshCw size={12} /> Reset to Template
                                 </button>
                             </motion.div>
+                        )}
+                    </motion.div>
+
+                    {/* Hook Title Editor */}
+                    <motion.div className="card" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.12 }}>
+                        <div className="card-title" style={{ marginBottom: 12, fontSize: 14 }}>
+                            <Zap size={14} /> Hook Title Overlay
+                        </div>
+
+                        {/* Hook text input */}
+                        <div style={{ marginBottom: 12 }}>
+                            <label className="form-label" style={{ fontSize: 11 }}>Hook Text</label>
+                            <textarea
+                                value={hookText}
+                                onChange={(e) => {
+                                    setHookText(e.target.value);
+                                    setHasChanges(true);
+                                }}
+                                placeholder="INI DIA RAHASIA SUKSES!"
+                                rows={2}
+                                style={{
+                                    width: '100%', padding: '8px 10px', borderRadius: 6,
+                                    border: '1px solid var(--border)', background: 'var(--bg-primary)',
+                                    color: 'var(--text-primary)', fontSize: 13, resize: 'vertical',
+                                    fontWeight: 700, textTransform: 'uppercase'
+                                }}
+                            />
+                        </div>
+
+                        {/* Live preview */}
+                        {hookText && (
+                            <div style={{
+                                marginBottom: 12, padding: '10px 16px', borderRadius: 8,
+                                background: hookSettings.bgColor || '#FF0000',
+                                opacity: parseFloat(hookSettings.bgOpacity || 0.85),
+                                textAlign: 'center'
+                            }}>
+                                <span style={{
+                                    color: hookSettings.textColor || '#FFFFFF',
+                                    fontWeight: 800, fontSize: hookSettings.fontSize ? hookSettings.fontSize / 3 : 16,
+                                    textTransform: 'uppercase', letterSpacing: 1, lineHeight: 1.3,
+                                    display: 'block'
+                                }}>
+                                    {hookText}
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Duration */}
+                        <div style={{ marginBottom: 10 }}>
+                            <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Duration</label>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                                {[
+                                    { value: 3, label: '3s' },
+                                    { value: 5, label: '5s' },
+                                    { value: 0, label: '∞ Permanent' }
+                                ].map(opt => (
+                                    <button
+                                        key={opt.value}
+                                        className={`btn btn-sm ${hookSettings.duration === opt.value ? 'btn-primary' : 'btn-ghost'}`}
+                                        onClick={() => {
+                                            setHookSettings(prev => ({ ...prev, duration: opt.value }));
+                                            setHasChanges(true);
+                                        }}
+                                        style={{ flex: 1, fontSize: 11, padding: '4px 0' }}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Position */}
+                        <div style={{ marginBottom: 10 }}>
+                            <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Position</label>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                                {['top', 'bottom'].map(pos => (
+                                    <button
+                                        key={pos}
+                                        className={`btn btn-sm ${hookSettings.position === pos ? 'btn-primary' : 'btn-ghost'}`}
+                                        onClick={() => {
+                                            setHookSettings(prev => ({ ...prev, position: pos }));
+                                            setHasChanges(true);
+                                        }}
+                                        style={{ flex: 1, fontSize: 11, padding: '4px 0', textTransform: 'capitalize' }}
+                                    >
+                                        {pos === 'top' ? '⬆ Top' : '⬇ Bottom'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Font Size */}
+                        <div style={{ marginBottom: 10 }}>
+                            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                <span>Font Size</span>
+                                <span style={{ color: 'var(--text-primary)' }}>{hookSettings.fontSize}px</span>
+                            </label>
+                            <input
+                                type="range" min="24" max="80" step="2"
+                                value={hookSettings.fontSize}
+                                onChange={(e) => {
+                                    setHookSettings(prev => ({ ...prev, fontSize: parseInt(e.target.value) }));
+                                    setHasChanges(true);
+                                }}
+                                style={{ width: '100%', accentColor: 'var(--accent-purple)' }}
+                            />
+                        </div>
+
+                        {/* Colors */}
+                        <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Text Color</label>
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                    {['#FFFFFF', '#FFFF00', '#000000'].map(c => (
+                                        <div
+                                            key={c}
+                                            onClick={() => {
+                                                setHookSettings(prev => ({ ...prev, textColor: c }));
+                                                setHasChanges(true);
+                                            }}
+                                            style={{
+                                                width: 24, height: 24, borderRadius: 4, cursor: 'pointer',
+                                                background: c, border: hookSettings.textColor === c ? '2px solid var(--accent-purple)' : '1px solid var(--border)'
+                                            }}
+                                        />
+                                    ))}
+                                    <input
+                                        type="color" value={hookSettings.textColor}
+                                        onChange={(e) => {
+                                            setHookSettings(prev => ({ ...prev, textColor: e.target.value }));
+                                            setHasChanges(true);
+                                        }}
+                                        style={{ width: 24, height: 24, border: 'none', padding: 0, cursor: 'pointer' }}
+                                    />
+                                </div>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Box Color</label>
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                    {['#FF0000', '#FFFF00', '#000000', '#7c3aed'].map(c => (
+                                        <div
+                                            key={c}
+                                            onClick={() => {
+                                                setHookSettings(prev => ({ ...prev, bgColor: c }));
+                                                setHasChanges(true);
+                                            }}
+                                            style={{
+                                                width: 24, height: 24, borderRadius: 4, cursor: 'pointer',
+                                                background: c, border: hookSettings.bgColor === c ? '2px solid var(--accent-purple)' : '1px solid var(--border)'
+                                            }}
+                                        />
+                                    ))}
+                                    <input
+                                        type="color" value={hookSettings.bgColor}
+                                        onChange={(e) => {
+                                            setHookSettings(prev => ({ ...prev, bgColor: e.target.value }));
+                                            setHasChanges(true);
+                                        }}
+                                        style={{ width: 24, height: 24, border: 'none', padding: 0, cursor: 'pointer' }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {hookText && (
+                            <div className="text-sm text-muted" style={{ fontSize: 10, marginTop: 4 }}>
+                                💡 Hook title will appear {hookSettings.duration > 0 ? `for ${hookSettings.duration}s` : 'permanently'} at {hookSettings.position} of video
+                            </div>
                         )}
                     </motion.div>
 

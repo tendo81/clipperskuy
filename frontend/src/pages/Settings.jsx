@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings as SettingsIcon, Cpu, FolderOpen, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Save, Bot, HardDrive, Palette, Plus, Trash2, Key, Image, Upload, Monitor, Moon, Sun, Paintbrush, Database, AlertTriangle, Volume2 } from 'lucide-react';
+import { Settings as SettingsIcon, Cpu, FolderOpen, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Save, Bot, HardDrive, Palette, Plus, Trash2, Key, Image, Upload, Monitor, Moon, Sun, Paintbrush, Database, AlertTriangle, Volume2, Film, AtSign, Droplets } from 'lucide-react';
 import { ThemeContext } from '../App';
 
 const API = 'http://localhost:5000/api';
@@ -55,6 +55,19 @@ export default function SettingsPage() {
     const [noiseReduction, setNoiseReduction] = useState(false);
     const [noiseLevel, setNoiseLevel] = useState('medium');
     const [voiceClarity, setVoiceClarity] = useState(false);
+    const [pexelsKeys, setPexelsKeys] = useState(['']);
+    const [showPexels, setShowPexels] = useState({});
+
+    // Social Handles state
+    const [socialTiktok, setSocialTiktok] = useState('');
+    const [socialInstagram, setSocialInstagram] = useState('');
+    const [socialYoutube, setSocialYoutube] = useState('');
+    const [socialTwitter, setSocialTwitter] = useState('');
+
+    // Brand Colors state
+    const [brandPrimary, setBrandPrimary] = useState('#8b5cf6');
+    const [brandSecondary, setBrandSecondary] = useState('#1a1a2e');
+    const [brandAccent, setBrandAccent] = useState('#06b6d4');
 
     // License tier
     const [licenseTier, setLicenseTier] = useState('free');
@@ -130,6 +143,19 @@ export default function SettingsPage() {
                 setNoiseReduction(settings.noise_reduction === 'true' || settings.noise_reduction === '1');
                 setNoiseLevel(settings.noise_reduction_level || 'medium');
                 setVoiceClarity(settings.voice_clarity === 'true' || settings.voice_clarity === '1');
+                const pKeys = (settings.pexels_api_key || '').split(',').map(k => k.trim()).filter(k => k);
+                setPexelsKeys(pKeys.length > 0 ? pKeys : ['']);
+
+                // Social Handles
+                setSocialTiktok(settings.social_tiktok || '');
+                setSocialInstagram(settings.social_instagram || '');
+                setSocialYoutube(settings.social_youtube || '');
+                setSocialTwitter(settings.social_twitter || '');
+
+                // Brand Colors
+                setBrandPrimary(settings.brand_color_primary || '#8b5cf6');
+                setBrandSecondary(settings.brand_color_secondary || '#1a1a2e');
+                setBrandAccent(settings.brand_color_accent || '#06b6d4');
 
                 setLoaded(true);
             })
@@ -227,7 +253,18 @@ export default function SettingsPage() {
                     // Audio Enhancement
                     noise_reduction: noiseReduction ? 'true' : 'false',
                     noise_reduction_level: noiseLevel,
-                    voice_clarity: voiceClarity ? 'true' : 'false'
+                    voice_clarity: voiceClarity ? 'true' : 'false',
+                    // B-Roll
+                    pexels_api_key: pexelsKeys.filter(k => k.trim()).join(','),
+                    // Social Handles
+                    social_tiktok: socialTiktok,
+                    social_instagram: socialInstagram,
+                    social_youtube: socialYoutube,
+                    social_twitter: socialTwitter,
+                    // Brand Colors
+                    brand_color_primary: brandPrimary,
+                    brand_color_secondary: brandSecondary,
+                    brand_color_accent: brandAccent
                 })
             });
             setSaved(true);
@@ -461,8 +498,81 @@ export default function SettingsPage() {
                         </select>
                     </div>
 
+                    {/* Pexels API Keys for B-Roll */}
+                    <div className="form-group" style={{ marginTop: 24 }}>
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Film size={16} /> Pexels API Keys (B-Roll)
+                            {pexelsKeys.filter(k => k.trim()).length > 0 && (
+                                <span style={{
+                                    background: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
+                                    padding: '2px 10px',
+                                    borderRadius: 12,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    color: '#fff'
+                                }}>
+                                    {pexelsKeys.filter(k => k.trim()).length} key{pexelsKeys.filter(k => k.trim()).length > 1 ? 's' : ''} active
+                                </span>
+                            )}
+                        </label>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.4 }}>
+                            📽️ Free API key for stock footage search — <a href="https://www.pexels.com/api/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-cyan)' }}>Get your key at pexels.com/api</a>
+                            {pexelsKeys.filter(k => k.trim()).length > 1 && <span style={{ marginLeft: 8, opacity: 0.7 }}>🔄 Auto-rotation on rate limits</span>}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {pexelsKeys.map((key, idx) => (
+                                <motion.div
+                                    key={idx}
+                                    initial={{ opacity: 0, x: -10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+                                >
+                                    <div style={{
+                                        width: 28, height: 28, borderRadius: '50%',
+                                        background: key.trim() ? 'rgba(6,182,212,0.2)' : 'rgba(255,255,255,0.05)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 12, fontWeight: 600, color: '#06b6d4', flexShrink: 0
+                                    }}>
+                                        {idx + 1}
+                                    </div>
+                                    <div style={{ flex: 1, position: 'relative' }}>
+                                        <input
+                                            type={showPexels[idx] ? 'text' : 'password'}
+                                            className="input-field"
+                                            placeholder="Enter Pexels API key..."
+                                            value={key}
+                                            onChange={(e) => {
+                                                const updated = [...pexelsKeys];
+                                                updated[idx] = e.target.value;
+                                                setPexelsKeys(updated);
+                                            }}
+                                            style={{ paddingRight: 40, fontSize: 13 }}
+                                        />
+                                        <button className="btn btn-ghost btn-icon" onClick={() => setShowPexels({ ...showPexels, [idx]: !showPexels[idx] })}
+                                            style={{ position: 'absolute', right: 4, top: 4, width: 32, height: 32 }}>
+                                            {showPexels[idx] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                        </button>
+                                    </div>
+                                    {pexelsKeys.length > 1 && (
+                                        <button className="btn btn-ghost btn-sm" onClick={() => {
+                                            const updated = pexelsKeys.filter((_, i) => i !== idx);
+                                            setPexelsKeys(updated.length > 0 ? updated : ['']);
+                                        }}
+                                            style={{ padding: '6px 8px', color: 'var(--color-error)', opacity: 0.7 }}>
+                                            <Trash2 size={14} />
+                                        </button>
+                                    )}
+                                </motion.div>
+                            ))}
+                        </div>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setPexelsKeys([...pexelsKeys, ''])}
+                            style={{ marginTop: 8, color: '#06b6d4', gap: 6, fontSize: 12 }}>
+                            <Plus size={14} /> Add Another Pexels Key
+                        </button>
+                    </div>
+
                     {/* Key Pool Info */}
-                    {(activeGroqCount > 1 || activeGeminiCount > 1) && (
+                    {(activeGroqCount > 1 || activeGeminiCount > 1 || pexelsKeys.filter(k => k.trim()).length > 1) && (
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
@@ -482,6 +592,7 @@ export default function SettingsPage() {
                             </div>
                             {activeGroqCount > 1 && <div>🟢 Groq: {activeGroqCount} keys — auto-rotation on rate limits</div>}
                             {activeGeminiCount > 1 && <div>🔵 Gemini: {activeGeminiCount} keys — auto-rotation on rate limits</div>}
+                            {pexelsKeys.filter(k => k.trim()).length > 1 && <div>🟦 Pexels: {pexelsKeys.filter(k => k.trim()).length} keys — auto-rotation on rate limits</div>}
                             <div style={{ marginTop: 4, opacity: 0.7 }}>Keys automatically rotate when one hits API limits. No manual intervention needed.</div>
                         </motion.div>
                     )}
@@ -1022,6 +1133,103 @@ export default function SettingsPage() {
                             </div>
                         </motion.div>
                     )}
+                </motion.div>
+
+                {/* Brand Kit */}
+                <motion.div className="settings-section" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.47 }}>
+                    <div className="settings-section-title"><Droplets size={20} /> Brand Kit</div>
+
+                    {/* Brand Colors */}
+                    <div className="form-group">
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Palette size={16} /> Brand Colors
+                        </label>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
+                            Warna brand channel kamu — otomatis dipakai untuk caption highlight, progress bar, dan intro/outro
+                        </div>
+                        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                            {[
+                                { label: 'Primary', value: brandPrimary, set: setBrandPrimary },
+                                { label: 'Secondary', value: brandSecondary, set: setBrandSecondary },
+                                { label: 'Accent', value: brandAccent, set: setBrandAccent }
+                            ].map(c => (
+                                <div key={c.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                                    <div style={{ position: 'relative' }}>
+                                        <input
+                                            type="color"
+                                            value={c.value}
+                                            onChange={(e) => c.set(e.target.value)}
+                                            style={{
+                                                width: 56, height: 56, border: 'none', borderRadius: 12,
+                                                cursor: 'pointer', padding: 0, background: 'none'
+                                            }}
+                                        />
+                                        <div style={{
+                                            position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none',
+                                            border: '2px solid rgba(255,255,255,0.1)', boxShadow: `0 0 12px ${c.value}33`
+                                        }} />
+                                    </div>
+                                    <span style={{ fontSize: 11, fontWeight: 600 }}>{c.label}</span>
+                                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{c.value}</span>
+                                </div>
+                            ))}
+                        </div>
+                        {/* Preview strip */}
+                        <div style={{ marginTop: 12, display: 'flex', borderRadius: 8, overflow: 'hidden', height: 32 }}>
+                            <div style={{ flex: 3, background: brandPrimary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>Primary</div>
+                            <div style={{ flex: 2, background: brandSecondary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>Secondary</div>
+                            <div style={{ flex: 2, background: brandAccent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>Accent</div>
+                        </div>
+                    </div>
+
+                    {/* Social Handles */}
+                    <div className="form-group" style={{ marginTop: 24 }}>
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <AtSign size={16} /> Social Media Handles
+                        </label>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
+                            Username channel kamu — bisa tampil di outro dan caption
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {[
+                                { icon: '📱', label: 'TikTok', placeholder: '@yourchannel', value: socialTiktok, set: setSocialTiktok },
+                                { icon: '📸', label: 'Instagram', placeholder: '@yourchannel', value: socialInstagram, set: setSocialInstagram },
+                                { icon: '▶️', label: 'YouTube', placeholder: '@YourChannel', value: socialYoutube, set: setSocialYoutube },
+                                { icon: '🐦', label: 'X / Twitter', placeholder: '@yourchannel', value: socialTwitter, set: setSocialTwitter }
+                            ].map(s => (
+                                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <span style={{ fontSize: 18, width: 28, textAlign: 'center' }}>{s.icon}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 600, width: 80, color: 'var(--text-secondary)' }}>{s.label}</span>
+                                    <input
+                                        className="input-field"
+                                        placeholder={s.placeholder}
+                                        value={s.value}
+                                        onChange={(e) => s.set(e.target.value)}
+                                        style={{ flex: 1, fontSize: 13 }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                        {(socialTiktok || socialInstagram || socialYoutube || socialTwitter) && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                style={{
+                                    marginTop: 12, padding: '10px 14px', borderRadius: 10,
+                                    background: `linear-gradient(135deg, ${brandPrimary}15, ${brandAccent}10)`,
+                                    border: `1px solid ${brandPrimary}25`
+                                }}
+                            >
+                                <div style={{ fontSize: 10, fontWeight: 600, marginBottom: 6, color: 'var(--text-muted)' }}>Preview Outro Card</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {socialTiktok && <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 16, background: `${brandPrimary}20`, color: brandPrimary, fontWeight: 600 }}>📱 {socialTiktok}</span>}
+                                    {socialInstagram && <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 16, background: `${brandPrimary}20`, color: brandPrimary, fontWeight: 600 }}>📸 {socialInstagram}</span>}
+                                    {socialYoutube && <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 16, background: `${brandPrimary}20`, color: brandPrimary, fontWeight: 600 }}>▶️ {socialYoutube}</span>}
+                                    {socialTwitter && <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 16, background: `${brandPrimary}20`, color: brandPrimary, fontWeight: 600 }}>🐦 {socialTwitter}</span>}
+                                </div>
+                            </motion.div>
+                        )}
+                    </div>
                 </motion.div>
 
                 {/* Appearance */}

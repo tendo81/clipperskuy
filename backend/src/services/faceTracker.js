@@ -311,9 +311,192 @@ function clamp(val, min, max) {
     return Math.max(min, Math.min(max, val));
 }
 
+/**
+ * Detect multiple faces/regions in a frame by splitting it into left/right halves
+ * and running detectROI on each half. Works well for podcast setups (2 people side by side).
+ */
+async function detectMultipleFaces(imagePath) {
+    const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+
+    // Get image dimensions
+    const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${imagePath}"`;
+    const { stdout: probeOut } = await execAsync(probeCmd, { timeout: 5000 });
+    const probeData = JSON.parse(probeOut);
+    const stream = probeData.streams.find(s => s.codec_type === 'video');
+    if (!stream) return [];
+
+    const imgW = stream.width;
+    const imgH = stream.height;
+
+    // Extract left half and right half as separate images
+    const dir = path.dirname(imagePath);
+    const leftPath = path.join(dir, '_left.jpg');
+    const rightPath = path.join(dir, '_right.jpg');
+
+    const halfW = Math.floor(imgW / 2);
+
+    try {
+        // Crop left half
+        await execAsync(`"${ffmpegPath}" -y -i "${imagePath}" -vf "crop=${halfW}:${imgH}:0:0" "${leftPath}"`, { timeout: 10000 });
+        // Crop right half
+        await execAsync(`"${ffmpegPath}" -y -i "${imagePath}" -vf "crop=${halfW}:${imgH}:${halfW}:0" "${rightPath}"`, { timeout: 10000 });
+
+        const leftROI = await detectROI(leftPath);
+        const rightROI = await detectROI(rightPath);
+
+        const faces = [];
+        if (leftROI && leftROI.confidence > 0.2) {
+            faces.push({
+                x: leftROI.x, // already relative to left half
+                y: leftROI.y,
+                w: leftROI.w,
+                h: leftROI.h,
+                side: 'left',
+                srcX: leftROI.x, // in full image coords
+                srcY: leftROI.y
+            });
+        }
+        if (rightROI && rightROI.confidence > 0.2) {
+            faces.push({
+                x: rightROI.x + halfW, // offset to full image coords
+                y: rightROI.y,
+                w: rightROI.w,
+                h: rightROI.h,
+                side: 'right',
+                srcX: rightROI.x + halfW,
+                srcY: rightROI.y
+            });
+        }
+
+        // Cleanup
+        try { fs.unlinkSync(leftPath); } catch (e) { }
+        try { fs.unlinkSync(rightPath); } catch (e) { }
+
+        return faces;
+    } catch (e) {
+        try { fs.unlinkSync(leftPath); } catch (e2) { }
+        try { fs.unlinkSync(rightPath); } catch (e2) { }
+        return [];
+    }
+}
+
+/**
+ * Generate podcast-style crop for video with 1 or 2 speakers.
+ * - 2 faces: Split screen (top + bottom), each zoomed to a speaker
+ * - 1 face: Full frame zoom on that speaker
+ * - 0 faces: Fallback to center crop
+ * 
+ * @returns {{ mode: 'single'|'split'|'center', cropFilter: string, faceCount: number }}
+ */
+async function generatePodcastCrop(videoPath, targetW, targetH, duration, startTime = 0) {
+    const tempDir = path.join(path.dirname(videoPath), '_podcast_frames_' + Date.now());
+
+    try {
+        console.log(`[Podcast] Detecting speakers: start=${startTime}s, duration=${duration}s`);
+
+        // Extract a few sample frames from early in the clip
+        const frames = await extractSampleFrames(videoPath, tempDir, 0.5, startTime, Math.min(duration, 10));
+
+        if (frames.length === 0) {
+            console.log('[Podcast] No frames, fallback to center crop');
+            return { mode: 'center', cropFilter: null, faceCount: 0 };
+        }
+
+        // Detect faces in the first good frame
+        let faces = [];
+        for (const frame of frames.slice(0, 3)) {
+            faces = await detectMultipleFaces(frame);
+            if (faces.length >= 1) break;
+        }
+
+        console.log(`[Podcast] Found ${faces.length} face region(s)`);
+
+        // Get source video dimensions
+        const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+        const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${videoPath}"`;
+        const { stdout: probeOut } = await execAsync(probeCmd, { timeout: 10000 });
+        const probeData = JSON.parse(probeOut);
+        const videoStream = probeData.streams.find(s => s.codec_type === 'video');
+        const srcW = videoStream.width;
+        const srcH = videoStream.height;
+
+        if (faces.length >= 2) {
+            // 2 faces: split screen — each face gets half the output height
+            const halfH = Math.floor(targetH / 2);
+            const targetAR = targetW / halfH; // aspect ratio per panel
+
+            const crops = faces.map(face => {
+                let cropW, cropH;
+                if (targetAR < srcW / srcH) {
+                    cropH = srcH;
+                    cropW = Math.round(srcH * targetAR);
+                } else {
+                    cropW = srcW;
+                    cropH = Math.round(srcW / targetAR);
+                }
+                cropW = Math.min(cropW, srcW);
+                cropH = Math.min(cropH, srcH);
+                cropW = cropW % 2 === 0 ? cropW : cropW - 1;
+                cropH = cropH % 2 === 0 ? cropH : cropH - 1;
+
+                const cropX = clamp(Math.round(face.srcX - cropW / 2), 0, srcW - cropW);
+                const cropY = clamp(Math.round(face.srcY - cropH / 2), 0, srcH - cropH);
+
+                return { cropW, cropH, cropX, cropY };
+            });
+
+            // Build split filter: crop each face, scale to half height, stack
+            const filter = [
+                `[0:v]split[pa][pb]`,
+                `[pa]crop=${crops[0].cropW}:${crops[0].cropH}:${crops[0].cropX}:${crops[0].cropY},scale=${targetW}:${halfH}:flags=lanczos[ptop]`,
+                `[pb]crop=${crops[1].cropW}:${crops[1].cropH}:${crops[1].cropX}:${crops[1].cropY},scale=${targetW}:${halfH}:flags=lanczos[pbottom]`,
+                `[ptop][pbottom]vstack`
+            ].join(';');
+
+            console.log(`[Podcast] 2-speaker split: ${faces[0].side} + ${faces[1].side}`);
+            return { mode: 'split', cropFilter: filter, faceCount: 2 };
+        }
+
+        if (faces.length === 1) {
+            // 1 face: full frame zoom on that speaker
+            const face = faces[0];
+            const targetAR = targetW / targetH;
+
+            let cropW, cropH;
+            if (targetAR < srcW / srcH) {
+                cropH = srcH;
+                cropW = Math.round(srcH * targetAR);
+            } else {
+                cropW = srcW;
+                cropH = Math.round(srcW / targetAR);
+            }
+            cropW = Math.min(cropW, srcW);
+            cropH = Math.min(cropH, srcH);
+            cropW = cropW % 2 === 0 ? cropW : cropW - 1;
+            cropH = cropH % 2 === 0 ? cropH : cropH - 1;
+
+            const cropX = clamp(Math.round(face.srcX - cropW / 2), 0, srcW - cropW);
+            const cropY = clamp(Math.round(face.srcY - cropH / 2), 0, srcH - cropH);
+
+            const filter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${targetW}:${targetH}:flags=lanczos`;
+            console.log(`[Podcast] 1-speaker full zoom: side=${face.side}`);
+            return { mode: 'single', cropFilter: filter, faceCount: 1 };
+        }
+
+        // 0 faces: fallback
+        console.log('[Podcast] No faces detected, fallback center crop');
+        return { mode: 'center', cropFilter: null, faceCount: 0 };
+
+    } finally {
+        try { fs.removeSync(tempDir); } catch (e) { }
+    }
+}
+
 module.exports = {
     extractSampleFrames,
     detectROI,
     generateFaceTrackCrop,
+    generatePodcastCrop,
     smoothPositions
 };

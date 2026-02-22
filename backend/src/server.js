@@ -93,6 +93,12 @@ async function start() {
     server.listen(PORT, () => {
       console.log(`\n⚡ ClipperSkuy Backend running on http://localhost:${PORT}`);
       console.log(`📁 Data directory: ${DATA_DIR}\n`);
+
+      // Start license heartbeat (online validation every 6 hours)
+      try {
+        const { startHeartbeat } = require('./services/license');
+        startHeartbeat();
+      } catch (e) { /* ignore if license module fails */ }
     });
   } catch (err) {
     console.error('[Fatal] Failed to start:', err);

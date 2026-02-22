@@ -2,7 +2,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs-extra');
 const { get, run } = require('../database');
-const { generateFaceTrackCrop } = require('./faceTracker');
+const { generateFaceTrackCrop, generatePodcastCrop } = require('./faceTracker');
 
 const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 const CLIPS_DIR = path.join(DATA_DIR, 'clips');
@@ -33,11 +33,11 @@ function runFFmpeg(args, duration, emit, io, projectId) {
         let lastProgress = 10;
         let lastLogTime = 0;
 
-        // Timeout: 10 minutes max per render
-        const TIMEOUT_MS = 10 * 60 * 1000;
+        // Timeout: 20 minutes max per render pass
+        const TIMEOUT_MS = 20 * 60 * 1000;
         const timeout = setTimeout(() => {
-            console.error('[Render] FFmpeg timed out after 10 minutes, killing process...');
-            if (emit) emit(null, 'Render timeout after 10 minutes');
+            console.error('[Render] FFmpeg timed out after 20 minutes, killing process...');
+            if (emit) emit(null, 'Render timeout after 20 minutes');
             proc.kill('SIGKILL');
         }, TIMEOUT_MS);
 
@@ -135,7 +135,7 @@ async function renderClip(clipId, io) {
     emit(5, 'Starting render...');
 
     // Settings
-    const reframingMode = project.reframing_mode || 'center';
+    let reframingMode = project.reframing_mode || 'center';
     const aspectRatio = project.aspect_ratio || '9:16';
     const settingsRows = require('../database').all('SELECT * FROM settings');
     const settings = {};
@@ -249,6 +249,67 @@ async function renderClip(clipId, io) {
         }
     }
 
+    // ===== Podcast mode: detect speakers and generate crop =====
+    let podcastFilter = null;
+    if (reframingMode === 'podcast') {
+        try {
+            emit(12, 'Detecting speakers...');
+            const result = await generatePodcastCrop(project.source_path, outW, outH, duration, clip.start_time);
+            if (result.cropFilter) {
+                podcastFilter = result.cropFilter;
+                if (result.mode === 'split') {
+                    emit(18, `Podcast: ${result.faceCount} speakers detected — split screen`);
+                } else {
+                    emit(18, `Podcast: 1 speaker detected — full zoom`);
+                }
+            } else {
+                emit(15, 'No speakers detected, using center crop');
+                reframingMode = 'center';
+            }
+        } catch (e) {
+            console.warn('[Render] Podcast detection failed, falling back to center:', e.message);
+            emit(15, 'Podcast detection failed, using center crop');
+            reframingMode = 'center';
+        }
+    }
+
+    // ===== Face Track + Blur mode =====
+    let faceTrackBlurFilter = null;
+    if (reframingMode === 'face_track_blur') {
+        if (!renderLimits.faceTrackAllowed) {
+            emit(8, '🔒 Face Track Blur is a PRO feature — using fit mode instead');
+            reframingMode = 'fit';
+        } else {
+            try {
+                emit(12, 'Analyzing face positions for blur mode...');
+                const result = await generateFaceTrackCrop(project.source_path, outW, outH, duration, clip.start_time);
+                const scaleFlags = ':flags=lanczos';
+
+                if (result.cropFilter) {
+                    // Extract just the crop part from face tracking (before scale)
+                    // cropFilter format: "crop=W:H:X:Y,scale=..." or "crop=W:H:expr:expr,scale=..."
+                    const cropPart = result.cropFilter.split(',scale=')[0];
+
+                    faceTrackBlurFilter = [
+                        `[0:v]split[a][b]`,
+                        `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=20:5[bg]`,
+                        `[b]${cropPart},scale=${outW}:${outH}:force_original_aspect_ratio=decrease${scaleFlags}[fg]`,
+                        `[bg][fg]overlay=(W-w)/2:(H-h)/2`
+                    ].join(';');
+
+                    emit(18, `Face Track Blur: ${result.positions.length} positions, blur background active`);
+                } else {
+                    emit(15, 'No faces detected, using fit mode');
+                    reframingMode = 'fit';
+                }
+            } catch (e) {
+                console.warn('[Render] Face track blur failed, falling back to fit:', e.message);
+                emit(15, 'Face track blur failed, using fit mode');
+                reframingMode = 'fit';
+            }
+        }
+    }
+
     // ===== Encoder selection (hardware acceleration) =====
     const { encoder, encoderArgs } = getEncoder(settings);
 
@@ -309,8 +370,10 @@ async function renderClip(clipId, io) {
     const progressBarFilter = buildProgressBarFilter(settings, outW, outH, duration);
 
     // ===== ATTEMPT 1: Preferred filter with subtitles =====
-    const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || watermarkFilter || musicTrack);
-    const vf = faceTrackFilter || buildVideoFilter(reframingMode, outW, outH, sourceW);
+    const podcastIsSplit = podcastFilter && podcastFilter.includes('[0:v]split');
+    const ftBlurIsSplit = faceTrackBlurFilter && faceTrackBlurFilter.includes('[0:v]split');
+    const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || podcastIsSplit || ftBlurIsSplit || watermarkFilter || musicTrack);
+    const vf = faceTrackBlurFilter || podcastFilter || faceTrackFilter || buildVideoFilter(reframingMode, outW, outH, sourceW);
 
     // Build subtitle filter string
     const subFilter = assPath ? buildSubtitleFilter(assPath) : '';
@@ -369,7 +432,12 @@ async function renderClip(clipId, io) {
         // Free tier fallback watermark
         textWatermarkFilter = `drawtext=text='${settings.watermark_text}':fontsize=24:fontcolor=white@0.5:x=w-tw-20:y=20`;
     }
-    const extraFilters = [progressBarFilter, subFilter, textWatermarkFilter].filter(Boolean).join(',');
+
+    // ===== Hook Title =====
+    const hookTitleFilter = buildHookTitleFilter(clip, outW, outH, duration);
+    if (hookTitleFilter) emit(9, `Hook title: "${clip.hook_text}"`);
+
+    const extraFilters = [progressBarFilter, subFilter, hookTitleFilter, textWatermarkFilter].filter(Boolean).join(',');
 
     // Single input-seeking: -ss before -i with accurate_seek (FFmpeg default)
     // This decodes from the nearest keyframe to clip.start_time, ensuring exact positioning.
@@ -462,8 +530,8 @@ async function renderClip(clipId, io) {
 
     // For complex filter modes (fit/split), we separate subtitle burn-in into a second pass.
     // The ASS filter has path escaping issues inside -filter_complex, causing subtitles to silently fail.
-    // Strategy: pass 1 = reframing only, pass 2 = subtitle burn-in via simple -vf.
-    const needsSubtitlePass = isComplexVf && subFilter;
+    // Strategy: pass 1 = reframing only, pass 2 = subtitle + hook title burn-in via simple -vf.
+    const needsSubtitlePass = isComplexVf && (subFilter || hookTitleFilter);
     const extraFiltersNoSub = needsSubtitlePass
         ? [progressBarFilter, textWatermarkFilter].filter(Boolean).join(',')
         : extraFilters;
@@ -540,13 +608,14 @@ async function renderClip(clipId, io) {
     const checkPath = needsSecondPass ? tempOutputPath : outputPath;
     if (result1.success && validateOutput(checkPath)) {
         if (needsSecondPass) {
-            // Second pass: burn subtitles onto the temp file using simple -vf
-            emit(85, 'Burning subtitles...');
-            console.log(`[Render] Pass 2: Burning subtitles onto ${tempOutputPath}`);
+            // Second pass: burn subtitles + hook title onto the temp file using simple -vf
+            emit(85, 'Burning subtitles & overlays...');
+            console.log(`[Render] Pass 2: Burning subtitles + hook onto ${tempOutputPath}`);
+            const pass2Filters = [subFilter, hookTitleFilter].filter(Boolean).join(',');
             const subArgs = [
                 '-y',
                 '-i', tempOutputPath,
-                '-vf', `${subFilter},format=yuv420p`,
+                '-vf', `${pass2Filters},format=yuv420p`,
                 '-c:v', encoder, ...encoderArgs, '-crf', crf,
                 '-c:a', 'copy',
                 '-shortest',
@@ -564,11 +633,12 @@ async function renderClip(clipId, io) {
                     else if (encoder.includes('qsv')) subArgs[crfIdx2] = '-global_quality';
                 }
             }
+            console.log(`[Render] Pass 2 args: ffmpeg ${subArgs.join(' ').substring(0, 300)}...`);
             const result1b = await runFFmpeg(subArgs, duration, emit, io, project.id);
-            // Clean up temp file
-            try { fs.unlinkSync(tempOutputPath); } catch (e) { }
 
             if (result1b.success && validateOutput(outputPath)) {
+                // Pass 2 succeeded — clean up temp and return
+                try { fs.unlinkSync(tempOutputPath); } catch (e) { }
                 const stats = fs.statSync(outputPath);
                 const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
                 run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
@@ -576,12 +646,19 @@ async function renderClip(clipId, io) {
                 console.log(`[Render] Clip #${clip.clip_number} exported (2-pass): ${outputPath} (${sizeMB} MB)`);
                 return { outputPath, size: stats.size };
             }
-            // If subtitle pass failed, use the temp file as-is (without subtitles)
-            console.warn('[Render] Subtitle pass failed, using video without subtitles');
+
+            // Pass 2 FAILED — use temp file as-is (without subtitles/hook)
+            console.warn(`[Render] Pass 2 failed: ${result1b.errorMsg || 'Unknown error'}`);
+            console.warn(`[Render] Pass 2 stderr (last 500): ${(result1b.stderr || '').slice(-500)}`);
+            emit(90, 'Subtitle burn failed, using video without overlays');
             try {
-                fs.copyFileSync(tempOutputPath, outputPath);
-                fs.unlinkSync(tempOutputPath);
-            } catch (e) { /* temp might already be deleted */ }
+                if (fs.existsSync(tempOutputPath)) {
+                    fs.renameSync(tempOutputPath, outputPath);
+                    console.log(`[Render] Fallback: renamed temp to output (without subtitles)`);
+                }
+            } catch (e) {
+                console.error(`[Render] Fallback rename failed: ${e.message}`);
+            }
         }
 
         const stats = fs.statSync(outputPath);
@@ -676,6 +753,62 @@ async function renderClip(clipId, io) {
     run("UPDATE clips SET status = 'failed' WHERE id = ?", [clipId]);
     emit(0, `Render failed: ${finalError}`);
     throw new Error(finalError);
+}
+
+/**
+ * Build Hook Title drawtext filter
+ * Shows a text overlay with colored background box at top or bottom of video.
+ * @param {object} clip - clip object (with hook_text, hook_settings)
+ * @param {number} outW - output width
+ * @param {number} outH - output height
+ * @param {number} duration - clip duration in seconds
+ * @returns {string} drawtext filter string or empty string
+ */
+function buildHookTitleFilter(clip, outW, outH, duration) {
+    const hookText = clip.hook_text;
+    if (!hookText || !hookText.trim()) return '';
+
+    // Only render hook if user explicitly configured settings in the editor
+    if (!clip.hook_settings) return '';
+
+    let settings = {};
+    try {
+        settings = typeof clip.hook_settings === 'string' ? JSON.parse(clip.hook_settings) : (clip.hook_settings || {});
+    } catch (e) { return ''; }
+
+    // Must have at least been saved from the editor (has explicit values)
+    if (!settings.position && !settings.textColor && !settings.bgColor) return '';
+
+    const hookDuration = settings.duration != null ? settings.duration : 5;
+    const position = settings.position || 'top';
+    const fontSize = settings.fontSize || Math.round(outW / 14);
+    const textColor = (settings.textColor || 'FFFFFF').replace('#', '');
+    const bgColor = (settings.bgColor || 'FF0000').replace('#', '');
+    const bgOpacity = settings.bgOpacity || '0.85';
+
+    // Simple escape for drawtext - strip problematic chars
+    const escapedText = hookText.replace(/['\\:%;]/g, ' ').replace(/"/g, ' ').trim();
+    if (!escapedText) return '';
+
+    const margin = Math.round(outW * 0.04);
+    const posY = position === 'bottom' ? `h-th-${margin * 4}` : `${margin}`;
+    const enableExpr = hookDuration > 0 ? `:enable='between(t,0,${hookDuration})'` : '';
+    const boxBorderW = Math.round(fontSize * 0.4);
+
+    // FFmpeg drawtext on Windows requires explicit fontfile= (no Fontconfig configured)
+    const os = require('os');
+    const userFontsDir = path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'Windows', 'Fonts');
+    const systemFontsDir = 'C:\\Windows\\Fonts';
+    const fontCandidates = [
+        path.join(userFontsDir, 'Montserrat-Bold.ttf'),
+        path.join(userFontsDir, 'Montserrat-ExtraBold.ttf'),
+        path.join(systemFontsDir, 'arialbd.ttf'),
+        path.join(systemFontsDir, 'arial.ttf'),
+    ];
+    let fontPath = fontCandidates.find(f => fs.existsSync(f)) || path.join(systemFontsDir, 'arial.ttf');
+    const escapedFontPath = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+
+    return `drawtext=text='${escapedText}':fontfile='${escapedFontPath}':fontsize=${fontSize}:fontcolor=0x${textColor}:x=(w-tw)/2:y=${posY}:box=1:boxcolor=0x${bgColor}@${bgOpacity}:boxborderw=${boxBorderW}${enableExpr}`;
 }
 
 /**
@@ -1012,6 +1145,11 @@ const CAPTION_PRESETS = {
     podcast: { font: 'Arial', weight: 500, size: 56, color: '#E0E0E0', highlight: '#FF9800', outline: false, transform: 'none', position: 'bottom' },
     cinema: { font: 'Georgia', weight: 400, size: 60, color: '#D4C5A9', highlight: '#FFFFFF', outline: false, transform: 'none', position: 'bottom', italic: true },
     tiktok_og: { font: 'Montserrat', weight: 800, size: 68, color: '#FFFFFF', highlight: '#FE2C55', outline: true, transform: 'none', position: 'center' },
+    // === NEW STYLES ===
+    raymond: { font: 'Montserrat', weight: 800, size: 60, color: '#FFFFFF', highlight: '#FFD700', outline: true, transform: 'none', position: 'bottom', highlightScale: 160, spacing: 2 },
+    clean_box: { font: 'Inter', weight: 700, size: 60, color: '#FFFFFF', highlight: '#00E5FF', outline: false, transform: 'none', position: 'center', boxBg: true, boxColor: '#1A1A2E', boxOpacity: 0.85, spacing: 2 },
+    neon_box: { font: 'Montserrat', weight: 800, size: 66, color: '#FFFFFF', highlight: '#39FF14', outline: true, transform: 'uppercase', position: 'center', boxBg: true, boxColor: '#000000', boxOpacity: 0.6, spacing: 2 },
+    pastel_box: { font: 'Inter', weight: 600, size: 58, color: '#2D2D2D', highlight: '#FF6B6B', outline: false, transform: 'none', position: 'bottom', boxBg: true, boxColor: '#FFFFFF', boxOpacity: 0.9, spacing: 2 },
 };
 
 /**
@@ -1146,6 +1284,11 @@ function generateSubtitleFile(clip, project, outputDir) {
         position: custom.position || preset.position,
         italic: custom.italic || preset.italic || false,
         bgOpacity: custom.bgOpacity !== undefined ? custom.bgOpacity : 0.6,
+        boxBg: preset.boxBg || false,
+        boxColor: preset.boxColor || '#000000',
+        boxOpacity: preset.boxOpacity !== undefined ? preset.boxOpacity : 0.75,
+        spacing: preset.spacing || 2,
+        highlightScale: preset.highlightScale || 110,
     };
 
     // ASS alignment value based on position
@@ -1157,12 +1300,16 @@ function generateSubtitleFile(clip, project, outputDir) {
 
     const bold = style.weight >= 700 ? -1 : 0;
     const italic = style.italic ? -1 : 0;
-    const outlineSize = style.outline ? 6 : 0;
-    const shadowSize = style.outline ? 3 : 1;
+    // BorderStyle: 1 = outline+shadow, 3 = opaque box background
+    const useBoxBg = style.boxBg;
+    const borderStyle = useBoxBg ? 3 : 1;
+    const outlineSize = useBoxBg ? 18 : (style.outline ? 6 : 0);
+    const shadowSize = useBoxBg ? 8 : (style.outline ? 3 : 1);
     const primaryColor = hexToASS(style.color);
     const highlightColor = hexToASS(style.highlight);
-    const outlineColor = hexToASS('#000000');
-    const bgColor = hexToASS('#000000', Math.round((1 - style.bgOpacity) * 255));
+    const outlineColor = useBoxBg ? hexToASS(style.boxColor, Math.round((1 - style.boxOpacity) * 255)) : hexToASS('#000000');
+    const bgColor = useBoxBg ? hexToASS(style.boxColor, Math.round((1 - style.boxOpacity) * 255)) : hexToASS('#000000', Math.round((1 - style.bgOpacity) * 255));
+    const letterSpacing = style.spacing || 2;
 
     // Build ASS content
     let ass = `[Script Info]
@@ -1175,7 +1322,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${style.font},${style.size},${primaryColor},${primaryColor},${outlineColor},${bgColor},${bold},${italic},0,0,100,100,2,0,1,${outlineSize},${shadowSize},${alignment},60,60,${marginV},1
+Style: Default,${style.font},${style.size},${primaryColor},${primaryColor},${outlineColor},${bgColor},${bold},${italic},0,0,100,100,${letterSpacing},0,${borderStyle},${outlineSize},${shadowSize},${alignment},60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1189,13 +1336,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // This matches the preview behavior exactly
     const MAX_WORDS_PER_CHUNK = 5;
     const hlColor = highlightColor; // ASS format &HBBGGRR
+    const hlScale = style.highlightScale || 110; // Scale for active word (110=default, 160=raymond)
 
     // Helper: build a dialogue line with all words visible, one highlighted
     const buildHighlightLine = (allWords, activeIndex) => {
         let line = '';
         for (let j = 0; j < allWords.length; j++) {
             if (j === activeIndex) {
-                line += `{\\c${hlColor}\\fscx110\\fscy110}${allWords[j]}{\\r} `;
+                line += `{\\c${hlColor}\\fscx${hlScale}\\fscy${hlScale}}${allWords[j]}{\\r} `;
             } else {
                 line += `${allWords[j]} `;
             }

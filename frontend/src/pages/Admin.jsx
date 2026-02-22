@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Key, Plus, Trash2, RefreshCw, Copy, CheckCircle, XCircle, AlertTriangle, Crown, Zap, Hash, Users, BarChart3, Ban, Unlock, Download, Clock, Timer, RotateCcw, Lock, UserCheck, ArrowUpCircle } from 'lucide-react';
+import { Shield, Key, Plus, Trash2, RefreshCw, Copy, CheckCircle, XCircle, AlertTriangle, Crown, Zap, Hash, Users, BarChart3, Ban, Unlock, Download, Clock, Timer, RotateCcw, Lock, UserCheck, ArrowUpCircle, FileText, Filter } from 'lucide-react';
 
 const API = 'http://localhost:5000/api';
 
@@ -81,6 +81,28 @@ export default function Admin() {
     const [upgradeTier, setUpgradeTier] = useState('pro');
     const [upgradeDuration, setUpgradeDuration] = useState(0);
     const [upgrading, setUpgrading] = useState(false);
+
+    // Audit log state
+    const [showLogs, setShowLogs] = useState(false);
+    const [auditLogs, setAuditLogs] = useState([]);
+    const [logsLoading, setLogsLoading] = useState(false);
+    const [logFilter, setLogFilter] = useState('');
+
+    const loadLogs = async (filter = '') => {
+        setLogsLoading(true);
+        try {
+            const url = filter
+                ? `${API}/admin/logs?action=${filter}&limit=100`
+                : `${API}/admin/logs?limit=100`;
+            const res = await adminFetch(url);
+            const data = await res.json();
+            setAuditLogs(data.logs || data.recentActivity || []);
+        } catch (err) {
+            setMsg(`❌ Error loading logs: ${err.message}`);
+        } finally {
+            setLogsLoading(false);
+        }
+    };
 
     const loadData = async () => {
         try {
@@ -481,7 +503,118 @@ export default function Admin() {
                         <Download size={14} /> Export CSV
                     </button>
                 )}
+                <button className="btn btn-ghost" onClick={() => { setShowLogs(!showLogs); if (!showLogs) loadLogs(logFilter); }} style={{ gap: 6 }}>
+                    <FileText size={14} /> {showLogs ? 'Hide Logs' : 'Audit Log'}
+                </button>
             </div>
+
+            {/* Audit Log Section */}
+            <AnimatePresence>
+                {showLogs && (
+                    <motion.div className="card" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                        style={{ marginBottom: 20, padding: 20 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                            <h3 style={{ fontFamily: 'Outfit', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                                <FileText size={18} style={{ color: '#06b6d4' }} /> Audit Log
+                            </h3>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <Filter size={14} style={{ color: 'var(--text-muted)' }} />
+                                <select
+                                    value={logFilter}
+                                    onChange={(e) => { setLogFilter(e.target.value); loadLogs(e.target.value); }}
+                                    style={{
+                                        padding: '4px 8px', borderRadius: 6, fontSize: 12,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+                                        color: 'var(--text-primary)'
+                                    }}
+                                >
+                                    <option value="">Semua</option>
+                                    <option value="activate">Activate</option>
+                                    <option value="deactivate">Deactivate</option>
+                                    <option value="admin_unbind">Unbind</option>
+                                    <option value="admin_revoke">Revoke</option>
+                                    <option value="admin_reset">Reset</option>
+                                    <option value="reactivate">Reactivate</option>
+                                </select>
+                                <button className="btn btn-ghost btn-sm" onClick={() => loadLogs(logFilter)} style={{ padding: '3px 8px' }}>
+                                    <RefreshCw size={12} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {logsLoading ? (
+                            <div style={{ textAlign: 'center', padding: 20 }}>
+                                <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-cyan)' }} />
+                            </div>
+                        ) : auditLogs.length === 0 ? (
+                            <p style={{ textAlign: 'center', fontSize: 13, color: 'var(--text-muted)', padding: 20 }}>Belum ada log.</p>
+                        ) : (
+                            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                            <th style={thStyle}>Waktu</th>
+                                            <th style={thStyle}>Action</th>
+                                            <th style={thStyle}>License Key</th>
+                                            <th style={thStyle}>Machine ID</th>
+                                            <th style={thStyle}>IP</th>
+                                            <th style={thStyle}>Detail</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {auditLogs.map((log, i) => {
+                                            const actionColors = {
+                                                activate: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
+                                                deactivate: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
+                                                admin_unbind: { bg: 'rgba(6,182,212,0.15)', color: '#06b6d4' },
+                                                admin_revoke: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
+                                                admin_reset: { bg: 'rgba(251,191,36,0.15)', color: '#f59e0b' },
+                                                reactivate: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
+                                            };
+                                            const ac = actionColors[log.action] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' };
+                                            const time = log.createdAt || log.created_at;
+                                            return (
+                                                <tr key={log.id || i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                                    <td style={tdStyle}>
+                                                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                                            {time ? new Date(time).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: ac.bg, color: ac.color }}>
+                                                            {log.action}
+                                                        </span>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <code style={{ fontSize: 11, color: '#10b981', fontFamily: 'monospace' }}>
+                                                            {log.licenseKey || log.license_keys?.license_key || '—'}
+                                                        </code>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                                                            {log.machineId || log.machine_id ? (log.machineId || log.machine_id).substring(0, 12) + '...' : '—'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                                            {log.ipAddress || log.ip_address || '—'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={tdStyle}>
+                                                        <span style={{ fontSize: 10, color: 'var(--text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                                                            {log.details ? (typeof log.details === 'string' ? log.details : JSON.stringify(log.details)) : '—'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Generate Form */}
             <AnimatePresence>

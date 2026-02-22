@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Upload, FolderOpen, Settings, Zap, Key, Info, ArrowUpCircle } from 'lucide-react';
+import { Home, Upload, FolderOpen, Music, Settings, Zap, Key, Info, ArrowUpCircle } from 'lucide-react';
 
 const APP_VERSION = __APP_VERSION__ || '1.1.6';
 
@@ -8,6 +8,7 @@ const navItems = [
     { path: '/', icon: Home, label: 'Dashboard' },
     { path: '/upload', icon: Upload, label: 'New Project' },
     { path: '/projects', icon: FolderOpen, label: 'Projects' },
+    { path: '/audio', icon: Music, label: 'Audio Library' },
     { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
