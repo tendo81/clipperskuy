@@ -104,10 +104,9 @@ export default function About() {
     ];
 
     const changelog = [
-        { version: '1.1.6', date: '2026-02-16', items: ['YouTube fix: Deno bundled for JS challenge', 'Auto-updater fix (electron-updater)', 'Smart yt-dlp binary detection', 'AI Social Media Copy Generator', 'Dynamic version display'] },
+        { version: '1.1.7', date: '2026-02-23', items: ['🔒 License binding: 1 license = 1 machine ID', '📋 Admin panel: Audit Log tab + filter by action', '🎵 Audio Library untuk background music clip', '🚫 Self-deactivation disabled, admin only unbind'] },
+        { version: '1.1.6', date: '2026-02-16', items: ['YouTube fix: Deno bundled for JS challenge', 'Auto-updater fix (electron-updater)', 'AI Social Media Copy Generator', 'Dynamic version display'] },
         { version: '1.1.2', date: '2026-02-15', items: ['Auto-update from private repo', 'Signed license keys (cross-machine)', 'YouTube download 16 strategies', 'yt-dlp path fix for Electron'] },
-        { version: '1.1.0', date: '2026-02-14', items: ['Karaoke subtitle highlight', 'Word-level timestamps', 'Clip selection & export', 'Admin panel (web only)'] },
-        { version: '1.0.0', date: '2026-02-11', items: ['Initial release', 'AI clip detection', 'Video reframing', 'Caption rendering'] },
     ];
 
     return (
