@@ -758,6 +758,7 @@ async function renderClip(clipId, io) {
 /**
  * Build Hook Title drawtext filter
  * Shows a text overlay with colored background box at top or bottom of video.
+ * Text is automatically wrapped to fit within the video frame.
  * @param {object} clip - clip object (with hook_text, hook_settings)
  * @param {number} outW - output width
  * @param {number} outH - output height
@@ -791,7 +792,6 @@ function buildHookTitleFilter(clip, outW, outH, duration) {
     if (!escapedText) return '';
 
     const margin = Math.round(outW * 0.04);
-    const posY = position === 'bottom' ? `h-th-${margin * 4}` : `${margin}`;
     const enableExpr = hookDuration > 0 ? `:enable='between(t,0,${hookDuration})'` : '';
     const boxBorderW = Math.round(fontSize * 0.4);
 
@@ -808,8 +808,54 @@ function buildHookTitleFilter(clip, outW, outH, duration) {
     let fontPath = fontCandidates.find(f => fs.existsSync(f)) || path.join(systemFontsDir, 'arial.ttf');
     const escapedFontPath = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 
-    return `drawtext=text='${escapedText}':fontfile='${escapedFontPath}':fontsize=${fontSize}:fontcolor=0x${textColor}:x=(w-tw)/2:y=${posY}:box=1:boxcolor=0x${bgColor}@${bgOpacity}:boxborderw=${boxBorderW}${enableExpr}`;
+    // === TEXT WRAPPING ===
+    // Available width for text: video width minus margins and box padding on both sides
+    const maxTextWidth = outW - (margin * 2) - (boxBorderW * 2);
+    // Character width for BOLD fonts is approximately 0.7 * fontSize
+    // Using conservative estimate to prevent overflow
+    const avgCharWidth = fontSize * 0.7;
+    const maxCharsPerLine = Math.max(6, Math.floor(maxTextWidth / avgCharWidth));
+
+    console.log(`[HookTitle] outW=${outW} fontSize=${fontSize} maxTextWidth=${maxTextWidth} avgCharW=${avgCharWidth.toFixed(1)} maxChars=${maxCharsPerLine} text="${escapedText}"`);
+
+    // Word-wrap the text into lines
+    const words = escapedText.split(/\s+/);
+    const lines = [];
+    let currentLine = '';
+    for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        if (testLine.length > maxCharsPerLine && currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+        } else {
+            currentLine = testLine;
+        }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    console.log(`[HookTitle] Wrapped into ${lines.length} lines:`, lines);
+
+    // For multiple lines, stack drawtext filters with calculated Y positions
+    const lineHeight = Math.round(fontSize * 1.4);
+    const totalTextHeight = lines.length * lineHeight;
+
+    // Calculate base Y position
+    let baseY;
+    if (position === 'bottom') {
+        baseY = outH - totalTextHeight - margin * 3;
+    } else {
+        baseY = margin;
+    }
+
+    // Build a drawtext filter for each line
+    const drawtextFilters = lines.map((line, idx) => {
+        const yPos = baseY + (idx * lineHeight);
+        return `drawtext=text='${line}':fontfile='${escapedFontPath}':fontsize=${fontSize}:fontcolor=0x${textColor}:x=(w-tw)/2:y=${yPos}:box=1:boxcolor=0x${bgColor}@${bgOpacity}:boxborderw=${boxBorderW}${enableExpr}`;
+    });
+
+    return drawtextFilters.join(',');
 }
+
 
 /**
  * Build video filter string
