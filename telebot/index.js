@@ -203,12 +203,14 @@ async function sendLog(bot, text) {
 async function createBayarGGPayment(orderId, amount, customerName) {
     if (!BAYARGG_API_KEY) return null;
     try {
+        // gopay_qris sudah dynamic by default - tidak perlu use_qris_converter
+        const useConverter = (BAYARGG_METHOD === 'qris' || BAYARGG_METHOD === 'qris_user');
         const body = {
             amount,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName || 'Customer',
             payment_method: BAYARGG_METHOD,
-            use_qris_converter: true  // QRIS dinamis dengan nominal tertanam
+            ...(useConverter && { use_qris_converter: true })
         };
         const res = await fetch('https://www.bayar.gg/api/create-payment.php', {
             method: 'POST',
@@ -226,12 +228,14 @@ async function createBayarGGPayment(orderId, amount, customerName) {
                 payment_url: data.data.payment_url,
                 final_amount: data.data.final_amount,
                 unique_code: data.data.unique_code,
-                // QRIS image (dinamis dengan nominal tertanam)
-                qris_image_url: data.data.qris_converter?.qr_image_url || null,
+                qris_image_url: data.data.qris_converter?.qr_image_url
+                    || data.data.qris_image_url
+                    || null,
                 qris_string: data.data.qris_converter?.converted_qris || null,
                 expires_at: data.data.expires_at
             };
         }
+        console.log('bayar.gg failed:', JSON.stringify(data));
         return null;
     } catch (err) {
         console.error('bayar.gg create error:', err.message);
