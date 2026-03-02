@@ -203,14 +203,12 @@ async function sendLog(bot, text) {
 async function createBayarGGPayment(orderId, amount, customerName) {
     if (!BAYARGG_API_KEY) return null;
     try {
-        // gopay_qris sudah dynamic by default - tidak perlu use_qris_converter
-        const useConverter = (BAYARGG_METHOD === 'qris' || BAYARGG_METHOD === 'qris_user');
         const body = {
             amount,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName || 'Customer',
-            payment_method: BAYARGG_METHOD,
-            ...(useConverter && { use_qris_converter: true })
+            payment_method: BAYARGG_METHOD
+            // Tidak pakai use_qris_converter — generate QR dari payment_url
         };
         const res = await fetch('https://www.bayar.gg/api/create-payment.php', {
             method: 'POST',
@@ -223,15 +221,17 @@ async function createBayarGGPayment(orderId, amount, customerName) {
         const data = await res.json();
         console.log('bayar.gg create response:', JSON.stringify(data));
         if (data.success && data.data) {
+            const paymentUrl = data.data.payment_url;
+            // Generate QR code dari payment_url agar user bisa scan langsung di Telegram
+            const qrImageUrl = paymentUrl
+                ? `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(paymentUrl)}`
+                : null;
             return {
                 invoice_id: data.data.invoice_id,
-                payment_url: data.data.payment_url,
+                payment_url: paymentUrl,
                 final_amount: data.data.final_amount,
                 unique_code: data.data.unique_code,
-                qris_image_url: data.data.qris_converter?.qr_image_url
-                    || data.data.qris_image_url
-                    || null,
-                qris_string: data.data.qris_converter?.converted_qris || null,
+                qris_image_url: qrImageUrl,
                 expires_at: data.data.expires_at
             };
         }
