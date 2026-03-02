@@ -200,14 +200,63 @@ async function sendLog(bot, text) {
 }
 
 // ============ PAYMENT (bayar.gg) ============
+
+// Cache QRIS string asli dari GoPay Merchant (untuk use_qris_converter)
+let _cachedQrisString = null;
+
+async function getGopayQrisString() {
+    if (_cachedQrisString) return _cachedQrisString;
+    try {
+        // Ambil QRIS image URL dari akun
+        const statusRes = await fetch('https://www.bayar.gg/api/get-account-status', {
+            headers: { 'X-API-Key': BAYARGG_API_KEY }
+        });
+        const statusData = await statusRes.json();
+        const qrisImageUrl = statusData.data?.integrations?.gopay_merchant?.qris_image_url
+            || statusData.data?.integrations?.bri_qris_user?.qris_image_url
+            || null;
+
+        if (!qrisImageUrl) {
+            console.log('bayar.gg: tidak ada QRIS image URL di akun');
+            return null;
+        }
+
+        // Convert image → QRIS string original
+        const convertRes = await fetch('https://www.bayar.gg/api/qris-convert.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': BAYARGG_API_KEY },
+            body: JSON.stringify({ image_url: qrisImageUrl, nominal: 1000 }) // nominal dummy untuk dapat original_qris
+        });
+        const convertData = await convertRes.json();
+        const originalQris = convertData.data?.original_qris || null;
+
+        if (originalQris) {
+            _cachedQrisString = originalQris;
+            console.log('bayar.gg: QRIS string cached OK');
+        }
+        return originalQris;
+    } catch (err) {
+        console.error('bayar.gg getGopayQrisString error:', err.message);
+        return null;
+    }
+}
+
 async function createBayarGGPayment(orderId, amount, customerName) {
     if (!BAYARGG_API_KEY) return null;
     try {
+        // Coba dapatkan QRIS string untuk use_qris_converter
+        const qrisString = await getGopayQrisString();
+
         const body = {
             amount,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName || 'Customer',
-            payment_method: BAYARGG_METHOD
+            payment_method: BAYARGG_METHOD,
+            // Jika ada QRIS string, aktifkan converter → QR dinamis di Telegram
+            ...(qrisString && {
+                use_qris_converter: true,
+                qris_string: qrisString
+            })
         };
         const res = await fetch('https://www.bayar.gg/api/create-payment.php', {
             method: 'POST',
@@ -225,6 +274,8 @@ async function createBayarGGPayment(orderId, amount, customerName) {
                 payment_url: data.data.payment_url,
                 final_amount: data.data.final_amount,
                 unique_code: data.data.unique_code,
+                // QR dinamis dari converter (jika berhasil)
+                qris_image_url: data.data.qris_converter?.qr_image_url || null,
                 expires_at: data.data.expires_at
             };
         }
@@ -570,9 +621,10 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
             const expiredAt = payment.expires_at
                 ? new Date(payment.expires_at).toLocaleString('id-ID')
                 : '15 menit';
+            const hasQR = !!payment.qris_image_url;
 
             const text = `
-💳 <b>PEMBAYARAN</b>
+💳 <b>PEMBAYARAN QRIS</b>
 ━━━━━━━━━━━━━━━━━━
 
 🆔 <b>Order:</b> <code>${orderId}</code>
@@ -581,23 +633,35 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
 🔢 <b>Kode unik:</b> +${uniqueCode}
 💳 <b>Total bayar: ${formatPrice(finalAmount)}</b>
 
-📱 Tap <b>"Bayar Sekarang"</b> → pilih GoPay/Dana/OVO → konfirmasi
-🔑 License key otomatis dikirim setelah bayar ✅
+${hasQR
+                    ? `<i>Scan QRIS di bawah — nominal sudah otomatis terisi!</i>\n(GoPay, Dana, OVO, ShopeePay, LinkAja, dll)`
+                    : `📱 Tap <b>"Bayar Sekarang"</b> → pilih GoPay → nominal otomatis terisi`}
 
-⏱ Expired: <b>${expiredAt}</b>`;
+⏱ Expired: <b>${expiredAt}</b>
+🔑 License key otomatis dikirim setelah bayar ✅`;
 
             await ctx.editMessageText(text, { parse_mode: 'HTML' });
 
-            const buttons = [];
-            if (payment.payment_url) {
-                buttons.push([Markup.button.url('💳 Bayar Sekarang', payment.payment_url)]);
+            if (hasQR) {
+                await ctx.replyWithPhoto(payment.qris_image_url, {
+                    caption: `💳 Scan & Bayar <b>${formatPrice(finalAmount)}</b>\n🆔 Order: <code>${orderId}</code>\n\n✅ Nominal sudah otomatis terisi!`,
+                    parse_mode: 'HTML',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)],
+                        [Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]
+                    ])
+                });
+            } else {
+                const buttons = [];
+                if (payment.payment_url) {
+                    buttons.push([Markup.button.url('💳 Bayar Sekarang', payment.payment_url)]);
+                }
+                buttons.push([Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)]);
+                buttons.push([Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]);
+                await ctx.reply('⏳ Bot otomatis cek pembayaran tiap 15 detik.',
+                    Markup.inlineKeyboard(buttons)
+                );
             }
-            buttons.push([Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)]);
-            buttons.push([Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]);
-
-            await ctx.reply('⏳ Bot otomatis cek pembayaran tiap 15 detik.',
-                Markup.inlineKeyboard(buttons)
-            );
 
             order.status = 'waiting_payment';
             order.payment_method = 'bayargg';
