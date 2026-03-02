@@ -199,8 +199,10 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
                 // even though the download succeeded. Check stdout for success indicators
                 // before deciding to retry.
                 const hasDownloaded = stdout.includes('[download] 100%') ||
+                    stdout.includes('[download] 100.0%') ||
                     stdout.includes('has already been downloaded') ||
-                    stdout.includes('Merging formats into');
+                    stdout.includes('Merging formats into') ||
+                    stdout.includes('Deleting original file');
 
                 if (code !== 0 && !hasDownloaded) {
                     const errLower = stderr.toLowerCase();
@@ -285,17 +287,19 @@ function downloadYoutube(url, outputDir, onProgress, io) {
 
             let outputFile = null;
 
-            // Format priority (more aggressive about getting HD):
+            // Format priority — ALL options MUST include video stream:
             // 1. Best MP4 video ≤1080p + best M4A audio (ideal)
-            // 2. Best ANY video ≤1080p + best audio (allows webm/av01 which have more formats)
-            // 3. Best combined MP4 (single stream, often 720p)
-            // 4. Best anything available
+            // 2. Best ANY video ≤1080p + best audio (allows webm/av01)
+            // 3. Best video-only ≤1080p + best audio (any format)
+            // 4. Best combined format with video (single stream)
+            // 5. Worst case: any format that has video (even low quality)
+            // NEVER use bare 'best' — it can match audio-only!
             const formatStr = [
                 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]',
                 'bestvideo[height<=1080]+bestaudio',
-                'best[ext=mp4][height>=720]',
-                'best[ext=mp4]',
-                'best'
+                'bestvideo+bestaudio',
+                'best[vcodec!=none][height>=360]',
+                'best[vcodec!=none]'
             ].join('/');
 
             console.log('[yt-dlp] Downloading:', url);
@@ -316,11 +320,22 @@ function downloadYoutube(url, outputDir, onProgress, io) {
                     if (progressMatch && onProgress) {
                         onProgress(parseFloat(progressMatch[1]), line);
                     }
-                    // Capture destination file
+                    // Capture destination file (but DON'T let audio overwrite video)
                     const destMatch = line.match(/Destination:\s+(.+)/);
-                    if (destMatch) outputFile = destMatch[1].trim();
-                    // Merge message contains final file
+                    if (destMatch) {
+                        const dest = destMatch[1].trim();
+                        // Only set if no merge file found yet, and prefer video over audio
+                        if (!outputFile || (!dest.endsWith('.m4a') && !dest.endsWith('.webm'))) {
+                            outputFile = dest;
+                        }
+                    }
+                    // Merge message contains FINAL merged file — always use this
                     const mergeMatch = line.match(/Merging formats into "(.+)"/);
+                    if (mergeMatch) outputFile = mergeMatch[1].trim();
+                },
+                onStderr: (data) => {
+                    // yt-dlp sometimes outputs merge info to stderr
+                    const mergeMatch = data.match(/Merging formats into "(.+)"/);
                     if (mergeMatch) outputFile = mergeMatch[1].trim();
                 }
             });
@@ -329,12 +344,73 @@ function downloadYoutube(url, outputDir, onProgress, io) {
                 return reject(new Error(`yt-dlp exited with code ${result.code}: ${result.stderr.slice(-200)}`));
             }
 
-            // Find the output file if we didn't capture it
-            if (!outputFile) {
-                const files = fs.readdirSync(outputDir).filter(f => f.startsWith(outputId));
-                if (files.length > 0) {
-                    outputFile = path.join(outputDir, files[0]);
+            // Also check stdout/stderr for merge path (belt and suspenders)
+            const mergeStdout = result.stdout.match(/Merging formats into "(.+)"/);
+            if (mergeStdout) outputFile = mergeStdout[1].trim();
+            const mergeStderr = (result.stderr || '').match(/Merging formats into "(.+)"/);
+            if (mergeStderr) outputFile = mergeStderr[1].trim();
+
+            // Scan all downloaded files for this ID
+            const allDlFiles = fs.readdirSync(outputDir).filter(f => f.startsWith(outputId));
+            console.log(`[yt-dlp] Files found: ${allDlFiles.join(', ')}`);
+
+            // Distinguish merged vs partial files
+            // Partial files have format IDs: .f399-sr.mp4, .f140.m4a, etc.
+            // Merged file: {uuid}.mp4 (no .f### pattern)
+            const mergedFile = allDlFiles.find(f => f.endsWith('.mp4') && !f.match(/\.f\d+/));
+            const videoPartial = allDlFiles.find(f => f.endsWith('.mp4') && f.match(/\.f\d+/));
+            const audioPartial = allDlFiles.find(f => f.endsWith('.m4a') && f.match(/\.f\d+/));
+
+            if (mergedFile) {
+                // Already merged by yt-dlp
+                outputFile = path.join(outputDir, mergedFile);
+                console.log(`[yt-dlp] ✅ Found merged file: ${mergedFile}`);
+            } else if (videoPartial && audioPartial) {
+                // yt-dlp failed to merge — do it manually with ffmpeg
+                const videoPath = path.join(outputDir, videoPartial);
+                const audioPath = path.join(outputDir, audioPartial);
+                const mergedPath = path.join(outputDir, `${outputId}.mp4`);
+
+                console.log(`[yt-dlp] ⚠ Merge not done by yt-dlp. Merging manually...`);
+                console.log(`[yt-dlp]   Video: ${videoPartial} (${(fs.statSync(videoPath).size / 1024 / 1024).toFixed(1)}MB)`);
+                console.log(`[yt-dlp]   Audio: ${audioPartial} (${(fs.statSync(audioPath).size / 1024 / 1024).toFixed(1)}MB)`);
+
+                const { execSync } = require('child_process');
+                const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+                try {
+                    execSync(
+                        `"${ffmpegPath}" -i "${videoPath}" -i "${audioPath}" -c copy -y "${mergedPath}"`,
+                        { timeout: 120000, stdio: 'pipe' }
+                    );
+                    outputFile = mergedPath;
+                    console.log(`[yt-dlp] ✅ Manual merge successful: ${outputId}.mp4`);
+                } catch (mergeErr) {
+                    console.error(`[yt-dlp] ❌ Manual merge failed: ${mergeErr.message}`);
+                    // Fall back to video-only file
+                    outputFile = videoPath;
                 }
+            } else if (videoPartial) {
+                // Only video partial, no audio — use it anyway
+                outputFile = path.join(outputDir, videoPartial);
+                console.log(`[yt-dlp] ⚠ Only video partial found: ${videoPartial}`);
+            } else if (outputFile && fs.existsSync(outputFile)) {
+                console.log(`[yt-dlp] Using captured output: ${path.basename(outputFile)}`);
+            } else if (allDlFiles.length > 0) {
+                outputFile = path.join(outputDir, allDlFiles[0]);
+                console.log(`[yt-dlp] Using first available: ${allDlFiles[0]}`);
+            }
+
+            // Clean up partial files ONLY after merge confirmed
+            if (outputFile && fs.existsSync(outputFile) && !outputFile.match(/\.f\d+/)) {
+                try {
+                    const cleanFiles = fs.readdirSync(outputDir).filter(f =>
+                        f.startsWith(outputId) && path.join(outputDir, f) !== outputFile
+                    );
+                    for (const f of cleanFiles) {
+                        fs.removeSync(path.join(outputDir, f));
+                        console.log(`[yt-dlp] Cleaned up partial: ${f}`);
+                    }
+                } catch (e) { /* ignore */ }
             }
 
             if (!outputFile || !fs.existsSync(outputFile)) {

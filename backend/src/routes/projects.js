@@ -818,6 +818,17 @@ router.post('/youtube', async (req, res) => {
             console.error('[FFmpeg] Could not get video info:', e.message);
         }
 
+        // VALIDATION: Reject audio-only downloads (e.g., .m4a from bot detection)
+        const ext = path.extname(downloadResult.filePath).toLowerCase();
+        if (!videoInfo.width || !videoInfo.height || videoInfo.width === 0 || videoInfo.height === 0) {
+            // Clean up the audio-only file
+            try { fs.removeSync(downloadResult.filePath); } catch (e) { }
+            const errMsg = `Download failed: file is audio-only (${ext}), no video stream found. YouTube may be blocking video downloads. Try: 1) Close all browsers and retry, 2) Use a different video URL, 3) Export cookies.txt manually.`;
+            console.error(`[YouTube] ${errMsg}`);
+            emitProgress('error', 0, errMsg);
+            return res.status(400).json({ error: errMsg });
+        }
+
         // Step 4: Generate thumbnail
         emitProgress('thumbnail', 95, `Creating thumbnail... (${videoInfo.width}x${videoInfo.height})`);
 
@@ -1502,11 +1513,11 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
   },
   "instagram": {
     "title": "clickbait title referencing actual content",
-    "description": "longer caption with story elements from clip, 200-500 chars, with CTA",
-    "hashtags": "#hashtags (15-20 including niche and broad)",
+    "description": "longer caption with story elements from clip, keyword-rich for SEO (Instagram now uses keywords for discovery, NOT hashtags). 200-500 chars, with CTA that encourages DM shares",
+    "hashtags": "#hashtags (3 MAX — Instagram caps at 3! Use only the most relevant ones)",
     "hooks": ["content-specific hook 1", "hook 2", "hook 3", "hook 4", "hook 5"],
     "bestTime": "best posting time",
-    "engagementTip": "engagement tip"
+    "engagementTip": "engagement tip (note: DM shares are Instagram's #1 ranking signal now)"
   },
   "youtube": {
     "title": "SEO clickbait title with real content keywords, 60-80 chars",
@@ -1552,7 +1563,7 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
                                 { role: 'user', content: prompt }
                             ],
                             temperature: 0.85,
-                            max_tokens: 3000
+                            max_tokens: 6000
                         })
                     });
                     if (resp.ok) {
@@ -1573,7 +1584,7 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
+                            generationConfig: { temperature: 0.6, maxOutputTokens: 6000 }
                         })
                     });
                     if (resp.ok) {
@@ -1611,7 +1622,29 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
             if (inStr && c === '\t') { sanitized += ' '; continue; }
             sanitized += c;
         }
-        const socialCopy = JSON.parse(sanitized);
+
+        let socialCopy;
+        try {
+            socialCopy = JSON.parse(sanitized);
+        } catch (parseErr) {
+            // Fallback: aggressive cleanup — remove problematic characters
+            console.warn('[SocialCopy] Initial parse failed, trying aggressive cleanup...');
+            try {
+                // Replace smart quotes and other problematic chars
+                let aggressive = sanitized
+                    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '\\"') // smart double quotes
+                    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")  // smart single quotes
+                    .replace(/[\u2013\u2014]/g, '-')  // em/en dashes
+                    .replace(/[\u2026]/g, '...')       // ellipsis
+                    .replace(/,\s*([}\]])/g, '$1')     // trailing commas
+                    .replace(/([}\]]),\s*$/g, '$1');    // trailing comma at end
+                socialCopy = JSON.parse(aggressive);
+            } catch (parseErr2) {
+                console.error('[SocialCopy] JSON parse failed even after cleanup:', parseErr2.message);
+                console.error('[SocialCopy] Raw AI response (first 500 chars):', sanitized.substring(0, 500));
+                return res.status(500).json({ error: 'AI returned malformed JSON. Try again.' });
+            }
+        }
 
         // Save to clip (optional — store last generated copy)
         run('UPDATE clips SET social_copy = ? WHERE id = ?', [JSON.stringify(socialCopy), req.params.clipId]);
@@ -1619,6 +1652,187 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
         res.json({ success: true, social: socialCopy });
     } catch (err) {
         console.error('[SocialCopy] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========================================
+// AI Hook Text Generator — Generate hook text for a single clip
+// ========================================
+router.post('/clips/:clipId/generate-hook', async (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        const project = get('SELECT * FROM projects WHERE id = ?', [clip.project_id]);
+        const transcript = get('SELECT * FROM transcripts WHERE project_id = ?', [clip.project_id]);
+
+        // Get clip's transcript portion
+        let clipText = clip.title || '';
+        if (transcript) {
+            const parsed = typeof transcript.content === 'string' ? JSON.parse(transcript.content) : transcript.content;
+            const segments = parsed?.segments || [];
+            clipText = segments
+                .filter(s => s.start >= clip.start_time && s.end <= clip.end_time + 2)
+                .map(s => s.text)
+                .join(' ')
+                .trim() || clipText;
+        }
+        clipText = clipText.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').replace(/[`$\\]/g, ' ');
+
+        const settingsRows = all('SELECT key, value FROM settings');
+        const settings = {};
+        (settingsRows || []).forEach(s => { settings[s.key] = s.value; });
+
+        const { hook_style } = req.body || {};
+        const hookStyle = hook_style || 'drama';
+
+        const hookExamples = {
+            drama: 'Emosional, bikin nangis, contoh: "Dia bilang AKU HAMIL... tapi suaminya udah 3 tahun meninggal 😱"',
+            edukasi: 'Informatif, mind-blowing, contoh: "Dokter bilang JANGAN makan ini sebelum tidur... 90% orang masih lakuin 🤯"',
+            comedy: 'Lucu, relatable, contoh: "Bapak gue nyamar jadi OJOL buat ngecek pacar gue 😂💀"',
+            motivasi: 'Inspiring, powerful, contoh: "Dari jualan GORENGAN di pinggir jalan... sekarang punya 15 cabang resto 🔥"',
+            gossip: 'Viral, heboh, contoh: "Chat WA SUAMINYA kepegang istri... isinya bikin langsung GUGAT CERAI"',
+            horror: 'Seram, misteri, contoh: "Jam 3 pagi CCTV rumahnya rekam SOSOK yang berdiri di pojok kamar... 😨"',
+            storytelling: 'Narasi, kronologis, contoh: "Jadi ceritanya, gue ketemu MANTAN di nikahan TEMEN... dan ini yang terjadi 🍿"',
+            kontroversial: 'Debat, polarisasi, contoh: "Maaf tapi FAKTA-nya: sekolah TIDAK menjamin kesuksesan ⚡"',
+            clickbait: 'Aggressive CTA, contoh: "JANGAN skip video ini kalau kamu masih mau HIDUP lama 🚨"',
+            aesthetic: 'Soft, poetic, contoh: "sometimes the universe sends you exactly what you need ✨"'
+        };
+
+        const styleDesc = hookExamples[hookStyle] || hookExamples.drama;
+
+        const prompt = `You are a viral social media hook writer. Generate ONE killer hook text for this video clip.
+
+LANGUAGE: Detect the language of the clip text and write in the SAME language.
+STYLE: ${hookStyle.toUpperCase()} — ${styleDesc}
+
+CLIP TITLE: "${clip.title}"
+CLIP TEXT (transcript):
+"""
+${clipText.substring(0, 2000)}
+"""
+
+RULES:
+1. Use REAL details from the transcript — names, events, quotes, situations
+2. MUST be 8-15 words. NOT shorter. NOT longer.
+3. Use CAPS for 1-2 key emotional words (e.g., HANCUR, VIRAL, TERNYATA, FIRED)
+4. Use 1-2 emoji at the end
+5. Create a CURIOSITY GAP — make viewer think "WAIT WHAT?"
+6. NO generic phrases like "Tunggu sampai akhir", "Ternyata...", or just copying the title
+7. GOOD examples: "Dia bilang HAMIL tapi suaminya udah 3 tahun MENINGGAL 😱", "Guru ini DIPECAT gara-gara ngomong soal muridnya yang bikin HEBOH 🤯"
+8. BAD examples (DO NOT do this): "Astagfirullah", "Pertandingan seru", "Gua menginap di hotel"
+
+Return ONLY the hook text. No quotes, no explanation, no prefix. Just the raw hook text.`;
+
+        let aiResult = null;
+        const primary = settings.ai_provider_primary || 'groq';
+
+        if (primary === 'groq' && settings.groq_api_key) {
+            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'llama-3.3-70b-versatile',
+                            messages: [
+                                { role: 'system', content: 'You generate viral hook text. Return ONLY the hook text, nothing else.' },
+                                { role: 'user', content: prompt }
+                            ],
+                            temperature: 0.9,
+                            max_tokens: 200
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.choices?.[0]?.message?.content?.trim();
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        if (!aiResult && settings.gemini_api_key) {
+            const keys = settings.gemini_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { temperature: 0.7, maxOutputTokens: 200 }
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        // Fallback for Groq first
+        if (!aiResult && primary !== 'groq' && settings.groq_api_key) {
+            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
+            for (const key of keys) {
+                try {
+                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: 'llama-3.3-70b-versatile',
+                            messages: [
+                                { role: 'system', content: 'You generate viral hook text. Return ONLY the hook text, nothing else.' },
+                                { role: 'user', content: prompt }
+                            ],
+                            temperature: 0.9,
+                            max_tokens: 200
+                        })
+                    });
+                    if (resp.ok) {
+                        const r = await resp.json();
+                        aiResult = r.choices?.[0]?.message?.content?.trim();
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+        }
+
+        if (!aiResult) {
+            return res.status(500).json({ error: 'AI provider not available. Check API keys in Settings.' });
+        }
+
+        // Clean up hook text — remove quotes, prefixes
+        let hookText = aiResult
+            .replace(/^["'`]+|["'`]+$/g, '')
+            .replace(/^(Hook|Title|Caption|Text|Result):\s*/i, '')
+            .replace(/\.+$/, '') // remove trailing periods
+            .trim();
+
+        // If hook is too short (< 6 words), enhance it with clip context
+        const wordCount = hookText.split(/\s+/).length;
+        if (wordCount < 6 && clip.title) {
+            // Append clip title context to make it longer
+            hookText = `${hookText}... ${clip.title} yang bikin HEBOH 🔥`;
+            console.log(`[HookGen] Hook too short (${wordCount} words), enhanced to: "${hookText}"`);
+        }
+
+        // Ensure at least one emoji
+        if (!/[\u{1F300}-\u{1FAF8}]/u.test(hookText)) {
+            hookText += ' 🔥';
+        }
+
+        // Save to clip (include hook_style so UI can show which style was used)
+        run('UPDATE clips SET hook_text = ?, hook_style = ? WHERE id = ?', [hookText, hookStyle, req.params.clipId]);
+        console.log(`[HookGen] ${hookStyle}: "${hookText.substring(0, 80)}..." → clip ${req.params.clipId}`);
+
+        res.json({ success: true, hook_text: hookText });
+    } catch (err) {
+        console.error('[HookGen] Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

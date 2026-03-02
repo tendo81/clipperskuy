@@ -5,7 +5,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs-extra');
-const { initDatabase } = require('./database');
+const { initDatabase, startAutoSave } = require('./database');
 
 dotenv.config();
 
@@ -49,7 +49,8 @@ app.get('/api/health', (req, res) => {
 async function start() {
   try {
     await initDatabase();
-    console.log('[DB] Database ready');
+    startAutoSave();
+    console.log('[DB] Database ready (auto-save enabled)');
 
     // Routes (loaded after DB init)
     const projectRoutes = require('./routes/projects');
@@ -107,5 +108,25 @@ async function start() {
 }
 
 start();
+
+// ─── Global error guards — prevent backend from dying on unhandled errors ────
+// Without these, ANY unhandled promise rejection (e.g. FFmpeg crash, DB error)
+// kills the entire backend process silently.
+
+process.on('uncaughtException', (err) => {
+  console.error('\n[FATAL] Uncaught Exception — backend WILL keep running:');
+  console.error('  ', err.message);
+  console.error(err.stack);
+  // Don't call process.exit() — let the server keep running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('\n[ERROR] Unhandled Promise Rejection — backend stays up:');
+  console.error('  Reason:', reason instanceof Error ? reason.message : reason);
+  if (reason instanceof Error && reason.stack) {
+    console.error(reason.stack);
+  }
+  // Don't crash — just log it
+});
 
 module.exports = { app, io };

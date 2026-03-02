@@ -13,7 +13,7 @@ const https = require('https');
 const LICENSE_SERVER_URL = process.env.LICENSE_SERVER_URL || '';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 
-const TRIAL_DAYS = 14;
+const TRIAL_DAYS = 7;
 const MAX_FREE_PROJECTS = 3;
 
 // Feature limits per tier
@@ -27,9 +27,12 @@ const TIER_LIMITS = {
         customBranding: false,
         apiAccess: false,
         faceTrack: false,
+        faceTrackBlur: false,
+        podcast: false,
         audioEnhancement: false,
         maxClipsPerProject: 5,
-        maxSourceDurationMin: 30
+        maxSourceDurationMin: 30,
+        maxDailyExports: 3
     },
     trial: {
         maxProjects: Infinity,
@@ -40,9 +43,12 @@ const TIER_LIMITS = {
         customBranding: false,
         apiAccess: false,
         faceTrack: true,
+        faceTrackBlur: false,
+        podcast: true,
         audioEnhancement: true,
         maxClipsPerProject: Infinity,
-        maxSourceDurationMin: Infinity
+        maxSourceDurationMin: Infinity,
+        maxDailyExports: Infinity
     },
     pro: {
         maxProjects: Infinity,
@@ -53,9 +59,12 @@ const TIER_LIMITS = {
         customBranding: true,
         apiAccess: false,
         faceTrack: true,
+        faceTrackBlur: true,
+        podcast: true,
         audioEnhancement: true,
         maxClipsPerProject: Infinity,
-        maxSourceDurationMin: Infinity
+        maxSourceDurationMin: Infinity,
+        maxDailyExports: Infinity
     },
     enterprise: {
         maxProjects: Infinity,
@@ -66,9 +75,12 @@ const TIER_LIMITS = {
         customBranding: true,
         apiAccess: true,
         faceTrack: true,
+        faceTrackBlur: true,
+        podcast: true,
         audioEnhancement: true,
         maxClipsPerProject: Infinity,
-        maxSourceDurationMin: Infinity
+        maxSourceDurationMin: Infinity,
+        maxDailyExports: Infinity
     }
 };
 
@@ -90,16 +102,197 @@ function getMachineId() {
 }
 
 /**
- * Get trial info (trial system disabled — always returns expired)
+ * Get trial info — manual activation version
+ * Does NOT auto-start trial. User must call startTrial() explicitly.
+ * If trial was never started, returns { started: false, expired: true }
+ * 
+ * On first call after install, checks online server for existing trial
+ * (prevents reinstall abuse)
  */
+let _trialSyncDone = false;
+
 function getTrialInfo() {
+    let trialRow = get('SELECT value FROM settings WHERE key = ?', ['trial_started_at']);
+
+    // On first call, check online server for existing trial (anti-abuse)
+    if (!trialRow && !_trialSyncDone) {
+        // Fire background sync — if server has a trial for this machine,
+        // it will be written to local DB for next call
+        syncTrialOnline().catch(e => console.warn('[License] Trial online sync failed:', e.message));
+        _trialSyncDone = true;
+
+        // No trial started yet
+        return {
+            started: false,
+            startedAt: null,
+            daysElapsed: 0,
+            daysRemaining: 0,
+            totalDays: TRIAL_DAYS,
+            expired: true  // treat as expired so tier stays 'free'
+        };
+    }
+
+    if (!trialRow) {
+        return {
+            started: false,
+            startedAt: null,
+            daysElapsed: 0,
+            daysRemaining: 0,
+            totalDays: TRIAL_DAYS,
+            expired: true
+        };
+    }
+
+    const startedAt = new Date(trialRow.value);
+    const now = new Date();
+    const elapsed = Math.floor((now - startedAt) / (1000 * 60 * 60 * 24));
+    const remaining = Math.max(0, TRIAL_DAYS - elapsed);
+
     return {
-        startedAt: null,
-        daysElapsed: 0,
-        daysRemaining: 0,
-        totalDays: 0,
-        expired: true
+        started: true,
+        startedAt: trialRow.value,
+        daysElapsed: elapsed,
+        daysRemaining: remaining,
+        totalDays: TRIAL_DAYS,
+        expired: remaining <= 0
     };
+}
+
+/**
+ * Manually start trial — called when user clicks "Start Trial" button
+ * Registers on online server first (anti-abuse), then saves locally
+ * Returns { success, trial } or { success: false, reason }
+ */
+async function startTrial() {
+    const machineId = getMachineId();
+    const machineName = os.hostname();
+
+    // Check if trial already started locally
+    const existing = get('SELECT value FROM settings WHERE key = ?', ['trial_started_at']);
+    if (existing) {
+        const info = getTrialInfo();
+        return { success: false, reason: 'Trial sudah pernah diaktifkan', ...info };
+    }
+
+    // Check online server
+    if (LICENSE_SERVER_URL) {
+        try {
+            const checkUrl = `${LICENSE_SERVER_URL}/api/trial?machine_id=${machineId}`;
+            const checkRes = await fetch(checkUrl, { signal: AbortSignal.timeout(8000) });
+            if (checkRes.ok) {
+                const checkData = await checkRes.json();
+                if (checkData.has_trial) {
+                    // Server says this machine already had a trial!
+                    // Save server's start date locally (so it shows as expired)
+                    run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('trial_started_at', ?, CURRENT_TIMESTAMP)", [checkData.started_at]);
+                    console.log(`[License] Trial already used on this machine (server record: ${checkData.started_at})`);
+
+                    return {
+                        success: false,
+                        reason: checkData.expired
+                            ? 'Trial 7 hari sudah habis di perangkat ini. Upgrade ke Pro untuk fitur lengkap!'
+                            : 'Trial sudah aktif di perangkat ini',
+                        startedAt: checkData.started_at,
+                        daysElapsed: checkData.days_elapsed,
+                        daysRemaining: checkData.days_remaining,
+                        totalDays: checkData.trial_days,
+                        expired: checkData.expired,
+                        notStarted: false
+                    };
+                }
+            }
+        } catch (e) {
+            console.warn('[License] Online trial check failed, proceeding locally:', e.message);
+        }
+    }
+
+    // No existing trial — start new one
+    const now = new Date().toISOString();
+    run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('trial_started_at', ?, CURRENT_TIMESTAMP)", [now]);
+    console.log(`[License] ✅ Trial started: ${TRIAL_DAYS} days from ${now}`);
+
+    // Register on server (non-blocking)
+    if (LICENSE_SERVER_URL) {
+        fetch(`${LICENSE_SERVER_URL}/api/trial`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ machine_id: machineId, machine_name: machineName }),
+            signal: AbortSignal.timeout(5000)
+        }).then(r => r.json())
+            .then(d => console.log(`[License] Trial registered on server: ${d.started_at}`))
+            .catch(e => console.warn('[License] Failed to register trial online:', e.message));
+    }
+
+    return {
+        success: true,
+        message: `Trial ${TRIAL_DAYS} hari dimulai! Nikmati semua fitur premium.`,
+        startedAt: now,
+        daysElapsed: 0,
+        daysRemaining: TRIAL_DAYS,
+        totalDays: TRIAL_DAYS,
+        expired: false,
+        notStarted: false
+    };
+}
+
+/**
+ * Sync trial with online server (anti-abuse)
+ * - If server has trial record for this machine → use server's start date (prevents reinstall reset)
+ * - If server has NO record → register this machine's trial on server
+ */
+async function syncTrialOnline() {
+    if (!LICENSE_SERVER_URL) return;
+    const machineId = getMachineId();
+    const machineName = os.hostname();
+
+    try {
+        // Check if server already has a trial for this machine
+        const checkUrl = `${LICENSE_SERVER_URL}/api/trial?machine_id=${machineId}`;
+        const checkRes = await fetch(checkUrl, {
+            signal: AbortSignal.timeout(5000)
+        });
+
+        if (!checkRes.ok) throw new Error(`Server returned ${checkRes.status}`);
+        const checkData = await checkRes.json();
+
+        if (checkData.has_trial) {
+            // Server already has a trial record — use SERVER's start date
+            // This prevents reinstall abuse: even after deleting local DB, server remembers
+            const serverStartDate = checkData.started_at;
+            const localRow = get('SELECT value FROM settings WHERE key = ?', ['trial_started_at']);
+
+            if (!localRow || localRow.value !== serverStartDate) {
+                run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('trial_started_at', ?, CURRENT_TIMESTAMP)", [serverStartDate]);
+                console.log(`[License] Trial synced from server: started ${serverStartDate} (${checkData.days_remaining} days remaining)`);
+
+                if (checkData.expired) {
+                    console.log('[License] ⚠ Trial already expired (server record)');
+                }
+            }
+        } else {
+            // No server record — register this trial on the server
+            const regRes = await fetch(`${LICENSE_SERVER_URL}/api/trial`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ machine_id: machineId, machine_name: machineName }),
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (regRes.ok) {
+                const regData = await regRes.json();
+                console.log(`[License] Trial registered on server: ${regData.started_at}`);
+                // Use server's timestamp for consistency
+                if (regData.started_at) {
+                    run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('trial_started_at', ?, CURRENT_TIMESTAMP)", [regData.started_at]);
+                }
+            }
+        }
+
+        _trialSyncDone = true;
+    } catch (e) {
+        console.warn('[License] Trial online sync failed (will retry next launch):', e.message);
+        // Offline = use local data, less secure but functional
+    }
 }
 
 /**
@@ -149,7 +342,21 @@ function getLicenseStatus() {
         }
     }
 
-    // No trial system — users stay on free tier until they activate a license key
+    // Trial check: if no license and trial has started but not expired, use trial tier
+    if (tier === 'free' && trial.started && !trial.expired) {
+        tier = 'trial';
+        status = 'trial';
+        daysRemaining = trial.daysRemaining;
+        const trialEnd = new Date(trial.startedAt);
+        trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
+        expiresAt = trialEnd.toISOString();
+    }
+
+    const rawLimits = TIER_LIMITS[tier] || TIER_LIMITS.free;
+    // Convert Infinity to -1 for JSON-safe serialization
+    const safeLimits = Object.fromEntries(
+        Object.entries(rawLimits).map(([k, v]) => [k, v === Infinity ? -1 : v])
+    );
 
     return {
         status,          // 'free' | 'trial' | 'licensed'
@@ -160,7 +367,7 @@ function getLicenseStatus() {
         daysRemaining,   // -1 = lifetime, null = no license, number = days left
         trial,
         machineId,
-        limits: TIER_LIMITS[tier] || TIER_LIMITS.free
+        limits: safeLimits
     };
 }
 
@@ -311,7 +518,7 @@ function activateLicense(key) {
             keyExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
         }
         run(`INSERT INTO license_keys (id, license_key, tier, status, duration_days, expires_at, max_activations, created_at) 
-             VALUES (?, ?, ?, 'active', ?, ?, 1, datetime('now'))`,
+             VALUES (?, ?, ?, 'active', ?, ?, 1, CURRENT_TIMESTAMP)`,
             [keyId, key.toUpperCase(), validation.tier, durationDays, keyExpiresAt]);
         dbKey = get('SELECT * FROM license_keys WHERE license_key = ?', [key.toUpperCase()]);
     }
@@ -334,21 +541,21 @@ function activateLicense(key) {
     }
 
     // Save to local settings
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
         ['license_key', key.toUpperCase()]);
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
         ['license_tier', validation.tier]);
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
         ['license_activated_at', now]);
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
         ['license_machine_id', machineId]);
     if (expiresAt) {
-        run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+        run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
             ['license_expires_at', expiresAt]);
     } else {
         run('DELETE FROM settings WHERE key = ?', ['license_expires_at']);
     }
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))',
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
         ['license_duration_days', String(durationDays)]);
 
     // Sync to online server — server enforces transfer limits, cooldown, max activations
@@ -390,7 +597,7 @@ function isFeatureAllowed(feature) {
  */
 function canCreateProject() {
     const status = getLicenseStatus();
-    if (status.limits.maxProjects === Infinity) return { allowed: true };
+    if (status.limits.maxProjects === -1 || status.limits.maxProjects === Infinity) return { allowed: true };
 
     // Track total projects ever created via a counter in settings
     const totalCreatedRow = get("SELECT value FROM settings WHERE key = 'total_projects_created'");
@@ -419,7 +626,7 @@ function canCreateProject() {
 function incrementProjectCount() {
     const row = get("SELECT value FROM settings WHERE key = 'total_projects_created'");
     const current = row ? parseInt(row.value, 10) : 0;
-    run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('total_projects_created', ?, datetime('now'))",
+    run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('total_projects_created', ?, CURRENT_TIMESTAMP)",
         [String(current + 1)]);
 }
 
@@ -435,6 +642,10 @@ function getRenderLimits() {
     const effectiveTier = (previewFree?.value === 'true') ? 'free' : status.tier;
     const limits = TIER_LIMITS[effectiveTier] || TIER_LIMITS.free;
 
+    // Helper: convert Infinity to -1 for JSON-safe serialization
+    // (JSON.stringify(Infinity) === 'null' which breaks frontend checks)
+    const toJsonSafe = (v) => (v === Infinity ? -1 : (v || 0));
+
     return {
         tier: effectiveTier,
         maxResolution: limits.maxExportResolution || 720,
@@ -442,10 +653,65 @@ function getRenderLimits() {
         batchExportAllowed: limits.batchExport === true,
         gpuAllowed: limits.gpuAccel === true,
         faceTrackAllowed: limits.faceTrack === true,
+        faceTrackBlurAllowed: limits.faceTrackBlur === true,
+        podcastAllowed: limits.podcast === true,
         audioEnhancementAllowed: limits.audioEnhancement === true,
-        maxClipsPerProject: limits.maxClipsPerProject || 5,
-        maxSourceDurationMin: limits.maxSourceDurationMin || 30
+        // -1 means unlimited (Infinity cannot be JSON-serialized)
+        maxClipsPerProject: toJsonSafe(limits.maxClipsPerProject) || 5,
+        maxSourceDurationMin: toJsonSafe(limits.maxSourceDurationMin) || 30,
+        maxDailyExports: toJsonSafe(limits.maxDailyExports) || 3
     };
+}
+
+/**
+ * Check if user can still export today (daily limit for free tier)
+ * Returns { allowed, used, max, message }
+ */
+function checkDailyExportLimit() {
+    const status = getLicenseStatus();
+    const previewFree = get('SELECT value FROM settings WHERE key = ?', ['preview_free_tier']);
+    const effectiveTier = (previewFree?.value === 'true') ? 'free' : status.tier;
+    const limits = TIER_LIMITS[effectiveTier] || TIER_LIMITS.free;
+    const maxDaily = limits.maxDailyExports || 3;
+
+    if (maxDaily === Infinity) return { allowed: true, used: 0, max: -1 };
+
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const counterRow = get('SELECT value FROM settings WHERE key = ?', ['daily_export_counter']);
+    const dateRow = get('SELECT value FROM settings WHERE key = ?', ['daily_export_date']);
+
+    let used = 0;
+    if (dateRow?.value === today && counterRow?.value) {
+        used = parseInt(counterRow.value, 10) || 0;
+    }
+
+    return {
+        allowed: used < maxDaily,
+        used,
+        max: maxDaily,
+        message: used >= maxDaily
+            ? `Batas export harian tercapai (${maxDaily}/hari). Upgrade ke Pro untuk unlimited!`
+            : null
+    };
+}
+
+/**
+ * Increment daily export counter (call after successful render)
+ */
+function incrementDailyExport() {
+    const today = new Date().toISOString().split('T')[0];
+    const dateRow = get('SELECT value FROM settings WHERE key = ?', ['daily_export_date']);
+
+    if (dateRow?.value !== today) {
+        // New day — reset counter
+        run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('daily_export_date', ?, CURRENT_TIMESTAMP)", [today]);
+        run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('daily_export_counter', '1', CURRENT_TIMESTAMP)");
+    } else {
+        const counterRow = get('SELECT value FROM settings WHERE key = ?', ['daily_export_counter']);
+        const current = counterRow ? parseInt(counterRow.value, 10) : 0;
+        run("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('daily_export_counter', ?, CURRENT_TIMESTAMP)",
+            [String(current + 1)]);
+    }
 }
 
 // ============================================================
@@ -586,6 +852,7 @@ function startHeartbeat() {
 module.exports = {
     getMachineId,
     getTrialInfo,
+    startTrial,
     getLicenseStatus,
     validateLicenseKey,
     activateLicense,
@@ -594,6 +861,8 @@ module.exports = {
     canCreateProject,
     incrementProjectCount,
     getRenderLimits,
+    checkDailyExportLimit,
+    incrementDailyExport,
     validateOnline,
     startHeartbeat,
     serverRequest,

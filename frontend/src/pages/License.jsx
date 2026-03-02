@@ -140,6 +140,23 @@ export default function License() {
         free: { label: 'Free Tier', color: '#6b7280', bg: 'rgba(107, 114, 128, 0.15)' }
     }[status] || { label: 'Unknown', color: '#6b7280', bg: 'rgba(107, 114, 128, 0.15)' };
 
+    const handleStartTrial = async () => {
+        setIsValidating(true);
+        setError(null);
+        try {
+            const res = await fetch(`${API}/license/trial`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                await loadLicenseStatus();
+            } else {
+                setError(data.reason || 'Gagal memulai trial. Periksa koneksi internet.');
+            }
+        } catch (e) {
+            setError('Network error. Check your connection.');
+        }
+        setIsValidating(false);
+    };
+
     if (loading) {
         return (
             <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
@@ -159,7 +176,44 @@ export default function License() {
                 </motion.p>
             </div>
 
-
+            {/* Trial Activation Card */}
+            {!isLicensed && !trial?.started && (
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                    className="card"
+                    style={{
+                        padding: 24, marginBottom: 24,
+                        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.02))',
+                        border: '1px solid rgba(245, 158, 11, 0.3)'
+                    }}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+                        <div>
+                            <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px' }}>
+                                🎁 Mulai Trial 7 Hari Gratis
+                            </h3>
+                            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', margin: 0, maxWidth: 600 }}>
+                                Buka Kunci fitur premium seperti Face Track, Podcast Mode, dan Batch Export tanpa biaya selama seminggu penuh.
+                            </p>
+                        </div>
+                        <button
+                            className="btn"
+                            onClick={handleStartTrial}
+                            disabled={isValidating}
+                            style={{
+                                background: '#f59e0b', color: '#fff', border: 'none',
+                                padding: '10px 24px', borderRadius: 8, fontWeight: 700,
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                whiteSpace: 'nowrap'
+                            }}
+                        >
+                            {isValidating ? <RefreshCw size={16} className="spin" /> : 'Mulai Trial Sekarang'}
+                        </button>
+                    </div>
+                </motion.div>
+            )}
 
             {/* Current Status */}
             <motion.div

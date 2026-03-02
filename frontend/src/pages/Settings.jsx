@@ -630,19 +630,42 @@ export default function SettingsPage() {
                     <div className="form-group">
                         <label className="form-label">Quality Preset</label>
                         <div className="chip-group">
-                            {['best', 'balanced', 'fast'].map((q) => (
-                                <button key={q} className={`chip ${quality === q ? 'active' : ''}`} onClick={() => setQuality(q)}>
-                                    {q === 'best' ? '🏆 Best' : q === 'balanced' ? '⚡ Balanced' : '📱 Quick'}
-                                </button>
-                            ))}
+                            {['best', 'balanced', 'fast'].map((q) => {
+                                const isQualityLocked = q !== 'fast' && licenseTier === 'free';
+                                return (
+                                    <button key={q}
+                                        className={`chip ${quality === q ? 'active' : ''}`}
+                                        onClick={() => !isQualityLocked && setQuality(q)}
+                                        style={{
+                                            position: 'relative',
+                                            opacity: isQualityLocked ? 0.5 : 1,
+                                            cursor: isQualityLocked ? 'not-allowed' : 'pointer'
+                                        }}>
+                                        {q === 'best' ? '🏆 Best' : q === 'balanced' ? '⚡ Balanced' : '📱 Quick'}
+                                        {isQualityLocked && (
+                                            <span style={{
+                                                position: 'absolute', top: -6, right: -6,
+                                                background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+                                                color: '#fff', fontSize: 9, fontWeight: 700,
+                                                padding: '1px 6px', borderRadius: 8
+                                            }}>🔒 PRO</span>
+                                        )}
+                                    </button>
+                                );
+                            })}
                         </div>
+                        {licenseTier === 'free' && (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                🔒 Best & Balanced quality hanya tersedia untuk Pro. Quick sudah optimal untuk TikTok/Reels.
+                            </div>
+                        )}
                     </div>
 
                     {/* Output Resolution */}
                     <div className="form-group">
                         <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             Output Resolution
-                            {actualTier !== 'free' && sessionStorage.getItem('admin_password') && (
+                            {(actualTier !== 'free' && (sessionStorage.getItem('admin_password') || localStorage.getItem('previewFreeTier') === 'true')) && (
                                 <button
                                     onClick={() => {
                                         const newTier = licenseTier === 'free' ? actualTier : 'free';
@@ -666,7 +689,7 @@ export default function SettingsPage() {
                                         color: licenseTier === 'free' ? '#ef4444' : '#8b5cf6',
                                         border: 'none', cursor: 'pointer', fontWeight: 600
                                     }}>
-                                    {licenseTier === 'free' ? '👁 Previewing Free' : '🔧 Preview Free'}
+                                    {licenseTier === 'free' ? '👁 Exit Preview → Back to Pro' : '🔧 Preview Free'}
                                 </button>
                             )}
                         </label>

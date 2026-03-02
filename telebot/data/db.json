@@ -1,0 +1,119 @@
+{
+  "users": {
+    "482006626": {
+      "id": "482006626",
+      "name": "rizal",
+      "username": "rizaltengker",
+      "registered_at": "2026-02-25T13:08:46.665Z",
+      "order_count": 2,
+      "total_spent": 319000,
+      "active_order": "CS-MM24MJWRECFB",
+      "pending_promo": null,
+      "waiting_promo_for": "pro_30"
+    }
+  },
+  "orders": [
+    {
+      "id": "CS-MM23J5YF9E1D",
+      "user_id": "482006626",
+      "user_name": "rizal",
+      "username": "rizaltengker",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "price": 69000,
+      "status": "cancelled",
+      "license_key": null,
+      "created_at": "2026-02-25T13:54:46.888Z",
+      "paid_at": null,
+      "proof_requested_at": "2026-02-25T13:55:01.165Z"
+    },
+    {
+      "id": "CS-MM24JEQF95B9",
+      "user_id": "482006626",
+      "user_name": "rizal",
+      "username": "rizaltengker",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "price": 69000,
+      "status": "cancelled",
+      "license_key": null,
+      "created_at": "2026-02-25T14:22:57.879Z",
+      "paid_at": null,
+      "payment_method": "static_qris"
+    },
+    {
+      "id": "CS-MM24MJWRECFB",
+      "user_id": "482006626",
+      "user_name": "rizal",
+      "username": "rizaltengker",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "price": 69000,
+      "status": "cancelled",
+      "license_key": null,
+      "created_at": "2026-02-25T14:25:24.555Z",
+      "paid_at": null,
+      "payment_method": "static_qris"
+    },
+    {
+      "id": "CS-MM24SQTV33B3",
+      "user_id": "482006626",
+      "user_name": "rizal",
+      "username": "rizaltengker",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "price": 69000,
+      "status": "paid",
+      "license_key": "6YGM-8EZL-P1BF-6E1A",
+      "created_at": "2026-02-25T14:30:13.460Z",
+      "paid_at": "2026-02-25T14:32:06.924Z",
+      "payment_method": "pakasir"
+    },
+    {
+      "id": "CS-MM25BTD1313C",
+      "user_id": "482006626",
+      "user_name": "dee zenn",
+      "username": "skuysdazen",
+      "product_id": "pro_365",
+      "product_name": "⚡ ClipperSkuy Pro — 365 Hari (1 Tahun)",
+      "tier": "pro",
+      "duration": 365,
+      "price": 250000,
+      "status": "paid",
+      "license_key": "Z5Z4-DPGW-PYBR-14AB",
+      "created_at": "2026-02-25T14:45:03.206Z",
+      "paid_at": "2026-02-25T14:45:42.476Z",
+      "payment_method": "pakasir"
+    },
+    {
+      "id": "CS-MM8DBJYNCAAE",
+      "user_id": "482006626",
+      "user_name": "dee zenn",
+      "username": "skuysdazen",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "original_price": 69000,
+      "price": 69000,
+      "discount_code": null,
+      "discount_percent": 0,
+      "status": "pending",
+      "license_key": null,
+      "created_at": "2026-03-01T23:15:25.007Z",
+      "paid_at": null
+    }
+  ],
+  "stats": {
+    "total_orders": 2,
+    "total_revenue": 319000
+  }
+}

@@ -145,8 +145,24 @@ async function renderClip(clipId, io) {
     const duration = clip.end_time - clip.start_time;
 
     // ===== Apply license tier restrictions =====
-    const { getRenderLimits } = require('./license');
+    const { getRenderLimits, checkDailyExportLimit, incrementDailyExport } = require('./license');
     const renderLimits = getRenderLimits();
+
+    // Daily export limit for free tier
+    const dailyCheck = checkDailyExportLimit();
+    if (!dailyCheck.allowed) {
+        emit(0, '\ud83d\udd12 ' + dailyCheck.message);
+        return { success: false, error: dailyCheck.message };
+    }
+
+    // Force quality to fast for free tier
+    if (renderLimits.tier === 'free') {
+        const currentQuality = settings.quality_preset || 'balanced';
+        if (currentQuality !== 'fast') {
+            settings.quality_preset = 'fast';
+            emit(5, 'Free tier: menggunakan Quick quality');
+        }
+    }
 
     // Resolution cap for free tier (720p max)
     if (renderLimits.maxResolution <= 720) {
@@ -207,14 +223,22 @@ async function renderClip(clipId, io) {
     fs.ensureDirSync(projectClipsDir);
     const outputPath = path.join(projectClipsDir, outputFilename);
 
+    // Per-clip temp dir for hook overlay files (avoids race condition on parallel renders)
+    const clipTempDir = path.join(projectClipsDir, `_tmp_clip${clip.clip_number}_${clipId}`);
+    fs.ensureDirSync(clipTempDir);
+
     // Remove existing broken file
     try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) { }
 
     // ===== Generate subtitle file (ASS) if transcript available =====
     let assPath = null;
+    let subFontsDir = null;
     try {
-        assPath = generateSubtitleFile(clip, project, projectClipsDir);
-        if (assPath) {
+        const subResult = generateSubtitleFile(clip, project, projectClipsDir);
+        if (subResult) {
+            // generateSubtitleFile returns the ASS path string directly
+            assPath = typeof subResult === 'string' ? subResult : subResult.assPath;
+            subFontsDir = typeof subResult === 'object' ? subResult.fontsDir : null;
             emit(8, 'Subtitles generated');
         } else {
             emit(8, 'No subtitles (no transcript segments in clip range)');
@@ -252,32 +276,40 @@ async function renderClip(clipId, io) {
     // ===== Podcast mode: detect speakers and generate crop =====
     let podcastFilter = null;
     if (reframingMode === 'podcast') {
-        try {
-            emit(12, 'Detecting speakers...');
-            const result = await generatePodcastCrop(project.source_path, outW, outH, duration, clip.start_time);
-            if (result.cropFilter) {
-                podcastFilter = result.cropFilter;
-                if (result.mode === 'split') {
-                    emit(18, `Podcast: ${result.faceCount} speakers detected — split screen`);
+        if (!renderLimits.podcastAllowed) {
+            emit(8, '🔒 Podcast mode is a PRO feature — using center crop instead');
+            reframingMode = 'center';
+        } else {
+            try {
+                emit(12, 'Detecting speakers...');
+                const result = await generatePodcastCrop(project.source_path, outW, outH, duration, clip.start_time);
+                if (result.cropFilter) {
+                    podcastFilter = result.cropFilter;
+                    if (result.mode === 'split') {
+                        emit(18, `Podcast: ${result.faceCount} speakers detected — split screen`);
+                    } else {
+                        emit(18, `Podcast: 1 speaker detected — full zoom`);
+                    }
                 } else {
-                    emit(18, `Podcast: 1 speaker detected — full zoom`);
+                    emit(15, 'No speakers detected, using center crop');
+                    reframingMode = 'center';
                 }
-            } else {
-                emit(15, 'No speakers detected, using center crop');
+            } catch (e) {
+                console.warn('[Render] Podcast detection failed, falling back to center:', e.message);
+                emit(15, 'Podcast detection failed, using center crop');
                 reframingMode = 'center';
             }
-        } catch (e) {
-            console.warn('[Render] Podcast detection failed, falling back to center:', e.message);
-            emit(15, 'Podcast detection failed, using center crop');
-            reframingMode = 'center';
-        }
+        } // end else podcastAllowed
     }
 
     // ===== Face Track + Blur mode =====
+    // TikTok/Reels style: blurred background fills entire 9:16 canvas,
+    // face-tracked video shown at full width in center (maintains source aspect ratio).
+    // Blurred background peeks through at top & bottom (letterbox areas).
     let faceTrackBlurFilter = null;
     if (reframingMode === 'face_track_blur') {
-        if (!renderLimits.faceTrackAllowed) {
-            emit(8, '🔒 Face Track Blur is a PRO feature — using fit mode instead');
+        if (!renderLimits.faceTrackBlurAllowed) {
+            emit(8, '🔒 Face Track + Blur adalah fitur PRO — menggunakan mode fit');
             reframingMode = 'fit';
         } else {
             try {
@@ -285,22 +317,84 @@ async function renderClip(clipId, io) {
                 const result = await generateFaceTrackCrop(project.source_path, outW, outH, duration, clip.start_time);
                 const scaleFlags = ':flags=lanczos';
 
-                if (result.cropFilter) {
-                    // Extract just the crop part from face tracking (before scale)
-                    // cropFilter format: "crop=W:H:X:Y,scale=..." or "crop=W:H:expr:expr,scale=..."
-                    const cropPart = result.cropFilter.split(',scale=')[0];
+                // Get source dimensions to build proper filter
+                const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+                const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${project.source_path}"`;
+                const { stdout: probeOut } = await require('util').promisify(require('child_process').exec)(probeCmd, { timeout: 10000 });
+                const probeData = JSON.parse(probeOut);
+                const videoStream = probeData.streams.find(s => s.codec_type === 'video');
+                const srcW = videoStream ? videoStream.width : 1920;
+                const srcH = videoStream ? videoStream.height : 1080;
+
+                if (result.positions.length > 0) {
+                    // Get average face position for centering
+                    const avgFaceX = result.positions.reduce((s, p) => s + p.x, 0) / result.positions.length;
+                    const avgFaceY = result.positions.reduce((s, p) => s + p.y, 0) / result.positions.length;
+
+                    // Target: foreground fills ~75% of output height
+                    // This keeps blur bars thin (just enough for hook text + subtitles)
+                    const fgFillRatio = 0.75;
+                    const fgH = Math.round(outH * fgFillRatio);
+                    const fgHEven = fgH % 2 === 0 ? fgH : fgH - 1;
+
+                    // Calculate how much of the source to crop to achieve this fill
+                    // We want: crop(cropW x cropH) → scale(outW x fgHEven)
+                    // Maintain crop aspect ratio = outW/fgHEven
+                    const cropAR = outW / fgHEven;
+                    let cropH = srcH;  // Use full source height
+                    let cropW = Math.round(cropH * cropAR);
+
+                    // If cropW exceeds source width, fit by width instead
+                    if (cropW > srcW) {
+                        cropW = srcW;
+                        cropH = Math.round(srcW / cropAR);
+                        cropH = cropH % 2 === 0 ? cropH : cropH - 1;
+                    }
+                    cropW = cropW % 2 === 0 ? cropW : cropW - 1;
+
+                    // Center crop on face position
+                    const cropX = Math.max(0, Math.min(Math.round(avgFaceX - cropW / 2), srcW - cropW));
+                    const cropY = Math.max(0, Math.min(Math.round(avgFaceY - cropH / 2), srcH - cropH));
 
                     faceTrackBlurFilter = [
                         `[0:v]split[a][b]`,
-                        `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=20:5[bg]`,
-                        `[b]${cropPart},scale=${outW}:${outH}:force_original_aspect_ratio=decrease${scaleFlags}[fg]`,
-                        `[bg][fg]overlay=(W-w)/2:(H-h)/2`
+                        // Background: scale+crop to fill entire output, then blur heavily
+                        `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=30:10[bg]`,
+                        // Foreground: crop source centered on face, then scale to target size
+                        `[b]crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
+                        // Overlay foreground centered vertically on blurred background
+                        `[bg][fg]overlay=0:(H-h)/2`
                     ].join(';');
 
-                    emit(18, `Face Track Blur: ${result.positions.length} positions, blur background active`);
+                    console.log(`[Render] Face Track Blur: srcW=${srcW} srcH=${srcH} crop=${cropW}x${cropH}@${cropX},${cropY} fgH=${fgHEven} (${Math.round(fgHEven / outH * 100)}% fill) faceXY=${Math.round(avgFaceX)},${Math.round(avgFaceY)}`);
+                    emit(18, `Face Track Blur: ${result.positions.length} positions, ${Math.round(fgHEven / outH * 100)}% fill`);
                 } else {
-                    emit(15, 'No faces detected, using fit mode');
-                    reframingMode = 'fit';
+                    // No faces detected — zoom into center of source
+                    emit(15, 'No faces detected, using center zoom with blur');
+                    const fgFillRatio = 0.75;
+                    const fgH = Math.round(outH * fgFillRatio);
+                    const fgHEven = fgH % 2 === 0 ? fgH : fgH - 1;
+
+                    const cropAR = outW / fgHEven;
+                    let cropH = srcH;
+                    let cropW = Math.round(cropH * cropAR);
+                    if (cropW > srcW) {
+                        cropW = srcW;
+                        cropH = Math.round(srcW / cropAR);
+                        cropH = cropH % 2 === 0 ? cropH : cropH - 1;
+                    }
+                    cropW = cropW % 2 === 0 ? cropW : cropW - 1;
+
+                    // Center crop
+                    const cropX = Math.round((srcW - cropW) / 2);
+                    const cropY = Math.round((srcH - cropH) / 2);
+
+                    faceTrackBlurFilter = [
+                        `[0:v]split[a][b]`,
+                        `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=30:10[bg]`,
+                        `[b]crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
+                        `[bg][fg]overlay=0:(H-h)/2`
+                    ].join(';');
                 }
             } catch (e) {
                 console.warn('[Render] Face track blur failed, falling back to fit:', e.message);
@@ -375,8 +469,11 @@ async function renderClip(clipId, io) {
     const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || podcastIsSplit || ftBlurIsSplit || watermarkFilter || musicTrack);
     const vf = faceTrackBlurFilter || podcastFilter || faceTrackFilter || buildVideoFilter(reframingMode, outW, outH, sourceW);
 
-    // Build subtitle filter string
+    // Build subtitle filter string — two variants:
+    // subFilter       : for -vf usage (colons escaped as \\:)
+    // subFilterComplex: for -filter_complex usage (colons escaped as \: — single backslash)
     const subFilter = assPath ? buildSubtitleFilter(assPath) : '';
+    const subFilterComplex = assPath ? buildSubtitleFilterComplex(assPath) : '';
 
     // Chain order: reframe → progress bar → subtitles → watermark text → format
     let textWatermarkFilter = '';
@@ -434,9 +531,21 @@ async function renderClip(clipId, io) {
     }
 
     // ===== Hook Title =====
-    const hookTitleFilter = buildHookTitleFilter(clip, outW, outH, duration);
-    if (hookTitleFilter) emit(9, `Hook title: "${clip.hook_text}"`);
+    const hookTitleResult = buildHookTitleFilter(clip, outW, outH, duration, clipTempDir);
+    let hookTitleFilter = '';
+    let hookOverlay = null;
+    if (hookTitleResult) {
+        emit(9, `Hook title: "${clip.hook_text}"`);
+        if (typeof hookTitleResult === 'object' && hookTitleResult.type === 'overlay') {
+            hookOverlay = hookTitleResult;
+            emit(9, 'Hook: PNG overlay with emoji support');
+        } else if (typeof hookTitleResult === 'string') {
+            hookTitleFilter = hookTitleResult;
+        }
+    }
 
+    // extraFilters    : used when rendering with simple -vf
+    // extraFiltersAll : used inside filter_complex (subtitle uses different escaping)
     const extraFilters = [progressBarFilter, subFilter, hookTitleFilter, textWatermarkFilter].filter(Boolean).join(',');
 
     // Single input-seeking: -ss before -i with accurate_seek (FFmpeg default)
@@ -489,6 +598,16 @@ async function renderClip(clipId, io) {
         emit(9, `Adding ${clipSfxList.length} SFX`);
     }
 
+    // Add hook overlay input if PNG was generated
+    // IMPORTANT: -loop 1 makes FFmpeg treat the PNG as an infinite-duration stream
+    // Without -loop 1, a PNG input is only 1 frame → hook appears for 1 frame then disappears!
+    let hookInputIdx = -1;
+    if (hookOverlay && fs.existsSync(hookOverlay.imagePath)) {
+        hookInputIdx = inputIdx;
+        args1.push('-loop', '1', '-framerate', '1', '-i', hookOverlay.imagePath);
+        inputIdx++;
+    }
+
     // Build audio filter chain
     let audioArgs;
     const hasSfx = sfxInputs.length > 0;
@@ -525,62 +644,114 @@ async function renderClip(clipId, io) {
         audioArgs = { simple: audioFilter };
     }
 
-    // Detect if vf is already a complex filter graph (fit/split modes start with [0:v]split)
+    // Detect if vf is already a complex filter graph (fit/split/podcast modes start with [0:v]split)
     const isComplexVf = vf.includes('[0:v]');
 
-    // For complex filter modes (fit/split), we separate subtitle burn-in into a second pass.
-    // The ASS filter has path escaping issues inside -filter_complex, causing subtitles to silently fail.
-    // Strategy: pass 1 = reframing only, pass 2 = subtitle + hook title burn-in via simple -vf.
-    const needsSubtitlePass = isComplexVf && (subFilter || hookTitleFilter);
-    const extraFiltersNoSub = needsSubtitlePass
-        ? [progressBarFilter, textWatermarkFilter].filter(Boolean).join(',')
-        : extraFilters;
+    // When hookOverlay exists, we MUST use filter_complex with overlay
+    const needsOverlay = hookOverlay && hookInputIdx >= 0;
+    const mustUseComplex = useFilterComplex || needsOverlay;
 
-    if (useFilterComplex && watermarkFilter) {
-        // Complex filter with watermark image overlay
+    // ── Subtitle 2-pass strategy ──────────────────────────────────────────────
+    // ASS subtitle filter reliably FAILS inside -filter_complex on Windows
+    // because the path "C:\\..." contains ":" which is the filter option separator.
+    // Solution: when using filter_complex (isComplexVf OR mustUseComplex with complex filter),
+    // do NOT include subtitle in pass 1. Burn subtitle in pass 2 via simple -vf.
+    //
+    // pass1 = reframing + hook overlay + music + watermark (everything complex)
+    // pass2 = subtitle + text overlays (always via -vf, no filter_complex)
+    const needsSubtitlePass2 = (isComplexVf || mustUseComplex) && (subFilter || hookTitleFilter || progressBarFilter);
+    const extraFiltersPass1 = needsSubtitlePass2
+        ? [textWatermarkFilter].filter(Boolean).join(',')   // only non-problematic text in pass1
+        : extraFilters;                                      // all filters in single pass
+    const extraFiltersPass2 = needsSubtitlePass2
+        ? [progressBarFilter, subFilter, hookTitleFilter].filter(Boolean).join(',')
+        : '';
+
+    console.log(`[Render] Filter debug: isComplexVf=${isComplexVf}, mustUseComplex=${mustUseComplex}, needsOverlay=${needsOverlay}, needsSubtitlePass2=${needsSubtitlePass2}`);
+    console.log(`[Render] pass1 extra: ${extraFiltersPass1 || 'EMPTY'}`);
+    console.log(`[Render] pass2 extra (subtitle): ${extraFiltersPass2 || 'EMPTY'}`);
+
+    if (mustUseComplex && watermarkFilter) {
+        // ── Complex filter with watermark IMAGE overlay ──
+        // Label sequence: [0:v] → crop/scale → [vid] → watermark overlay → [wm_out] → hook overlay → [outv2]
         let fullFilter;
         if (isComplexVf) {
-            fullFilter = vf + (extraFiltersNoSub ? `,${extraFiltersNoSub}` : '') + ',format=yuv420p[vid]';
+            fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
         } else {
-            fullFilter = `[0:v]${vf}` + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[vid]';
+            fullFilter = `[0:v]${vf}` + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
         }
-        fullFilter += `;${watermarkFilter}`;
+        // Watermark filter expects [vid] input and produces [outv]
+        fullFilter += `;${watermarkFilter}`; // watermarkFilter must produce [outv]
+        if (needsOverlay) {
+            // Hook PNG overlay: [outv] + [hookIdx:v] → [outv2]
+            fullFilter += `;[outv][${hookInputIdx}:v]overlay=x=${hookOverlay.overlayX}:y=${hookOverlay.overlayY},format=yuv420p[outv2]`;
+        } else {
+            fullFilter += `;[outv]format=yuv420p[outv2]`;
+        }
         if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
+        console.log('[Render] Pass1 filter_complex (with watermark):', fullFilter.substring(0, 300));
         args1.push('-filter_complex', fullFilter);
-        args1.push('-map', '[outv]');
+        args1.push('-map', '[outv2]');
         if (audioArgs.map) args1.push('-map', audioArgs.map);
         else { args1.push('-map', '0:a?'); args1.push('-af', audioFilter); }
-    } else if (useFilterComplex) {
-        // Complex filter without watermark (fit/split or with music/sfx)
+
+    } else if (mustUseComplex) {
+        // ── Complex filter (reframing + hook overlay + music, no watermark image) ──
+        // Label: [0:v] → crop/scale/etc → [outv] → (hook overlay) → [outv2]
         let fullFilter;
         if (isComplexVf) {
-            fullFilter = vf + (extraFiltersNoSub ? `,${extraFiltersNoSub}` : '') + ',format=yuv420p[outv]';
+            fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
         } else {
-            fullFilter = `[0:v]${vf}` + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p[outv]';
+            fullFilter = `[0:v]${vf}` + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
+        }
+        if (needsOverlay) {
+            // Hook PNG overlay on top of video — no enable= to avoid quote escaping issues
+            // Hook PNG is typically 5s but since it's an overlay input, we just overlay it for full clip.
+            // The PNG itself is opaque only where drawn; transparent elsewhere.
+            fullFilter += `;[outv][${hookInputIdx}:v]overlay=x=${hookOverlay.overlayX}:y=${hookOverlay.overlayY},format=yuv420p[outv2]`;
+        } else {
+            fullFilter += `,format=yuv420p[outv2]`;
         }
         if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
+        console.log('[Render] Pass1 filter_complex (no watermark):', fullFilter.substring(0, 300));
         args1.push('-filter_complex', fullFilter);
-        args1.push('-map', '[outv]');
+        args1.push('-map', '[outv2]');
         if (audioArgs.map) args1.push('-map', audioArgs.map);
         else { args1.push('-map', '0:a?'); args1.push('-af', audioFilter); }
+
     } else {
-        // Simple filter (center/face_track without music/watermark)
+        // ── Simple filter (center/face_track — no filter_complex needed) ──
         const fullFilter = vf + (extraFilters ? `,${extraFilters}` : '') + ',format=yuv420p';
         args1.push('-vf', fullFilter);
         args1.push('-af', audioFilter);
     }
 
-    // If we need subtitle second pass, output to temp file first
-    const needsSecondPass = needsSubtitlePass;
-    const tempOutputPath = needsSecondPass ? outputPath.replace('.mp4', '_temp.mp4') : null;
-
     args1.push(
         '-c:v', encoder, ...encoderArgs, '-crf', crf,
         '-c:a', 'aac', '-b:a', '192k',
         '-shortest',
-        '-movflags', '+faststart',
-        needsSecondPass ? tempOutputPath : outputPath
+        '-movflags', '+faststart'
     );
+
+    // Calculate target bitrate based on output resolution
+    const pixels = outW * outH;
+    let baseBitrate, baseMax;
+    if (pixels >= 1920 * 1080) {
+        // 1080p+ (1080x1920): 10-15 Mbps
+        baseBitrate = { best: '12M', balanced: '8M', fast: '5M' };
+        baseMax = { best: '18M', balanced: '12M', fast: '8M' };
+    } else if (pixels >= 1280 * 720) {
+        // 720p (720x1280): 5-8 Mbps
+        baseBitrate = { best: '8M', balanced: '5M', fast: '3M' };
+        baseMax = { best: '12M', balanced: '8M', fast: '5M' };
+    } else {
+        // 480p or lower: 2-4 Mbps
+        baseBitrate = { best: '4M', balanced: '3M', fast: '2M' };
+        baseMax = { best: '6M', balanced: '5M', fast: '3M' };
+    }
+    const gpuBitrate = baseBitrate[qualityPreset] || baseBitrate.balanced;
+    const gpuMaxrate = baseMax[qualityPreset] || baseMax.balanced;
+    console.log(`[Render] Bitrate for ${outW}x${outH}: target=${gpuBitrate}, max=${gpuMaxrate}`);
 
     // For GPU encoders, replace -crf with appropriate quality param
     if (encoder !== 'libx264') {
@@ -591,95 +762,109 @@ async function renderClip(clipId, io) {
             if (hasQuality) {
                 // Remove -crf and its value entirely (already set by encoderArgs)
                 args1.splice(crfIdx, 2);
+                // Still need bitrate cap for GPU encoders (they don't auto-limit like CRF)
+                if (!args1.includes('-b:v') && !args1.includes('-maxrate')) {
+                    args1.push('-b:v', gpuBitrate, '-maxrate', gpuMaxrate, '-bufsize', '16M');
+                    console.log(`[Render] GPU bitrate cap (hasQuality): target=${gpuBitrate}, max=${gpuMaxrate}`);
+                }
             } else if (encoder.includes('nvenc')) {
                 args1[crfIdx] = '-cq';
+                // NVENC: add bitrate cap to prevent excessive bitrate on 720p
+                args1.push('-maxrate', gpuMaxrate, '-bufsize', '16M');
+                console.log(`[Render] NVENC bitrate cap: cq=${crf}, maxrate=${gpuMaxrate}`);
             } else if (encoder.includes('amf')) {
+                // AMF doesn't support CRF - use quality + bitrate cap
                 args1[crfIdx] = '-quality';
                 args1[crfIdx + 1] = qualityPreset === 'best' ? 'quality' : qualityPreset === 'fast' ? 'speed' : 'balanced';
+                // Add bitrate control (AMF without -b:v produces ~19 Mbps, way too high for 720p)
+                args1.push('-b:v', gpuBitrate, '-maxrate', gpuMaxrate, '-bufsize', '16M');
+                console.log(`[Render] AMF bitrate: target=${gpuBitrate}, max=${gpuMaxrate}`);
             } else if (encoder.includes('qsv')) {
                 args1[crfIdx] = '-global_quality';
+                // QSV: add bitrate cap to prevent excessive bitrate on 720p
+                args1.push('-maxrate', gpuMaxrate, '-bufsize', '16M');
+                console.log(`[Render] QSV bitrate cap: global_quality=${crf}, maxrate=${gpuMaxrate}`);
             }
         }
     }
 
+    // Enforce duration limit: add -t before output (input -t may be ignored with filter_complex split)
+    args1.push('-t', String(duration), outputPath);
+
     const result1 = await runFFmpeg(args1, duration, emit, io, project.id);
 
-    // For fit/split modes: run second pass to burn subtitles
-    const checkPath = needsSecondPass ? tempOutputPath : outputPath;
-    if (result1.success && validateOutput(checkPath)) {
-        if (needsSecondPass) {
-            // Second pass: burn subtitles + hook title onto the temp file using simple -vf
-            emit(85, 'Burning subtitles & overlays...');
-            console.log(`[Render] Pass 2: Burning subtitles + hook onto ${tempOutputPath}`);
-            const pass2Filters = [subFilter, hookTitleFilter].filter(Boolean).join(',');
-            const subArgs = [
-                '-y',
-                '-i', tempOutputPath,
-                '-vf', `${pass2Filters},format=yuv420p`,
-                '-c:v', encoder, ...encoderArgs, '-crf', crf,
-                '-c:a', 'copy',
-                '-shortest',
-                '-movflags', '+faststart',
-                outputPath
-            ];
-            // Fix CRF for GPU encoders in pass 2 as well
-            if (encoder !== 'libx264') {
-                const crfIdx2 = subArgs.indexOf('-crf');
-                if (crfIdx2 > -1) {
-                    const hasQuality2 = encoderArgs.some(a => ['-quality', '-cq', '-global_quality', '-preset'].includes(a));
-                    if (hasQuality2) subArgs.splice(crfIdx2, 2);
-                    else if (encoder.includes('nvenc')) subArgs[crfIdx2] = '-cq';
-                    else if (encoder.includes('amf')) { subArgs[crfIdx2] = '-quality'; subArgs[crfIdx2 + 1] = 'balanced'; }
-                    else if (encoder.includes('qsv')) subArgs[crfIdx2] = '-global_quality';
-                }
-            }
-            console.log(`[Render] Pass 2 args: ffmpeg ${subArgs.join(' ').substring(0, 300)}...`);
-            const result1b = await runFFmpeg(subArgs, duration, emit, io, project.id);
+    if (result1.success && validateOutput(outputPath)) {
+        // ===== PASS 2: Subtitle + text overlays burn-in (if deferred from pass 1) =====
+        if (needsSubtitlePass2 && extraFiltersPass2) {
+            emit(96, 'Burning subtitles...');
+            console.log(`[Render] Pass 2: burning subtitles — filters: ${extraFiltersPass2.substring(0, 150)}`);
 
-            if (result1b.success && validateOutput(outputPath)) {
-                // Pass 2 succeeded — clean up temp and return
-                try { fs.unlinkSync(tempOutputPath); } catch (e) { }
-                const stats = fs.statSync(outputPath);
-                const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
-                run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
-                emit(100, `Done! ${sizeMB} MB`);
-                console.log(`[Render] Clip #${clip.clip_number} exported (2-pass): ${outputPath} (${sizeMB} MB)`);
-                return { outputPath, size: stats.size };
-            }
-
-            // Pass 2 FAILED — use temp file as-is (without subtitles/hook)
-            console.warn(`[Render] Pass 2 failed: ${result1b.errorMsg || 'Unknown error'}`);
-            console.warn(`[Render] Pass 2 stderr (last 500): ${(result1b.stderr || '').slice(-500)}`);
-            emit(90, 'Subtitle burn failed, using video without overlays');
+            // Rename pass1 output to temp path — keep it for fallback if pass 2 fails
+            const pass1TempPath = outputPath.replace('.mp4', '_pass1.mp4');
+            let renamedOk = false;
             try {
-                if (fs.existsSync(tempOutputPath)) {
-                    fs.renameSync(tempOutputPath, outputPath);
-                    console.log(`[Render] Fallback: renamed temp to output (without subtitles)`);
-                }
+                fs.renameSync(outputPath, pass1TempPath);
+                renamedOk = true;
             } catch (e) {
-                console.error(`[Render] Fallback rename failed: ${e.message}`);
+                console.warn('[Render] Pass 2: could not rename pass1 output, skipping subtitle burn:', e.message);
+            }
+
+            if (renamedOk && fs.existsSync(pass1TempPath)) {
+                const pass2Filter = extraFiltersPass2 + ',format=yuv420p';
+                const args2pass = [
+                    '-y',
+                    '-i', pass1TempPath,
+                    '-vf', pass2Filter,
+                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                    '-c:a', 'copy',    // audio already processed in pass 1 — just copy
+                    '-movflags', '+faststart',
+                    outputPath
+                ];
+                const result2pass = await runFFmpeg(args2pass, duration, emit, io, project.id);
+
+                if (!result2pass.success || !validateOutput(outputPath)) {
+                    // Pass 2 failed — fallback to pass 1 output (no subtitles, but has hook)
+                    console.warn('[Render] Pass 2 subtitle burn failed, falling back to pass 1 (no subtitles)');
+                    try { fs.renameSync(pass1TempPath, outputPath); } catch (e) {
+                        console.error('[Render] Pass 2: could not restore pass1 output:', e.message);
+                    }
+                } else {
+                    // Pass 2 success — cleanup temp
+                    console.log('[Render] Pass 2 subtitle burn: OK');
+                    try { fs.unlinkSync(pass1TempPath); } catch (e) { }
+                }
             }
         }
 
-        const stats = fs.statSync(outputPath);
-        const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
-        run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
-        emit(100, `Done! ${sizeMB} MB`);
-        console.log(`[Render] Clip #${clip.clip_number} exported: ${outputPath} (${sizeMB} MB)`);
-        return { outputPath, size: stats.size };
+        if (!fs.existsSync(outputPath)) {
+            console.error('[Render] Output missing after pass 2 — render failed');
+        } else {
+            const stats = fs.statSync(outputPath);
+            const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
+            run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
+            incrementDailyExport();
+            emit(100, `Done! ${sizeMB} MB`);
+            console.log(`[Render] Clip #${clip.clip_number} exported: ${outputPath} (${sizeMB} MB)`);
+            try { fs.removeSync(clipTempDir); } catch (e) { }
+            return { outputPath, size: stats.size };
+        }
     }
 
     // ===== ATTEMPT 2: Simple fallback (scale+crop only) =====
     console.warn(`[Render] Attempt 1 failed for clip #${clip.clip_number}, trying simple fallback...`);
     console.warn(`[Render] Error: ${result1.errorMsg || 'Output file invalid'}`);
+    if (result1.stderr) console.warn(`[Render] FFmpeg stderr (last 500 chars): ${result1.stderr.slice(-500)}`);
     emit(15, 'Retrying with simpler encoding...');
 
     // Cleanup broken file
     try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) { }
 
-    const simpleFallbackFilter = `scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH},format=yuv420p`;
+    // Include subtitle filter in fallback if available
+    const fallbackSubFilter = assPath ? buildSubtitleFilter(assPath) : '';
+    const simpleFallbackFilter = `scale=${outW}:${outH}:force_original_aspect_ratio=increase,crop=${outW}:${outH}${fallbackSubFilter ? ',' + fallbackSubFilter : ''},format=yuv420p`;
 
     // Use appropriate quality args for the encoder
+    // GPU encoders need explicit bitrate caps — without them q=-0.0 = unlimited bitrate (~19 Mbps at 720p!)
     const fallbackEncoderArgs = encoder.includes('amf')
         ? ['-quality', 'balanced']
         : encoder.includes('nvenc')
@@ -688,6 +873,15 @@ async function renderClip(clipId, io) {
                 ? ['-preset', 'medium', '-global_quality', '23']
                 : ['-preset', 'medium', '-crf', '23'];
 
+    // Bitrate cap for GPU encoders in fallback (prevents huge files)
+    const fallbackBitrateCap = [];
+    if (encoder.includes('nvenc') || encoder.includes('amf') || encoder.includes('qsv')) {
+        const fbBitrate = gpuBitrate || (outW * outH >= 1280 * 720 ? '5M' : '3M');
+        const fbMaxrate = gpuMaxrate || (outW * outH >= 1280 * 720 ? '8M' : '5M');
+        fallbackBitrateCap.push('-b:v', fbBitrate, '-maxrate', fbMaxrate, '-bufsize', '12M');
+        console.log(`[Render] Fallback GPU bitrate cap: b:v=${fbBitrate} maxrate=${fbMaxrate}`);
+    }
+
     const args2 = [
         '-y',
         '-ss', String(Math.max(0, clip.start_time - 2)),
@@ -695,7 +889,7 @@ async function renderClip(clipId, io) {
         '-ss', String(Math.min(2, clip.start_time)),
         '-t', String(duration),
         '-vf', simpleFallbackFilter,
-        '-c:v', encoder, ...fallbackEncoderArgs,
+        '-c:v', encoder, ...fallbackEncoderArgs, ...fallbackBitrateCap,
         '-c:a', 'aac', '-b:a', '128k',
         '-shortest',
         '-movflags', '+faststart',
@@ -708,8 +902,10 @@ async function renderClip(clipId, io) {
         const stats = fs.statSync(outputPath);
         const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
         run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
+        incrementDailyExport(); // Track daily export count
         emit(100, `Done! ${sizeMB} MB (fallback mode)`);
         console.log(`[Render] Clip #${clip.clip_number} exported (fallback): ${outputPath} (${sizeMB} MB)`);
+        try { fs.removeSync(clipTempDir); } catch (e) { }
         return { outputPath, size: stats.size };
     }
 
@@ -736,13 +932,16 @@ async function renderClip(clipId, io) {
         const stats = fs.statSync(outputPath);
         const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
         run("UPDATE clips SET status = 'rendered', output_path = ? WHERE id = ?", [outputPath, clipId]);
+        incrementDailyExport(); // Track daily export count
         emit(100, `Done! ${sizeMB} MB (stream copy)`);
         console.log(`[Render] Clip #${clip.clip_number} exported (stream copy): ${outputPath} (${sizeMB} MB)`);
+        try { fs.removeSync(clipTempDir); } catch (e) { }
         return { outputPath, size: stats.size };
     }
 
     // All attempts failed — cleanup any leftover empty/broken files
     try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch (e) { }
+    try { fs.removeSync(clipTempDir); } catch (e) { }
 
     const finalError = result3.errorMsg || result2.errorMsg || result1.errorMsg || 'All render attempts failed';
     console.error(`[Render] All 3 attempts failed for clip #${clip.clip_number}:`);
@@ -756,119 +955,179 @@ async function renderClip(clipId, io) {
 }
 
 /**
- * Build Hook Title drawtext filter
- * Shows a text overlay with colored background box at top or bottom of video.
- * Text is automatically wrapped to fit within the video frame.
- * @param {object} clip - clip object (with hook_text, hook_settings)
- * @param {number} outW - output width
- * @param {number} outH - output height
- * @param {number} duration - clip duration in seconds
- * @returns {string} drawtext filter string or empty string
+ * Build Hook Title overlay.
+ * Uses PowerShell/WPF to generate PNG image with emoji support,
+ * then overlays it on the video via FFmpeg.
+ * Falls back to drawtext if PowerShell fails.
  */
-function buildHookTitleFilter(clip, outW, outH, duration) {
+function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     const hookText = clip.hook_text;
     if (!hookText || !hookText.trim()) return '';
-
-    // Only render hook if user explicitly configured settings in the editor
     if (!clip.hook_settings) return '';
 
     let settings = {};
     try {
         settings = typeof clip.hook_settings === 'string' ? JSON.parse(clip.hook_settings) : (clip.hook_settings || {});
     } catch (e) { return ''; }
-
-    // Must have at least been saved from the editor (has explicit values)
-    if (!settings.position && !settings.textColor && !settings.bgColor) return '';
+    // Hook is valid if there's text — settings may have defaults, don't block on missing fields
+    // Only skip if settings is completely empty (no recognizable fields at all)
+    if (!settings.position && !settings.textColor && !settings.bgColor && !settings.hookStyle && !settings.fontSize && !settings.duration) return '';
 
     const hookDuration = settings.duration != null ? settings.duration : 5;
     const position = settings.position || 'top';
-    const fontSize = settings.fontSize || Math.round(outW / 14);
-    const textColor = (settings.textColor || 'FFFFFF').replace('#', '');
-    const bgColor = (settings.bgColor || 'FF0000').replace('#', '');
-    const bgOpacity = settings.bgOpacity || '0.85';
+    const fontSize = settings.fontSize || Math.round(outW / 11);
+    const hookStyle = settings.hookStyle || 'podcast';
 
-    // Simple escape for drawtext - strip problematic chars
-    const escapedText = hookText.replace(/['\\:%;]/g, ' ').replace(/"/g, ' ').trim();
-    if (!escapedText) return '';
+    const HOOK_STYLES = {
+        podcast: { textColor: '000000', bgColor: 'FFFFFF', borderColor: 'FF0000', borderW: 6 },
+        kdm: { textColor: '000000', bgColor: 'FFD700', borderColor: 'CC0000', borderW: 5 },
+        neon: { textColor: '000000', bgColor: '00E5FF', borderColor: 'FFFFFF', borderW: 5 },
+        drama: { textColor: 'FFFFFF', bgColor: 'CC0000', borderColor: '000000', borderW: 5 },
+        dark: { textColor: 'FFFFFF', bgColor: '1A1A2E', borderColor: '8B5CF6', borderW: 5 },
+        custom: { textColor: 'FFFFFF', bgColor: 'FF0000', borderColor: '000000', borderW: 5 },
+    };
 
-    const margin = Math.round(outW * 0.04);
-    const enableExpr = hookDuration > 0 ? `:enable='between(t,0,${hookDuration})'` : '';
-    const boxBorderW = Math.round(fontSize * 0.4);
+    const sp = HOOK_STYLES[hookStyle] || HOOK_STYLES.podcast;
+    const textColor = hookStyle === 'custom' ? (settings.textColor || sp.textColor).replace('#', '') : sp.textColor;
+    const bgColor = hookStyle === 'custom' ? (settings.bgColor || sp.bgColor).replace('#', '') : sp.bgColor;
+    const borderColor = hookStyle === 'custom' ? (settings.borderColor || sp.borderColor).replace('#', '') : sp.borderColor;
+    const borderThk = sp.borderW;
 
-    // FFmpeg drawtext on Windows requires explicit fontfile= (no Fontconfig configured)
-    const os = require('os');
-    const userFontsDir = path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'Windows', 'Fonts');
-    const systemFontsDir = 'C:\\Windows\\Fonts';
-    const fontCandidates = [
-        path.join(userFontsDir, 'Montserrat-Bold.ttf'),
-        path.join(userFontsDir, 'Montserrat-ExtraBold.ttf'),
-        path.join(systemFontsDir, 'arialbd.ttf'),
-        path.join(systemFontsDir, 'arial.ttf'),
-    ];
-    let fontPath = fontCandidates.find(f => fs.existsSync(f)) || path.join(systemFontsDir, 'arial.ttf');
-    const escapedFontPath = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+    // UPPERCASE, strip FFmpeg-breaking chars but keep emoji
+    const cleanText = hookText
+        .replace(/[':%;]/g, ' ').replace(/"/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (!cleanText) return '';
 
-    // === TEXT WRAPPING ===
-    // Available width for text: video width minus margins and box padding on both sides
-    const maxTextWidth = outW - (margin * 2) - (boxBorderW * 2);
-    // Character width for BOLD fonts is approximately 0.7 * fontSize
-    // Using conservative estimate to prevent overflow
-    const avgCharWidth = fontSize * 0.7;
-    const maxCharsPerLine = Math.max(6, Math.floor(maxTextWidth / avgCharWidth));
+    const marginY = Math.round(outH * 0.08);
+    const enableExpr = hookDuration > 0 ? `enable='between(t,0,${hookDuration})'` : '';
 
-    console.log(`[HookTitle] outW=${outW} fontSize=${fontSize} maxTextWidth=${maxTextWidth} avgCharW=${avgCharWidth.toFixed(1)} maxChars=${maxCharsPerLine} text="${escapedText}"`);
+    // =====================================================
+    //  Try PNG overlay approach (supports emoji via WPF!)
+    // =====================================================
+    if (clipDir) {
+        try {
+            const hookImgPath = path.join(clipDir, 'hook_overlay.png');
+            const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'hook_gen.ps1');
+            const padX = Math.round(fontSize * 0.5);
+            const padY = Math.round(fontSize * 0.35);
+            const maxW = outW - Math.round(outW * 0.14);
+            const psFontSize = Math.round(fontSize * 0.75);
 
-    // Word-wrap the text into lines
-    const words = escapedText.split(/\s+/);
-    const lines = [];
-    let currentLine = '';
-    for (const word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        if (testLine.length > maxCharsPerLine && currentLine) {
-            lines.push(currentLine);
-            currentLine = word;
-        } else {
-            currentLine = testLine;
+            // Write text to temp file (preserves emoji/Unicode through pipeline)
+            const { execSync } = require('child_process');
+            const textFilePath = path.join(clipDir, '_hook_text.txt');
+            fs.writeFileSync(textFilePath, cleanText, 'utf-8');
+
+            const args = [
+                `"${textFilePath}"`,
+                psFontSize, padX, padY, borderThk,
+                bgColor, textColor, borderColor,
+                maxW, `"${hookImgPath}"`
+            ].join(' ');
+
+            const result = execSync(
+                `powershell -NoProfile -ExecutionPolicy Bypass -Sta -File "${scriptPath}" ${args}`,
+                { timeout: 15000, encoding: 'utf-8' }
+            ).trim();
+
+            // Cleanup text file
+            try { fs.unlinkSync(textFilePath); } catch (e) { }
+
+            if (fs.existsSync(hookImgPath)) {
+                const dims = result.split(',').map(Number);
+                const imgW = dims[0] || 400;
+                const imgH = dims[1] || 100;
+                const overlayX = Math.round((outW - imgW) / 2);
+                const overlayY = position === 'bottom' ? (outH - imgH - marginY) : marginY;
+
+                console.log('[HookTitle] PNG generated:', imgW + 'x' + imgH, '| Style:', hookStyle, '| emoji: YES');
+
+                return {
+                    type: 'overlay',
+                    imagePath: hookImgPath,
+                    overlayX,
+                    overlayY,
+                    enableExpr,
+                    hookDuration
+                };
+            }
+        } catch (err) {
+            console.warn('[HookTitle] PNG failed:', err.message.substring(0, 150), '— using drawtext fallback');
         }
     }
-    if (currentLine) lines.push(currentLine);
 
-    console.log(`[HookTitle] Wrapped into ${lines.length} lines:`, lines);
+    // =====================================================
+    //  FALLBACK: drawtext (no emoji support)
+    // =====================================================
+    console.log('[HookTitle] Using drawtext fallback (no emoji)');
 
-    // For multiple lines, stack drawtext filters with calculated Y positions
-    const lineHeight = Math.round(fontSize * 1.4);
-    const totalTextHeight = lines.length * lineHeight;
+    // Strip emoji for drawtext
+    const noEmojiText = cleanText
+        .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{2B50}\u{2764}\u{203C}\u{2049}]/gu, '')
+        .replace(/\s+/g, ' ').trim();
+    if (!noEmojiText) return '';
 
-    // Calculate base Y position
-    let baseY;
-    if (position === 'bottom') {
-        baseY = outH - totalTextHeight - margin * 3;
-    } else {
-        baseY = margin;
+    const dtEnableExpr = hookDuration > 0 ? `:enable='between(t,0,${hookDuration})'` : '';
+
+    // Font resolution
+    const os = require('os');
+    const bundledFontsDir = path.join(__dirname, '..', '..', 'fonts');
+    const systemFontsDir = 'C:\\Windows\\Fonts';
+    const fontCandidates = [
+        path.join(bundledFontsDir, 'Montserrat-ExtraBold.ttf'),
+        path.join(bundledFontsDir, 'Montserrat-Bold.ttf'),
+        path.join(bundledFontsDir, 'Montserrat.ttf'),
+        path.join(systemFontsDir, 'arialbd.ttf'),
+    ];
+    let fontPath = fontCandidates.find(f => fs.existsSync(f)) || path.join(systemFontsDir, 'arial.ttf');
+    const escapedFontPath = fontPath.split(path.sep).join('/').replace(/:/g, '\\:');
+
+    const padX = Math.round(fontSize * 0.45);
+    const padY = Math.round(fontSize * 0.30);
+    const avgCharWidth = fontSize * 0.62;
+    const maxCharsPerLine = Math.max(6, Math.floor((outW - outW * 0.1 - padX * 2) / avgCharWidth));
+
+    const words = noEmojiText.split(/\s+/);
+    const wLines = [];
+    let currentLine = '';
+    for (const word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        if (testLine.length > maxCharsPerLine && currentLine) { wLines.push(currentLine); currentLine = word; }
+        else { currentLine = testLine; }
     }
+    if (currentLine) wLines.push(currentLine);
+    while (wLines.length > 4) { const o = wLines.pop(); wLines[wLines.length - 1] += ' ' + o; }
 
-    // Build a drawtext filter for each line
-    const drawtextFilters = lines.map((line, idx) => {
-        const yPos = baseY + (idx * lineHeight);
-        return `drawtext=text='${line}':fontfile='${escapedFontPath}':fontsize=${fontSize}:fontcolor=0x${textColor}:x=(w-tw)/2:y=${yPos}:box=1:boxcolor=0x${bgColor}@${bgOpacity}:boxborderw=${boxBorderW}${enableExpr}`;
-    });
+    const lineHeight = Math.round(fontSize * 1.20);
+    const totalTextH = wLines.length * lineHeight;
+    const longestLine = wLines.reduce((a, b) => a.length > b.length ? a : b, '');
+    const boxW = Math.min(outW - Math.round(outW * 0.1), Math.round(longestLine.length * avgCharWidth) + padX * 2);
+    const boxH = totalTextH + padY * 2;
+    const boxX = Math.round((outW - boxW) / 2);
+    const bw = Math.max(4, borderThk);
 
-    return drawtextFilters.join(',');
+    let boxY = position === 'bottom' ? outH - boxH - marginY * 2 : marginY;
+
+    const filters = [];
+    filters.push('drawbox=x=' + (boxX - bw) + ':y=' + (boxY - bw) + ':w=' + (boxW + bw * 2) + ':h=' + (boxH + bw * 2) +
+        ':color=0x' + borderColor + '@1.0:t=fill' + dtEnableExpr);
+    filters.push('drawbox=x=' + boxX + ':y=' + boxY + ':w=' + boxW + ':h=' + boxH +
+        ':color=0x' + bgColor + '@1.0:t=fill' + dtEnableExpr);
+    for (let i = 0; i < wLines.length; i++) {
+        filters.push("drawtext=text='" + wLines[i] + "':fontfile='" + escapedFontPath + "':fontsize=" + fontSize +
+            ':fontcolor=0x' + textColor + ':x=(w-tw)/2:y=' + (boxY + padY + i * lineHeight) + dtEnableExpr);
+    }
+    return filters.join(',');
 }
 
 
 /**
- * Build video filter string
- * Uses lanczos scaling (highest quality). Sharpening only when upscaling.
- * @param {string} mode - reframing mode
- * @param {number} outW - output width
- * @param {number} outH - output height
- * @param {number} [sourceW=0] - source video width (0 = unknown, skip sharpen)
+ * Build video filter chain based on the selected reframing mode.
  */
 function buildVideoFilter(mode, outW, outH, sourceW = 0) {
     // Lanczos = highest quality scaler (barely slower than bilinear)
     const scaleFlags = ':flags=lanczos';
-    // Only sharpen when upscaling (source smaller than output) — saves render time on HD sources
+    // Only sharpen when upscaling (source smaller than output) ΓÇö saves render time on HD sources
     const needsSharpen = sourceW > 0 && sourceW < outW;
     const sharpen = needsSharpen ? ',unsharp=5:5:0.5:5:5:0.0' : '';
 
@@ -877,7 +1136,7 @@ function buildVideoFilter(mode, outW, outH, sourceW = 0) {
             return `scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH}${sharpen}`;
 
         case 'fit':
-            // Fit with blur background — popular TikTok/Reels style
+            // Fit with blur background ΓÇö popular TikTok/Reels style
             return [
                 `[0:v]split[a][b]`,
                 `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=20:5[bg]`,
@@ -984,7 +1243,7 @@ function getEncoder(settings) {
         return { encoder: 'h264_qsv', encoderArgs: ['-preset', 'medium'] };
     }
 
-    // 'auto'/'auto' — try to detect GPU encoder from FFmpeg
+    // 'auto'/'auto' ΓÇö try to detect GPU encoder from FFmpeg
     try {
         const { execSync } = require('child_process');
         const encoders = execSync('ffmpeg -encoders 2>&1', { timeout: 5000 }).toString();
@@ -1000,17 +1259,17 @@ function getEncoder(settings) {
         // Match GPU to encoder
         if ((gpuName.includes('nvidia') || gpuName.includes('geforce') || gpuName.includes('rtx') || gpuName.includes('gtx'))
             && encoders.includes('h264_nvenc')) {
-            console.log(`[Render] Auto-detected NVIDIA GPU (${gpuName}) → using h264_nvenc`);
+            console.log(`[Render] Auto-detected NVIDIA GPU (${gpuName}) ΓåÆ using h264_nvenc`);
             return { encoder: 'h264_nvenc', encoderArgs: ['-preset', 'p4', '-tune', 'hq'] };
         }
         if ((gpuName.includes('amd') || gpuName.includes('radeon'))
             && encoders.includes('h264_amf')) {
-            console.log(`[Render] Auto-detected AMD GPU (${gpuName}) → using h264_amf`);
+            console.log(`[Render] Auto-detected AMD GPU (${gpuName}) ΓåÆ using h264_amf`);
             return { encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced'] };
         }
         if ((gpuName.includes('intel') || gpuName.includes('uhd') || gpuName.includes('iris'))
             && encoders.includes('h264_qsv')) {
-            console.log(`[Render] Auto-detected Intel GPU (${gpuName}) → using h264_qsv`);
+            console.log(`[Render] Auto-detected Intel GPU (${gpuName}) ΓåÆ using h264_qsv`);
             return { encoder: 'h264_qsv', encoderArgs: ['-preset', 'medium'] };
         }
     } catch (e) {
@@ -1026,7 +1285,7 @@ function getEncoder(settings) {
 
 /**
  * Build FFmpeg filter for animated progress bar at bottom of video.
- * Color transitions: start(blue/green) → mid(yellow) → end(red)
+ * Color transitions: start(blue/green) ΓåÆ mid(yellow) ΓåÆ end(red)
  * 
  * @param {object} settings - App settings
  * @param {number} outW - Output width
@@ -1055,8 +1314,8 @@ function buildProgressBarFilter(settings, outW, outH, duration) {
     const progressW = `(t/${duration})*${outW}`;
 
     // Color interpolation using FFmpeg expressions
-    // Phase 1 (0%-50%): startColor → midColor
-    // Phase 2 (50%-100%): midColor → endColor
+    // Phase 1 (0%-50%): startColor ΓåÆ midColor
+    // Phase 2 (50%-100%): midColor ΓåÆ endColor
     const progress = `t/${duration}`; // 0.0 to 1.0
 
     // Red channel interpolation
@@ -1072,7 +1331,7 @@ function buildProgressBarFilter(settings, outW, outH, duration) {
     // we use multiple drawbox filters with conditional enable
 
     // Multi-segment approach for color gradient:
-    // Split bar into N segments, each a different color from start→mid→end
+    // Split bar into N segments, each a different color from startΓåÆmidΓåÆend
     const SEGMENTS = 10;
     const filters = [];
 
@@ -1252,7 +1511,7 @@ function generateSubtitleFile(clip, project, outputDir) {
         return null;
     }
 
-    // sql.js can return TEXT columns as Uint8Array for large data — convert to string
+    // sql.js can return TEXT columns as Uint8Array for large data ΓÇö convert to string
     let segmentDataStr = transcript.segment_data;
     if (segmentDataStr instanceof Uint8Array || Buffer.isBuffer(segmentDataStr)) {
         segmentDataStr = Buffer.from(segmentDataStr).toString('utf-8');
@@ -1374,9 +1633,16 @@ Style: Default,${style.font},${style.size},${primaryColor},${primaryColor},${out
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
-    // Subtitle delay offset (seconds) to compensate for FFmpeg seeking imprecision.
-    // Positive = subtitles appear later (fixes "subtitles too early" issue)
-    const SUBTITLE_DELAY = 0.5;
+    // Subtitle delay (seconds): Groq/Whisper word timestamps tend to detect word
+    // boundaries slightly early (before actual audio peak). This delay shifts all
+    // subtitle timestamps later so text appears in sync with actual speech.
+    // With 2-pass rendering (pass 1 single-seek + pass 2 subtitle overlay),
+    // the video PTS is accurate, so we add delay purely to compensate for Whisper offset.
+    // 0.5s = subtitle appears 0.5s after the word's detected start → feels natural
+    // If subtitles appear TOO LATE after this change: reduce to 0.3
+    // Subtitle delay (seconds): 0.3s compensates for Whisper early detection.
+    // Lower = subtitles appear earlier (less delay). Raise if subs still appear too early.
+    const SUBTITLE_DELAY = 0.3;
 
     // Per-word highlight: all words visible, only the current word gets highlight color
     // This matches the preview behavior exactly
@@ -1430,7 +1696,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             wordChunks.push(validWords.slice(i, i + MAX_WORDS_PER_CHUNK));
         }
 
-        // STEP 4: Generate ASS Dialogue events — one per word, showing full chunk text
+        // STEP 4: Generate ASS Dialogue events ΓÇö one per word, showing full chunk text
         for (const chunk of wordChunks) {
             const chunkTexts = chunk.map(w => w.text);
             if (chunkTexts.length === 0) continue;
@@ -1490,29 +1756,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 }
 
 /**
- * Build FFmpeg subtitle filter string for ASS file
- * Handles Windows path escaping for FFmpeg
+ * Build FFmpeg subtitle filter string for ASS file — for use with -vf
+ * Colons escaped as \\: (double backslash + colon) as required by -vf argument.
  */
 function buildSubtitleFilter(assPath) {
-    // FFmpeg ass filter path escaping on Windows:
-    // Convert backslashes to forward slashes and escape colons
     const escapePath = (p) => p
         .replace(/\\/g, '/')
         .replace(/'/g, "'\\''")
         .replace(/:/g, '\\:');
 
     const escapedPath = escapePath(assPath);
-
-    // Add fontsdir so FFmpeg can find user-installed fonts (like Montserrat)
-    const os = require('os');
-    const userFontsDir = path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'Windows', 'Fonts');
-    const systemFontsDir = 'C:\\Windows\\Fonts';
-
-    // Use the user fonts dir if it exists (Google Fonts are installed there)
-    const fontsDir = fs.existsSync(userFontsDir) ? userFontsDir : systemFontsDir;
-    const escapedFontsDir = escapePath(fontsDir);
+    const escapedFontsDir = escapePath('C:\\Windows\\Fonts');
 
     return `ass='${escapedPath}':fontsdir='${escapedFontsDir}'`;
+}
+
+/**
+ * Build FFmpeg subtitle filter string for ASS file — for use inside -filter_complex
+ * The 'ass' filter uses ':' as option separator inside filter_complex, which conflicts
+ * with the path that contains ':' (Windows drive letter e.g. C:\\...).
+ * Solution: use 'subtitles=' filter (alias for ass) and escape differently.
+ * In filter_complex, the option separator ':' inside a quoted string must be escaped as '\:'.
+ */
+function buildSubtitleFilterComplex(assPath) {
+    // In filter_complex: backslash → forward slash, single-escape colon with \:
+    const escaped = assPath
+        .replace(/\\/g, '/')
+        .replace(/'/g, "''")
+        .replace(/:/g, '\\:');
+
+    const fontsDir = 'C\\\\:/Windows/Fonts';
+
+    // Use 'subtitles=' which handles filter_complex better than 'ass='
+    return `subtitles='${escaped}'`;
 }
 
 /**
@@ -1555,5 +1831,6 @@ async function renderAllClips(projectId, io) {
 
     return results;
 }
+
 
 module.exports = { renderClip, renderAllClips };

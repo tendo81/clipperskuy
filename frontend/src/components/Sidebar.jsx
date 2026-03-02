@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Upload, FolderOpen, Music, Settings, Zap, Key, Info, ArrowUpCircle } from 'lucide-react';
+import { Home, Upload, FolderOpen, Music, Settings, Zap, Key, Info, ArrowUpCircle, Shield } from 'lucide-react';
+
+const isElectron = !!(window && window.process && window.process.type)
+    || !!(window && window.__ELECTRON__)
+    || (typeof navigator === 'object' && navigator.userAgent.indexOf('Electron') >= 0);
 
 const APP_VERSION = __APP_VERSION__ || '1.1.6';
 
@@ -51,6 +55,15 @@ export default function Sidebar() {
             </nav>
 
             <div className="sidebar-bottom">
+                {!isElectron && (
+                    <NavLink
+                        to="/admin"
+                        className={`sidebar-nav-item ${location.pathname === '/admin' ? 'active' : ''}`}
+                    >
+                        <Shield size={20} />
+                        <span>Admin</span>
+                    </NavLink>
+                )}
                 <NavLink
                     to="/license"
                     className={`sidebar-nav-item ${location.pathname === '/license' ? 'active' : ''}`}

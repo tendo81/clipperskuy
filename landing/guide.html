@@ -1,0 +1,963 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panduan ClipperSkuy — Cara Menggunakan AI Video Clip Generator</title>
+    <meta name="description"
+        content="Panduan lengkap cara menggunakan ClipperSkuy — dari instalasi, setup API key, hingga menghasilkan clip viral untuk TikTok, Reels & YouTube Shorts.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #0a0a12;
+            --bg2: #12121e;
+            --bg-card: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.06);
+            --text: #f0f0f5;
+            --text2: rgba(255, 255, 255, 0.6);
+            --text3: rgba(255, 255, 255, 0.35);
+            --purple: #7c3aed;
+            --cyan: #22d3ee;
+            --pink: #ec4899;
+            --green: #22c55e;
+            --orange: #f59e0b;
+            --red: #ef4444;
+            --gradient: linear-gradient(135deg, #7c3aed 0%, #2dd4bf 50%, #22d3ee 100%);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+        }
+
+        /* Navbar */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 14px 0;
+            background: rgba(10, 10, 18, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-inner {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-brand {
+            font-family: 'Outfit';
+            font-weight: 800;
+            font-size: 20px;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text2);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+        }
+
+        .nav-back {
+            padding: 8px 18px;
+            border-radius: 50px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text);
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .nav-back:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Layout */
+        .doc-layout {
+            display: flex;
+            max-width: 1100px;
+            margin: 80px auto 0;
+            padding: 0 24px;
+            gap: 48px;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            flex-shrink: 0;
+            position: sticky;
+            top: 100px;
+            height: fit-content;
+            padding: 24px 0;
+        }
+
+        .sidebar-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text3);
+            margin-bottom: 16px;
+        }
+
+        .sidebar-nav {
+            list-style: none;
+        }
+
+        .sidebar-nav li {
+            margin-bottom: 2px;
+        }
+
+        .sidebar-nav a {
+            display: block;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text2);
+            text-decoration: none;
+            transition: all 0.2s;
+            border-left: 2px solid transparent;
+        }
+
+        .sidebar-nav a:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .sidebar-nav a.active {
+            color: var(--cyan);
+            border-left-color: var(--cyan);
+            background: rgba(34, 211, 238, 0.05);
+        }
+
+        .sidebar-nav .sub {
+            padding-left: 28px;
+            font-size: 12px;
+        }
+
+        /* Content */
+        .doc-content {
+            flex: 1;
+            min-width: 0;
+            padding: 32px 0 80px;
+        }
+
+        .doc-content h1 {
+            font-family: 'Outfit';
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .doc-content .doc-subtitle {
+            font-size: 16px;
+            color: var(--text2);
+            margin-bottom: 40px;
+        }
+
+        .doc-content h2 {
+            font-family: 'Outfit';
+            font-size: 26px;
+            font-weight: 700;
+            margin-top: 56px;
+            margin-bottom: 20px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+            scroll-margin-top: 100px;
+        }
+
+        .doc-content h2:first-of-type {
+            border-top: none;
+            margin-top: 0;
+            padding-top: 0;
+        }
+
+        .doc-content h3 {
+            font-family: 'Outfit';
+            font-size: 18px;
+            font-weight: 700;
+            margin-top: 32px;
+            margin-bottom: 12px;
+            color: var(--cyan);
+            scroll-margin-top: 100px;
+        }
+
+        .doc-content p {
+            font-size: 15px;
+            color: var(--text2);
+            margin-bottom: 16px;
+            line-height: 1.8;
+        }
+
+        .doc-content strong {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .doc-content ul,
+        .doc-content ol {
+            margin-bottom: 16px;
+            padding-left: 24px;
+        }
+
+        .doc-content li {
+            font-size: 15px;
+            color: var(--text2);
+            margin-bottom: 8px;
+            line-height: 1.7;
+        }
+
+        .doc-content a {
+            color: var(--cyan);
+            text-decoration: none;
+            border-bottom: 1px solid rgba(34, 211, 238, 0.3);
+            transition: border-color 0.2s;
+        }
+
+        .doc-content a:hover {
+            border-bottom-color: var(--cyan);
+        }
+
+        /* Code blocks */
+        .code-block {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: #e2e8f0;
+            line-height: 1.6;
+        }
+
+        .code-block .label {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text3);
+            background: var(--bg2);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        /* Info boxes */
+        .info-box {
+            padding: 16px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.7;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .info-box.tip {
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.15);
+            color: var(--green);
+        }
+
+        .info-box.warning {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.15);
+            color: var(--orange);
+        }
+
+        .info-box.danger {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+            color: var(--red);
+        }
+
+        .info-box.info {
+            background: rgba(34, 211, 238, 0.08);
+            border: 1px solid rgba(34, 211, 238, 0.15);
+            color: var(--cyan);
+        }
+
+        .info-box .icon {
+            font-size: 18px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .info-box .content {
+            color: var(--text2);
+        }
+
+        .info-box .content strong {
+            color: var(--text);
+        }
+
+        /* Table */
+        .doc-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .doc-table th {
+            text-align: left;
+            padding: 12px 16px;
+            background: var(--bg2);
+            color: var(--text);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .doc-table td {
+            padding: 10px 16px;
+            color: var(--text2);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .doc-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .badge-free {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text3);
+        }
+
+        .badge-trial {
+            background: rgba(34, 211, 238, 0.15);
+            color: var(--cyan);
+        }
+
+        .badge-pro {
+            background: rgba(124, 58, 237, 0.15);
+            color: var(--purple);
+        }
+
+        /* Screenshot placeholder */
+        .screenshot {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg2);
+            padding: 40px;
+            text-align: center;
+            color: var(--text3);
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+
+            .doc-layout {
+                padding: 0 16px;
+            }
+
+            .doc-content h1 {
+                font-size: 28px;
+            }
+        }
+
+        /* Footer */
+        .doc-footer {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 32px 24px;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            font-size: 13px;
+            color: var(--text3);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="nav-inner">
+            <a href="index.html" class="nav-brand">⚡ ClipperSkuy</a>
+            <ul class="nav-links">
+                <li><a href="index.html#features">Fitur</a></li>
+                <li><a href="index.html#pricing">Harga</a></li>
+                <li><a href="#" style="color: var(--cyan);">📖 Panduan</a></li>
+            </ul>
+            <a href="index.html" class="nav-back">← Kembali</a>
+        </div>
+    </nav>
+
+    <div class="doc-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-title">Panduan</div>
+            <ul class="sidebar-nav">
+                <li><a href="#install" class="active">📦 Instalasi</a></li>
+                <li><a href="#api-key" class="sub">🔑 Setup API Key</a></li>
+                <li><a href="#first-project">🎬 Project Pertama</a></li>
+                <li><a href="#youtube-download" class="sub">📥 Download YouTube</a></li>
+                <li><a href="#upload-video" class="sub">📤 Upload Video</a></li>
+                <li><a href="#clips">✂️ Review Clips</a></li>
+                <li><a href="#reframing">🎯 Reframing Mode</a></li>
+                <li><a href="#subtitle">💬 Subtitle & Captions</a></li>
+                <li><a href="#render">🎞️ Render & Export</a></li>
+                <li><a href="#settings">⚙️ Settings</a></li>
+                <li><a href="#license">🔐 Lisensi & Trial</a></li>
+                <li><a href="#tier-comparison">📊 Perbandingan Tier</a></li>
+                <li><a href="#troubleshoot">🔧 Troubleshooting</a></li>
+                <li><a href="#faq-doc">❓ FAQ Teknis</a></li>
+            </ul>
+        </aside>
+
+        <!-- Content -->
+        <main class="doc-content">
+            <h1>📖 Panduan ClipperSkuy</h1>
+            <p class="doc-subtitle">Panduan lengkap dari instalasi sampai menghasilkan clip viral. Estimasi waktu baca:
+                10 menit.</p>
+
+            <!-- Instalasi -->
+            <h2 id="install">📦 Instalasi</h2>
+            <p>ClipperSkuy adalah aplikasi desktop Windows yang berjalan 100% lokal di PC kamu. Tidak perlu upload video
+                ke cloud.</p>
+
+            <h3>System Requirements</h3>
+            <table class="doc-table">
+                <tr>
+                    <th>Komponen</th>
+                    <th>Minimum</th>
+                    <th>Recommended</th>
+                </tr>
+                <tr>
+                    <td>OS</td>
+                    <td>Windows 10 (64-bit)</td>
+                    <td>Windows 11</td>
+                </tr>
+                <tr>
+                    <td>RAM</td>
+                    <td>8 GB</td>
+                    <td>16 GB</td>
+                </tr>
+                <tr>
+                    <td>Storage</td>
+                    <td>2 GB free</td>
+                    <td>10 GB+ free</td>
+                </tr>
+                <tr>
+                    <td>GPU</td>
+                    <td>Tidak wajib</td>
+                    <td>NVIDIA/AMD/Intel (untuk rendering cepat)</td>
+                </tr>
+                <tr>
+                    <td>Internet</td>
+                    <td>Untuk download YouTube & API</td>
+                    <td>—</td>
+                </tr>
+            </table>
+
+            <h3>Langkah Instalasi</h3>
+            <ol>
+                <li><strong>Download</strong> file installer dari halaman <a href="index.html#pricing">Download</a></li>
+                <li><strong>Extract</strong> file ZIP ke folder yang diinginkan</li>
+                <li><strong>Jalankan</strong> <code>ClipperSkuy.exe</code></li>
+                <li>Aplikasi akan otomatis membuat folder data di <code>%APPDATA%\clipperskuy\data</code></li>
+            </ol>
+
+            <div class="info-box tip">
+                <span class="icon">💡</span>
+                <div class="content"><strong>Trial Otomatis:</strong> Saat pertama kali membuka aplikasi, kamu otomatis
+                    mendapat <strong>7 hari trial</strong> dengan semua fitur premium terbuka. Tidak perlu registrasi!
+                </div>
+            </div>
+
+            <!-- API Key -->
+            <h2 id="api-key">🔑 Setup API Key</h2>
+            <p>ClipperSkuy menggunakan AI untuk menganalisa video dan menemukan momen viral. Kamu perlu API key gratis
+                dari salah satu provider berikut:</p>
+
+            <h3>Groq API Key (Recommended)</h3>
+            <ol>
+                <li>Buka <a href="https://console.groq.com" target="_blank">console.groq.com</a></li>
+                <li>Buat akun gratis (login dengan Google)</li>
+                <li>Klik <strong>"API Keys"</strong> → <strong>"Create API Key"</strong></li>
+                <li>Copy key yang diawali <code>gsk_</code></li>
+                <li>Paste di <strong>Settings → AI Configuration → Groq API Keys</strong></li>
+            </ol>
+
+            <div class="info-box info">
+                <span class="icon">🔄</span>
+                <div class="content"><strong>Multi-Key Rotation:</strong> Tambahkan beberapa API key untuk
+                    auto-rotation. Saat satu key kena rate limit, key berikutnya otomatis digunakan.</div>
+            </div>
+
+            <h3>Gemini API Key (Alternatif)</h3>
+            <ol>
+                <li>Buka <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>
+                </li>
+                <li>Login dengan akun Google</li>
+                <li>Klik <strong>"Create API Key"</strong></li>
+                <li>Copy key yang diawali <code>AIzaSy</code></li>
+                <li>Paste di <strong>Settings → AI Configuration → Gemini API Keys</strong></li>
+            </ol>
+
+            <div class="info-box warning">
+                <span class="icon">⚠️</span>
+                <div class="content"><strong>Penting:</strong> Minimal satu API key (Groq atau Gemini) harus diisi agar
+                    AI clip detection berfungsi. Tanpa API key, kamu tetap bisa memotong video secara manual.</div>
+            </div>
+
+            <!-- First Project -->
+            <h2 id="first-project">🎬 Membuat Project Pertama</h2>
+            <p>Ada dua cara untuk membuat project baru — download dari YouTube atau upload video langsung dari PC.</p>
+
+            <h3 id="youtube-download">📥 Download dari YouTube</h3>
+            <ol>
+                <li>Buka halaman <strong>New Project</strong> (tombol + di sidebar)</li>
+                <li>Paste URL YouTube di field yang tersedia</li>
+                <li>Atur settings: Platform target, Reframing mode, Durasi clip</li>
+                <li>Klik <strong>"Upload & Generate Clips"</strong></li>
+                <li>Tunggu proses download + analisis AI (progress ditampilkan realtime)</li>
+            </ol>
+
+            <div class="code-block">
+                <span class="label">Contoh URL</span>
+                <code>https://www.youtube.com/watch?v=dQw4w9WgXcQ<br>https://youtu.be/dQw4w9WgXcQ</code>
+            </div>
+
+            <h3 id="upload-video">📤 Upload Video dari PC</h3>
+            <ol>
+                <li>Buka halaman <strong>New Project</strong></li>
+                <li><strong>Drag & drop</strong> file video ke area upload, atau klik untuk browse</li>
+                <li>Format yang didukung: <strong>MP4, MOV, AVI, MKV, WebM</strong></li>
+                <li>Ukuran maksimal: <strong>5 GB</strong></li>
+                <li>Atur settings dan klik <strong>"Upload & Generate Clips"</strong></li>
+            </ol>
+
+            <!-- Clips -->
+            <h2 id="clips">✂️ Review & Edit Clips</h2>
+            <p>Setelah AI selesai menganalisa, kamu akan melihat daftar clips yang ditemukan. Setiap clip memiliki:</p>
+            <ul>
+                <li><strong>Viral Score</strong> — Skor 0-100 yang menunjukkan potensi viral</li>
+                <li><strong>Title</strong> — Judul yang di-generate AI berdasarkan konten</li>
+                <li><strong>Duration</strong> — Panjang clip (bisa diedit)</li>
+                <li><strong>Transcript</strong> — Teks transkripsi dari audio</li>
+                <li><strong>Hook Text</strong> — Kalimat pembuka yang menarik perhatian</li>
+            </ul>
+
+            <p>Klik pada clip untuk membuka <strong>Clip Editor</strong> — di sini kamu bisa:</p>
+            <ul>
+                <li>Preview clip dengan subtitle</li>
+                <li>Edit start/end time</li>
+                <li>Ubah subtitle text dan styling</li>
+                <li>Pilih reframing mode</li>
+                <li>Generate hook text alternatif</li>
+                <li>Lihat rekomendasi platform terbaik</li>
+            </ul>
+
+            <!-- Reframing -->
+            <h2 id="reframing">🎯 Reframing Mode</h2>
+            <p>ClipperSkuy menawarkan 6 mode reframing untuk mengubah video landscape (16:9) ke portrait (9:16):</p>
+
+            <table class="doc-table">
+                <tr>
+                    <th>Mode</th>
+                    <th>Deskripsi</th>
+                    <th>Tier</th>
+                </tr>
+                <tr>
+                    <td><strong>Center Crop</strong></td>
+                    <td>Crop tengah sederhana. Cepat dan reliable.</td>
+                    <td><span class="badge badge-free">Free</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Fit (Blur)</strong></td>
+                    <td>Full video + blur background di atas/bawah. Tidak ada bagian yang terpotong.</td>
+                    <td><span class="badge badge-free">Free</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Face Track</strong></td>
+                    <td>AI mengikuti wajah speaker secara dinamis. Smooth tracking sepanjang clip.</td>
+                    <td><span class="badge badge-trial">Trial</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Face + Blur</strong></td>
+                    <td>Face tracking + blur background. Look paling profesional.</td>
+                    <td><span class="badge badge-pro">Pro</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Split Screen</strong></td>
+                    <td>Speaker di atas, konten/slide di bawah. Cocok untuk tutorial.</td>
+                    <td><span class="badge badge-free">Free</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Podcast</strong></td>
+                    <td>Auto-detect 1 atau 2 speaker. Dynamic split screen untuk interview/podcast.</td>
+                    <td><span class="badge badge-free">Free</span></td>
+                </tr>
+            </table>
+
+            <!-- Subtitle -->
+            <h2 id="subtitle">💬 Subtitle & Captions</h2>
+            <p>Subtitle dihasilkan menggunakan <strong>Whisper AI</strong> dan di-burn langsung ke video saat render.
+            </p>
+
+            <h3>Fitur Subtitle</h3>
+            <ul>
+                <li><strong>Word-by-word animation</strong> — Highlight kata saat diucapkan</li>
+                <li><strong>Multi-bahasa</strong> — ID, EN, AR, ZH, JA, KO, dan lainnya</li>
+                <li><strong>Custom styling</strong> — Font, warna, ukuran, posisi, outline</li>
+                <li><strong>Hook text overlay</strong> — Teks menarik di 3 detik pertama</li>
+            </ul>
+
+            <div class="info-box tip">
+                <span class="icon">💡</span>
+                <div class="content"><strong>Tips:</strong> Gunakan YouTube caption sebagai sumber subtitle jika
+                    tersedia — lebih cepat dan hemat API quota dibanding re-transcribe.</div>
+            </div>
+
+            <!-- Render -->
+            <h2 id="render">🎞️ Render & Export</h2>
+            <p>Setelah puas dengan editing, klik tombol <strong>Render</strong> untuk menghasilkan file video final.</p>
+
+            <h3>Proses Render</h3>
+            <ol>
+                <li>ClipperSkuy akan menerapkan semua efek: reframing, subtitle, hook text, progress bar</li>
+                <li>Progress ditampilkan secara realtime via WebSocket</li>
+                <li>File output disimpan di folder project</li>
+                <li>Kamu bisa render satu clip atau <strong>batch render</strong> semua clips sekaligus</li>
+            </ol>
+
+            <h3>Quality Preset</h3>
+            <table class="doc-table">
+                <tr>
+                    <th>Preset</th>
+                    <th>Speed</th>
+                    <th>File Size</th>
+                    <th>Tier</th>
+                </tr>
+                <tr>
+                    <td>🏆 Best</td>
+                    <td>Lambat</td>
+                    <td>Besar</td>
+                    <td><span class="badge badge-pro">Pro</span></td>
+                </tr>
+                <tr>
+                    <td>⚡ Balanced</td>
+                    <td>Medium</td>
+                    <td>Medium</td>
+                    <td><span class="badge badge-pro">Pro</span></td>
+                </tr>
+                <tr>
+                    <td>📱 Quick</td>
+                    <td>Cepat</td>
+                    <td>Kecil</td>
+                    <td><span class="badge badge-free">Free</span></td>
+                </tr>
+            </table>
+
+            <div class="info-box info">
+                <span class="icon">⚡</span>
+                <div class="content"><strong>GPU Acceleration:</strong> Jika kamu punya GPU NVIDIA, AMD, atau Intel,
+                    aktifkan di Settings untuk rendering hingga <strong>5x lebih cepat</strong>. ClipperSkuy otomatis
+                    mendeteksi hardware terbaik.</div>
+            </div>
+
+            <!-- Settings -->
+            <h2 id="settings">⚙️ Settings</h2>
+            <p>Halaman Settings memungkinkan kamu mengkonfigurasi:</p>
+            <ul>
+                <li><strong>AI Configuration</strong> — API keys untuk Groq, Gemini, dan Pexels (B-Roll)</li>
+                <li><strong>Video Processing</strong> — GPU acceleration, encoder, quality preset, resolusi output</li>
+                <li><strong>Audio Enhancement</strong> — Noise reduction, voice clarity (Pro)</li>
+                <li><strong>Retention Progress Bar</strong> — Warna, posisi, tinggi, opacity</li>
+                <li><strong>Watermark & Branding</strong> — Logo, teks, animasi watermark</li>
+                <li><strong>Output Folder</strong> — Lokasi penyimpanan default</li>
+            </ul>
+
+            <!-- License -->
+            <h2 id="license">🔐 Lisensi & Trial</h2>
+
+            <h3>Trial Otomatis (7 Hari)</h3>
+            <p>Saat pertama kali membuka ClipperSkuy, kamu otomatis mendapat <strong>7 hari trial gratis</strong>.
+                Selama trial:</p>
+            <ul>
+                <li>✅ Semua fitur terbuka (kecuali Face + Blur)</li>
+                <li>✅ Resolusi 1080p</li>
+                <li>✅ Tanpa watermark</li>
+                <li>✅ Unlimited project & export</li>
+                <li>✅ Batch export</li>
+            </ul>
+            <p>Setelah trial habis, akun otomatis turun ke <strong>Free tier</strong>. Kamu tetap bisa menggunakan fitur
+                dasar tanpa batas waktu.</p>
+
+            <h3>Aktivasi License Key</h3>
+            <ol>
+                <li>Beli license key via <strong>WhatsApp</strong> atau channel resmi</li>
+                <li>Buka <strong>Settings → License</strong></li>
+                <li>Paste license key (format: <code>XXXX-XXXX-XXXX-XXXX</code>)</li>
+                <li>Klik <strong>"Activate"</strong></li>
+                <li>License langsung aktif dan terikat ke PC kamu</li>
+            </ol>
+
+            <div class="info-box danger">
+                <span class="icon">🔒</span>
+                <div class="content"><strong>1 License = 1 PC.</strong> License key terikat ke hardware (Machine ID).
+                    Untuk pindah PC, hubungi admin untuk reset aktivasi.</div>
+            </div>
+
+            <!-- Tier Comparison -->
+            <h2 id="tier-comparison">📊 Perbandingan Tier</h2>
+            <table class="doc-table">
+                <tr>
+                    <th>Fitur</th>
+                    <th>Free</th>
+                    <th>Trial (7 hari)</th>
+                    <th>Pro</th>
+                    <th>Enterprise</th>
+                </tr>
+                <tr>
+                    <td>Max Project</td>
+                    <td>3</td>
+                    <td>Unlimited</td>
+                    <td>Unlimited</td>
+                    <td>Unlimited</td>
+                </tr>
+                <tr>
+                    <td>Export per Hari</td>
+                    <td>3</td>
+                    <td>Unlimited</td>
+                    <td>Unlimited</td>
+                    <td>Unlimited</td>
+                </tr>
+                <tr>
+                    <td>Resolusi</td>
+                    <td>720p</td>
+                    <td>1080p</td>
+                    <td>1080p</td>
+                    <td>1080p</td>
+                </tr>
+                <tr>
+                    <td>Watermark</td>
+                    <td>✅ Wajib</td>
+                    <td>❌ Tidak</td>
+                    <td>❌ Tidak</td>
+                    <td>❌ Tidak</td>
+                </tr>
+                <tr>
+                    <td>Face Track</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                </tr>
+                <tr>
+                    <td>Face + Blur</td>
+                    <td>🔒</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                </tr>
+                <tr>
+                    <td>Quality Preset</td>
+                    <td>Quick</td>
+                    <td>All</td>
+                    <td>All</td>
+                    <td>All</td>
+                </tr>
+                <tr>
+                    <td>Audio Enhancement</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                </tr>
+                <tr>
+                    <td>Batch Export</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                </tr>
+                <tr>
+                    <td>GPU Accel</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                </tr>
+                <tr>
+                    <td>Custom Branding</td>
+                    <td>🔒</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                    <td>✅</td>
+                </tr>
+                <tr>
+                    <td>API Access</td>
+                    <td>🔒</td>
+                    <td>🔒</td>
+                    <td>🔒</td>
+                    <td>✅</td>
+                </tr>
+            </table>
+
+            <!-- Troubleshooting -->
+            <h2 id="troubleshoot">🔧 Troubleshooting</h2>
+
+            <h3>Aplikasi tidak bisa dibuka</h3>
+            <ul>
+                <li>Pastikan Windows 10/11 64-bit</li>
+                <li>Jalankan sebagai <strong>Administrator</strong></li>
+                <li>Periksa apakah antivirus memblokir aplikasi</li>
+            </ul>
+
+            <h3>AI clip detection gagal</h3>
+            <ul>
+                <li>Pastikan API key sudah diisi di Settings</li>
+                <li>Cek validitas API key (klik tombol refresh ↻)</li>
+                <li>Pastikan koneksi internet aktif</li>
+                <li>Coba ganti provider (Groq ↔ Gemini)</li>
+            </ul>
+
+            <h3>Render gagal atau video corrupt</h3>
+            <ul>
+                <li>Pastikan FFmpeg terinstall (biasanya bundled otomatis)</li>
+                <li>Coba ubah encoder ke <strong>CPU - libx264 (Software)</strong> di Settings</li>
+                <li>Kurangi resolusi dari 1080p ke 720p</li>
+                <li>Pastikan ada cukup ruang disk</li>
+            </ul>
+
+            <h3>YouTube download gagal</h3>
+            <ul>
+                <li>Pastikan yt-dlp terinstall</li>
+                <li>Update yt-dlp: <code>pip install -U yt-dlp</code></li>
+                <li>Periksa apakah URL valid</li>
+                <li>Beberapa video mungkin diblokir oleh region/copyright</li>
+            </ul>
+
+            <!-- FAQ -->
+            <h2 id="faq-doc">❓ FAQ Teknis</h2>
+
+            <h3>Di mana data disimpan?</h3>
+            <p>Semua data tersimpan di <code>%APPDATA%\clipperskuy\data\</code>. Ini termasuk database, video source,
+                dan clip output.</p>
+
+            <h3>Bisa pakai API key gratis?</h3>
+            <p>Ya! Groq dan Gemini menawarkan tier gratis yang cukup untuk penggunaan normal. Groq memberikan ~14.400
+                request/hari dan Gemini memberikan 15 request/menit.</p>
+
+            <h3>Apakah aman untuk video pribadi?</h3>
+            <p>100% aman. Video tidak pernah di-upload ke server manapun. Semua proses AI (kecuali analisis teks oleh
+                Groq/Gemini) berjalan lokal. Yang dikirim ke API hanya <strong>teks transkripsi</strong>, bukan video.
+            </p>
+
+            <h3>Bisa digunakan untuk video selain YouTube?</h3>
+            <p>Tentu! Kamu bisa upload video apapun dari PC (MP4, MOV, AVI, MKV, WebM) — tidak terbatas pada YouTube.
+            </p>
+
+            <h3>Bagaimana cara update?</h3>
+            <p>Download versi terbaru dari website dan extract ke folder yang sama. Database dan settings akan tetap
+                tersimpan karena disimpan di folder <code>%APPDATA%</code> yang terpisah.</p>
+
+            <div
+                style="margin-top: 60px; padding: 32px; background: rgba(124,58,237,0.06); border: 1px solid rgba(124,58,237,0.12); border-radius: 16px; text-align: center;">
+                <h3 style="font-family: 'Outfit'; font-size: 22px; margin-bottom: 8px; color: var(--text);">Butuh
+                    Bantuan?</h3>
+                <p style="margin-bottom: 16px;">Hubungi kami via WhatsApp atau email untuk support teknis.</p>
+                <a href="https://wa.me/6281234567890"
+                    style="display: inline-block; padding: 12px 28px; border-radius: 50px; background: var(--gradient); color: #fff; text-decoration: none; font-weight: 700; font-size: 14px; border: none;">💬
+                    Hubungi Support</a>
+            </div>
+        </main>
+    </div>
+
+    <footer class="doc-footer">
+        © 2026 ClipperSkuy. All rights reserved. Built with ❤️ in Indonesia.
+    </footer>
+
+    <script>
+        // Active sidebar on scroll
+        const sections = document.querySelectorAll('h2[id], h3[id]');
+        const navLinks = document.querySelectorAll('.sidebar-nav a');
+        window.addEventListener('scroll', () => {
+            let current = '';
+            sections.forEach(s => { if (window.scrollY >= s.offsetTop - 120) current = s.id; });
+            navLinks.forEach(a => {
+                a.classList.remove('active');
+                if (a.getAttribute('href') === '#' + current) a.classList.add('active');
+            });
+        });
+    </script>
+</body>
+
+</html>

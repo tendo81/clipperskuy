@@ -1,4 +1,4 @@
-const initSqlJs = require('sql.js');
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs-extra');
 
@@ -9,18 +9,14 @@ fs.ensureDirSync(dataDir);
 let db = null;
 
 async function initDatabase() {
-  const SQL = await initSqlJs();
+  db = new Database(dbPath);
 
-  // Load existing database or create new
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
+  // WAL mode: faster writes, better concurrency, safer on crash
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
   // Create tables
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -48,7 +44,7 @@ async function initDatabase() {
     )
   `);
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS clips (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -76,12 +72,17 @@ async function initDatabase() {
       thumbnail_path TEXT,
       status TEXT DEFAULT 'pending',
       is_selected INTEGER DEFAULT 1,
+      music_track_id TEXT,
+      music_volume INTEGER DEFAULT 20,
+      social_copy TEXT,
+      hook_settings TEXT,
+      hook_style TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     )
   `);
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS transcripts (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -97,7 +98,7 @@ async function initDatabase() {
     )
   `);
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT,
@@ -105,7 +106,7 @@ async function initDatabase() {
     )
   `);
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS brand_kits (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL DEFAULT 'My Brand',
@@ -150,7 +151,7 @@ async function initDatabase() {
     )
   `);
 
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS license_keys (
       id TEXT PRIMARY KEY,
       license_key TEXT UNIQUE NOT NULL,
@@ -159,6 +160,8 @@ async function initDatabase() {
       duration_days INTEGER DEFAULT 0,
       expires_at DATETIME,
       max_activations INTEGER DEFAULT 1,
+      deactivation_count INTEGER DEFAULT 0,
+      max_transfers INTEGER DEFAULT 2,
       machine_id TEXT,
       activated_by TEXT,
       notes TEXT,
@@ -168,8 +171,7 @@ async function initDatabase() {
     )
   `);
 
-  // Track multiple activations per key
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS license_activations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       license_key_id TEXT NOT NULL,
@@ -180,8 +182,7 @@ async function initDatabase() {
     )
   `);
 
-  // Track license transfers (deactivation → reactivation on different machine)
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS license_transfers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       license_key TEXT NOT NULL,
@@ -192,8 +193,7 @@ async function initDatabase() {
     )
   `);
 
-  // Admin audit log — tracks all admin actions
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS admin_audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,
@@ -205,8 +205,7 @@ async function initDatabase() {
     )
   `);
 
-  // Music library
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS music_tracks (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -221,8 +220,7 @@ async function initDatabase() {
     )
   `);
 
-  // SFX library
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS sfx_tracks (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -235,8 +233,7 @@ async function initDatabase() {
     )
   `);
 
-  // SFX placed on clips
-  db.run(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS clip_sfx (
       id TEXT PRIMARY KEY,
       clip_id TEXT NOT NULL,
@@ -247,72 +244,6 @@ async function initDatabase() {
       FOREIGN KEY (sfx_track_id) REFERENCES sfx_tracks(id)
     )
   `);
-
-  // --- Migrations for existing databases ---
-  // Add new columns to license_keys if missing
-  try {
-    const lkCols = db.exec("PRAGMA table_info(license_keys)")[0];
-    const lkColNames = lkCols ? lkCols.values.map(r => r[1]) : [];
-    if (!lkColNames.includes('duration_days')) {
-      db.run('ALTER TABLE license_keys ADD COLUMN duration_days INTEGER DEFAULT 0');
-      console.log('[DB] Migration: added duration_days to license_keys');
-    }
-    if (!lkColNames.includes('expires_at')) {
-      db.run('ALTER TABLE license_keys ADD COLUMN expires_at DATETIME');
-      console.log('[DB] Migration: added expires_at to license_keys');
-    }
-    if (!lkColNames.includes('max_activations')) {
-      db.run('ALTER TABLE license_keys ADD COLUMN max_activations INTEGER DEFAULT 1');
-      console.log('[DB] Migration: added max_activations to license_keys');
-    }
-    if (!lkColNames.includes('deactivation_count')) {
-      db.run('ALTER TABLE license_keys ADD COLUMN deactivation_count INTEGER DEFAULT 0');
-      console.log('[DB] Migration: added deactivation_count to license_keys');
-    }
-    if (!lkColNames.includes('max_transfers')) {
-      db.run('ALTER TABLE license_keys ADD COLUMN max_transfers INTEGER DEFAULT 2');
-      console.log('[DB] Migration: added max_transfers to license_keys');
-    }
-  } catch (e) { /* table may not exist yet */ }
-
-  // Add caption_settings column if missing
-  try {
-    const cols = db.exec("PRAGMA table_info(clips)")[0];
-    const colNames = cols ? cols.values.map(r => r[1]) : [];
-    if (!colNames.includes('caption_settings')) {
-      db.run('ALTER TABLE clips ADD COLUMN caption_settings TEXT');
-      console.log('[DB] Migration: added caption_settings column');
-      saveDatabase();
-    }
-  } catch (e) { /* ignore */ }
-
-  // Add music columns to clips if missing
-  try {
-    const clipCols2 = db.exec("PRAGMA table_info(clips)")[0];
-    const clipColNames2 = clipCols2 ? clipCols2.values.map(r => r[1]) : [];
-    if (!clipColNames2.includes('music_track_id')) {
-      db.run('ALTER TABLE clips ADD COLUMN music_track_id TEXT');
-      console.log('[DB] Migration: added music_track_id to clips');
-    }
-    if (!clipColNames2.includes('music_volume')) {
-      db.run('ALTER TABLE clips ADD COLUMN music_volume INTEGER DEFAULT 20');
-      console.log('[DB] Migration: added music_volume to clips');
-    }
-  } catch (e) { /* ignore */ }
-
-  // Add social_copy column to clips if missing
-  try {
-    const clipCols3 = db.exec("PRAGMA table_info(clips)")[0];
-    const clipColNames3 = clipCols3 ? clipCols3.values.map(r => r[1]) : [];
-    if (!clipColNames3.includes('social_copy')) {
-      db.run('ALTER TABLE clips ADD COLUMN social_copy TEXT');
-      console.log('[DB] Migration: added social_copy to clips');
-    }
-    if (!clipColNames3.includes('hook_settings')) {
-      db.run("ALTER TABLE clips ADD COLUMN hook_settings TEXT");
-      console.log('[DB] Migration: added hook_settings to clips');
-    }
-  } catch (e) { /* ignore */ }
 
   // Insert default settings
   const defaults = {
@@ -330,47 +261,38 @@ async function initDatabase() {
     'yt_cookie_browser': 'auto'
   };
 
+  const insertDefault = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   for (const [key, value] of Object.entries(defaults)) {
-    db.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', [key, value]);
+    insertDefault.run(key, value);
   }
 
-  saveDatabase();
   console.log('[DB] Database initialized at', dbPath);
   return db;
 }
 
-function saveDatabase() {
-  if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
-  }
-}
+// No-op: kept for compatibility (better-sqlite3 writes directly to disk)
+function saveDatabase() { }
 
 function getDb() {
   return db;
 }
 
-// Helper functions that mimic better-sqlite3 API
+// No-op: kept for compatibility (no auto-save needed)
+function startAutoSave() {
+  console.log('[DB] Database ready (WAL mode — writes directly to disk)');
+}
+
+// Helper functions — same API as before
 function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  if (params.length) stmt.bind(params);
-  const results = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return results;
+  return db.prepare(sql).all(...params);
 }
 
 function get(sql, params = []) {
-  const results = all(sql, params);
-  return results.length > 0 ? results[0] : null;
+  return db.prepare(sql).get(...params);
 }
 
 function run(sql, params = []) {
-  db.run(sql, params);
-  saveDatabase();
+  return db.prepare(sql).run(...params);
 }
 
-module.exports = { initDatabase, getDb, saveDatabase, all, get, run };
+module.exports = { initDatabase, getDb, saveDatabase, all, get, run, startAutoSave };

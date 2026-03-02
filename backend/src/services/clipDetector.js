@@ -49,12 +49,22 @@ function buildPrompt(compactTranscript, projectInfo) {
     const minDur = min_duration || 15;
     const maxDur = max_duration || 60;
 
+    // Support both text labels AND custom numbers
     const countGuide = {
         few: '3-5',
         medium: '6-10',
         many: '10-15'
     };
-    const clipCount = countGuide[clip_count_target] || '6-10';
+    let clipCount;
+    const numTarget = parseInt(clip_count_target);
+    if (!isNaN(numTarget) && numTarget > 0) {
+        // User specified exact number (e.g., 5)
+        clipCount = `exactly ${numTarget}`;
+    } else {
+        clipCount = countGuide[clip_count_target] || '6-10';
+    }
+
+    console.log(`[ClipDetect] Clip count target: "${clip_count_target}" → prompt: "${clipCount}"`);
 
     return `You are a viral short-form video expert. Analyze the timestamped transcript below and identify ${clipCount} viral-worthy clips for ${platform || 'TikTok/Reels/Shorts'}.
 
@@ -67,11 +77,31 @@ LANGUAGE RULE (MOST IMPORTANT):
 
 CRITICAL RULES:
 1. Each clip MUST be between ${minDur} and ${maxDur} seconds long. NO EXCEPTIONS.
-2. Combine multiple consecutive segments to reach the minimum duration of ${minDur} seconds.
-3. start_time and end_time must come from the timestamps in the transcript.
-4. end_time minus start_time must be >= ${minDur} and <= ${maxDur}.
-5. Select clips from DIFFERENT parts of the video, not just the beginning.
-6. Each clip must tell a complete mini-story or deliver a complete thought.
+2. VARY the durations! Do NOT make all clips the same length. Use the FULL range (${minDur}-${maxDur}s).
+   - Short clips (${minDur}-${Math.round(minDur + (maxDur - minDur) * 0.3)}s): for punchy, high-energy moments
+   - Medium clips (${Math.round(minDur + (maxDur - minDur) * 0.3)}-${Math.round(minDur + (maxDur - minDur) * 0.7)}s): for stories with setup+payoff
+   - Long clips (${Math.round(minDur + (maxDur - minDur) * 0.7)}-${maxDur}s): for emotional arcs that need time to develop
+   - Let the CONTENT dictate the ideal length — include enough for a COMPLETE thought.
+3. Combine multiple consecutive segments to reach the minimum duration of ${minDur} seconds.
+4. start_time and end_time must come from the timestamps in the transcript.
+5. end_time minus start_time must be >= ${minDur} and <= ${maxDur}.
+6. Select clips from DIFFERENT parts of the video, not just the beginning.
+7. Each clip must tell a complete mini-story or deliver a complete thought.
+8. EVERY clip MUST have DIFFERENT start_time and end_time — NO DUPLICATES allowed.
+9. Clips must NOT overlap more than 30% with each other.
+${!isNaN(numTarget) ? `9. Return EXACTLY ${numTarget} clips — no more, no less.
+` : ''}
+HOOK TEXT RULES (VERY IMPORTANT):
+- hook_text is the TEXT OVERLAY shown on screen for the first 3 seconds to GRAB attention.
+- It must be 8-15 words (NOT 1-3 words! MINIMUM 8 words).
+- It must create a CURIOSITY GAP — make the viewer think "WAIT, WHAT?!"
+- Use CAPS for 1-2 emotional key words (e.g., "HANCUR", "VIRAL", "TERNYATA")
+- Add 1-2 emoji at the end
+- Reference SPECIFIC details from the clip (names, events, quotes)
+- NEVER just copy the first sentence of the transcript
+- NEVER use generic phrases like the title
+- Examples of GOOD hooks: "Dia bilang HAMIL tapi suaminya udah 3 tahun MENINGGAL 😱", "Chat WA SUAMINYA kepegang istri isinya bikin langsung GUGAT CERAI 💔", "This teacher got FIRED for what she said about students 🤯"
+- Examples of BAD hooks: "Astagfirullah", "Namaku Nining", "Pertandingan ini seru", "Gua menginap di hotel"
 
 WHAT MAKES A VIRAL CLIP:
 - Strong opening hook that grabs attention in 2 seconds
@@ -83,10 +113,13 @@ TRANSCRIPT:
 ${compactTranscript}
 
 Return EXACTLY a JSON array. No markdown, no explanation. Each object:
-{"clip_number":1,"title":"judul pendek menarik (SAME LANGUAGE AS TRANSCRIPT)","hook_text":"kalimat pertama (SAME LANGUAGE)","summary":"apa yang terjadi (SAME LANGUAGE)","start_time":120.0,"end_time":155.0,"content_type":"insight|story|humor|hot_take|tutorial|quote|emotional","virality_score":85,"score_hook":90,"score_content":85,"score_emotion":80,"score_share":85,"score_complete":90,"improvement_tips":"satu tips (SAME LANGUAGE)","hashtags":"#tag1 #tag2 #tag3"}
+{"clip_number":1,"title":"judul pendek menarik (SAME LANGUAGE)","hook_text":"HOOK VIRAL 8-15 kata dengan CAPS dan emoji yang bikin penasaran 🔥 (SAME LANGUAGE)","summary":"apa yang terjadi (SAME LANGUAGE)","start_time":120.0,"end_time":${120 + Math.round(minDur + (maxDur - minDur) * 0.6)}.0,"content_type":"insight|story|humor|hot_take|tutorial|quote|emotional","virality_score":85,"score_hook":90,"score_content":85,"score_emotion":80,"score_share":85,"score_complete":90,"improvement_tips":"satu tips (SAME LANGUAGE)","hashtags":"#tag1 #tag2 #tag3"}
 
 REMEMBER: Every clip must be ${minDur}-${maxDur} seconds! Clips shorter than ${minDur}s are REJECTED.
-REMEMBER: Output language MUST match transcript language!`;
+REMEMBER: VARY clip durations! Do NOT make all clips ${minDur}s. Use different lengths like ${minDur}s, ${Math.round(minDur + (maxDur - minDur) * 0.4)}s, ${Math.round(minDur + (maxDur - minDur) * 0.7)}s, ${maxDur}s based on content.
+REMEMBER: Output language MUST match transcript language!
+REMEMBER: hook_text MUST be 8-15 words with CAPS and emoji — NOT just 1-3 generic words!
+${!isNaN(numTarget) ? `REMEMBER: Return EXACTLY ${numTarget} clips!` : ''}`;
 }
 
 /**
@@ -273,9 +306,39 @@ function parseClipsJson(text, projectInfo = {}) {
     // Sort by virality score descending
     parsed.sort((a, b) => b.virality_score - a.virality_score);
 
-    console.log(`[ClipDetect] Parsed ${parsed.length} clips, durations: ${parsed.map(c => c.duration.toFixed(0) + 's').join(', ')}`);
+    // === DEDUPLICATION ===
+    // Remove clips that overlap >80% with a higher-scored clip
+    const deduplicated = [];
+    for (const clip of parsed) {
+        const isDuplicate = deduplicated.some(existing => {
+            const overlapStart = Math.max(existing.start_time, clip.start_time);
+            const overlapEnd = Math.min(existing.end_time, clip.end_time);
+            const overlapDuration = Math.max(0, overlapEnd - overlapStart);
+            const clipDuration = clip.end_time - clip.start_time;
+            const overlapPercent = clipDuration > 0 ? overlapDuration / clipDuration : 0;
+            return overlapPercent > 0.3; // Remove if >30% overlap
+        });
+        if (!isDuplicate) {
+            deduplicated.push(clip);
+        } else {
+            console.log(`[ClipDetect] Removed duplicate clip: "${clip.title}" (${clip.start_time}s-${clip.end_time}s)`);
+        }
+    }
 
-    return parsed;
+    // Enforce exact clip count if specified as number
+    const numTarget = parseInt(projectInfo.clip_count_target);
+    let finalClips = deduplicated;
+    if (!isNaN(numTarget) && numTarget > 0 && deduplicated.length > numTarget) {
+        finalClips = deduplicated.slice(0, numTarget);
+        console.log(`[ClipDetect] Trimmed from ${deduplicated.length} to ${numTarget} clips`);
+    }
+
+    // Re-number clips
+    finalClips.forEach((clip, i) => { clip.clip_number = i + 1; });
+
+    console.log(`[ClipDetect] Final: ${finalClips.length} clips (dedup removed ${parsed.length - deduplicated.length}), durations: ${finalClips.map(c => c.duration.toFixed(0) + 's').join(', ')}`);
+
+    return finalClips;
 }
 
 /**

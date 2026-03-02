@@ -44,13 +44,25 @@ CREATE TABLE IF NOT EXISTS license_audit_log (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Indexes for performance
+-- 4. Trial Records (anti-abuse: tracks trial per machine, survives reinstall)
+CREATE TABLE IF NOT EXISTS trial_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    machine_id VARCHAR(64) UNIQUE NOT NULL,
+    machine_name VARCHAR(255),
+    started_at TIMESTAMPTZ DEFAULT NOW(),
+    trial_days INTEGER DEFAULT 7,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_license_keys_key ON license_keys(license_key);
 CREATE INDEX IF NOT EXISTS idx_license_keys_status ON license_keys(status);
 CREATE INDEX IF NOT EXISTS idx_activations_key_id ON license_activations(license_key_id);
 CREATE INDEX IF NOT EXISTS idx_activations_machine ON license_activations(machine_id);
 CREATE INDEX IF NOT EXISTS idx_audit_key_id ON license_audit_log(license_key_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON license_audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trial_machine ON trial_records(machine_id);
 
 -- 5. Auto-update updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -70,6 +82,7 @@ CREATE TRIGGER license_keys_updated_at
 ALTER TABLE license_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE license_activations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE license_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trial_records ENABLE ROW LEVEL SECURITY;
 
 -- Allow service_role full access (used by our API)
 CREATE POLICY "Service role full access on license_keys" ON license_keys
@@ -79,4 +92,7 @@ CREATE POLICY "Service role full access on license_activations" ON license_activ
     FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Service role full access on license_audit_log" ON license_audit_log
+    FOR ALL USING (true) WITH CHECK (true);
+
+CREATE POLICY "Service role full access on trial_records" ON trial_records
     FOR ALL USING (true) WITH CHECK (true);

@@ -1,0 +1,38 @@
+{
+    "buildCommand": "",
+    "outputDirectory": ".",
+    "framework": null,
+    "rewrites": [
+        {
+            "source": "/en",
+            "destination": "/en.html"
+        },
+        {
+            "source": "/guide",
+            "destination": "/guide.html"
+        },
+        {
+            "source": "/guide-en",
+            "destination": "/guide-en.html"
+        },
+        {
+            "source": "/produk-telebot",
+            "destination": "/produk-telebot.html"
+        }
+    ],
+    "headers": [
+        {
+            "source": "/(.*)",
+            "headers": [
+                {
+                    "key": "X-Content-Type-Options",
+                    "value": "nosniff"
+                },
+                {
+                    "key": "X-Frame-Options",
+                    "value": "DENY"
+                }
+            ]
+        }
+    ]
+}

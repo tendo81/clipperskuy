@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TS Telebot Apprem — Bot Telegram Auto Order Aplikasi Premium</title>
+    <meta name="description"
+        content="Bot Telegram otomatis untuk penjualan aplikasi premium, license key, dan produk digital. Pembayaran QRIS realtime, auto-delivery, affiliate system.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #0a0a0f;
+            --bg2: #111118;
+            --bg3: #1a1a24;
+            --card: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.07);
+            --text: #f0f0f5;
+            --text2: rgba(255, 255, 255, 0.6);
+            --text3: rgba(255, 255, 255, 0.3);
+            --blue: #3b82f6;
+            --cyan: #22d3ee;
+            --purple: #8b5cf6;
+            --green: #22c55e;
+            --orange: #f59e0b;
+            --pink: #ec4899;
+            --red: #ef4444;
+            --gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #ec4899 100%);
+            --gradient2: linear-gradient(135deg, #22d3ee, #3b82f6);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* Background effect */
+        .bg-glow {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .bg-glow::before {
+            content: '';
+            position: absolute;
+            top: -100px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, transparent 70%);
+            animation: glow 8s ease-in-out infinite;
+        }
+
+        .bg-glow::after {
+            content: '';
+            position: absolute;
+            bottom: -200px;
+            right: -100px;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, transparent 70%);
+            animation: glow 10s ease-in-out infinite reverse;
+        }
+
+        @keyframes glow {
+
+            0%,
+            100% {
+                opacity: 0.5;
+                transform: translateX(-50%) scale(1);
+            }
+
+            50% {
+                opacity: 1;
+                transform: translateX(-50%) scale(1.15);
+            }
+        }
+
+        /* Container */
+        .container {
+            max-width: 580px;
+            margin: 0 auto;
+            padding: 20px 16px 40px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 24px 0 16px;
+        }
+
+        .header-brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Outfit';
+            font-weight: 800;
+            font-size: 16px;
+            color: var(--text2);
+        }
+
+        .header-brand img {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+        }
+
+        /* Product Card */
+        .product-card {
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        /* Banner */
+        .product-banner {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: var(--gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .product-banner::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+        }
+
+        .banner-content {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            padding: 30px;
+        }
+
+        .banner-icon {
+            font-size: 56px;
+            margin-bottom: 12px;
+            filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.3));
+        }
+
+        .banner-title {
+            font-family: 'Outfit';
+            font-size: 28px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+            line-height: 1.2;
+        }
+
+        .banner-subtitle {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 6px;
+            font-weight: 500;
+        }
+
+        .banner-badges {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .banner-badge {
+            padding: 4px 12px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 700;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        /* Product Body */
+        .product-body {
+            padding: 24px;
+        }
+
+        /* Price Section */
+        .price-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .price-original {
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--text3);
+            text-decoration: line-through;
+        }
+
+        .price-current {
+            font-family: 'Outfit';
+            font-size: 36px;
+            font-weight: 900;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .price-discount {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 800;
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        /* Order Button */
+        .order-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 16px;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            border: none;
+            background: var(--gradient);
+            color: #fff;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .order-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.6s;
+        }
+
+        .order-btn:hover::before {
+            transform: translateX(100%);
+        }
+
+        .order-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(59, 130, 246, 0.35);
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 14px 8px;
+            border-radius: 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+        }
+
+        .stat-value {
+            font-family: 'Outfit';
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--cyan);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text3);
+            margin-top: 2px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Description */
+        .desc-text {
+            font-size: 14px;
+            color: var(--text2);
+            line-height: 1.8;
+            margin-bottom: 24px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Feature Sections */
+        .feature-section {
+            margin-bottom: 20px;
+        }
+
+        .feature-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Outfit';
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            cursor: pointer;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .feature-title:hover {
+            border-color: rgba(59, 130, 246, 0.2);
+            background: rgba(59, 130, 246, 0.04);
+        }
+
+        .feature-title .icon {
+            font-size: 20px;
+        }
+
+        .feature-title .arrow {
+            margin-left: auto;
+            font-size: 14px;
+            color: var(--text3);
+            transition: transform 0.3s;
+        }
+
+        .feature-title.open .arrow {
+            transform: rotate(180deg);
+        }
+
+        .feature-list {
+            list-style: none;
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.4s ease, padding 0.3s;
+            padding: 0 16px;
+        }
+
+        .feature-list.open {
+            max-height: 600px;
+            padding: 8px 16px 16px;
+        }
+
+        .feature-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            color: var(--text2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+
+        .feature-list li::before {
+            content: '✅';
+            font-size: 13px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* Requirements */
+        .req-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            list-style: none;
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.4s ease, padding 0.3s;
+            padding: 0 16px;
+        }
+
+        .req-grid.open {
+            max-height: 400px;
+            padding: 8px 16px 16px;
+        }
+
+        .req-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--text2);
+            font-weight: 500;
+        }
+
+        .req-item .icon {
+            font-size: 16px;
+        }
+
+        /* How it works */
+        .flow-steps {
+            overflow: hidden;
+            max-height: 0;
+            transition: max-height 0.4s ease, padding 0.3s;
+            padding: 0 16px;
+        }
+
+        .flow-steps.open {
+            max-height: 800px;
+            padding: 8px 16px 16px;
+        }
+
+        .flow-step {
+            display: flex;
+            gap: 14px;
+            align-items: flex-start;
+            padding: 10px 0;
+            position: relative;
+        }
+
+        .flow-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 17px;
+            top: 38px;
+            bottom: -2px;
+            width: 2px;
+            background: rgba(59, 130, 246, 0.15);
+        }
+
+        .flow-num {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit';
+            font-size: 14px;
+            font-weight: 800;
+            background: rgba(59, 130, 246, 0.1);
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            color: var(--blue);
+            position: relative;
+            z-index: 1;
+        }
+
+        .flow-text {
+            font-size: 13px;
+            color: var(--text2);
+            padding-top: 7px;
+            line-height: 1.6;
+        }
+
+        .flow-text strong {
+            color: var(--text);
+        }
+
+        /* Code block */
+        .code-block {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin: 12px 16px 16px;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--cyan);
+            line-height: 1.7;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease, padding 0.3s, margin 0.3s;
+        }
+
+        .code-block.open {
+            max-height: 400px;
+            overflow-x: auto;
+            padding: 14px 16px;
+            margin: 12px 16px 16px;
+        }
+
+        /* Guarantee */
+        .guarantee {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            border-radius: 14px;
+            background: rgba(34, 197, 94, 0.06);
+            border: 1px solid rgba(34, 197, 94, 0.12);
+            margin-bottom: 20px;
+        }
+
+        .guarantee .icon {
+            font-size: 28px;
+        }
+
+        .guarantee-text {
+            font-size: 13px;
+            color: var(--text2);
+            line-height: 1.6;
+        }
+
+        .guarantee-text strong {
+            color: var(--green);
+        }
+
+        /* Warning */
+        .warning-box {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px 20px;
+            border-radius: 14px;
+            background: rgba(245, 158, 11, 0.06);
+            border: 1px solid rgba(245, 158, 11, 0.12);
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: var(--text2);
+            line-height: 1.6;
+        }
+
+        .warning-box .icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .warning-box strong {
+            color: var(--orange);
+        }
+
+        /* Bottom CTA */
+        .bottom-cta {
+            text-align: center;
+            padding: 24px;
+            background: var(--bg2);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            margin-bottom: 16px;
+        }
+
+        .bottom-cta h3 {
+            font-family: 'Outfit';
+            font-size: 20px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        .bottom-cta p {
+            font-size: 13px;
+            color: var(--text2);
+            margin-bottom: 16px;
+        }
+
+        /* Footer */
+        .page-footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: var(--text3);
+        }
+
+        /* Floating bar */
+        .floating-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 12px 16px;
+            background: rgba(10, 10, 15, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+        }
+
+        .floating-price {
+            text-align: right;
+        }
+
+        .floating-price .old {
+            font-size: 12px;
+            color: var(--text3);
+            text-decoration: line-through;
+        }
+
+        .floating-price .new {
+            font-family: 'Outfit';
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--cyan);
+        }
+
+        .floating-btn {
+            flex: 1;
+            max-width: 320px;
+            padding: 14px 24px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            border: none;
+            background: var(--gradient);
+            color: #fff;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .floating-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 30px rgba(59, 130, 246, 0.3);
+        }
+
+        /* Pulse animation */
+        @keyframes pulse-ring {
+            0% {
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 12px rgba(59, 130, 246, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+            }
+        }
+
+        .pulse {
+            animation: pulse-ring 2s infinite;
+        }
+
+        /* Responsive */
+        @media (max-width: 400px) {
+            .banner-title {
+                font-size: 22px;
+            }
+
+            .price-current {
+                font-size: 30px;
+            }
+
+            .stats-row {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+            }
+
+            .req-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-glow"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-brand">
+                🤖 TemanScript
+            </div>
+        </div>
+
+        <!-- Product Card -->
+        <div class="product-card">
+            <!-- Banner -->
+            <div class="product-banner">
+                <div class="banner-content">
+                    <div class="banner-icon">🤖</div>
+                    <div class="banner-title">TS Telebot Apprem</div>
+                    <div class="banner-subtitle">Bot Telegram Auto Order — Versi Premium</div>
+                    <div class="banner-badges">
+                        <span class="banner-badge">🟢 Node.js</span>
+                        <span class="banner-badge">📦 MongoDB</span>
+                        <span class="banner-badge">💳 QRIS Realtime</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Body -->
+            <div class="product-body">
+                <!-- Price -->
+                <div class="price-section">
+                    <span class="price-original">Rp 250.000</span>
+                    <span class="price-current">Rp 99.000</span>
+                    <span class="price-discount">HEMAT 60%</span>
+                </div>
+
+                <!-- Order Button -->
+                <a href="https://wa.me/628151616315?text=Halo%2C%20saya%20mau%20order%20TS%20Telebot%20Apprem!"
+                    class="order-btn pulse">
+                    💬 Order via WhatsApp
+                </a>
+
+                <!-- Stats -->
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <div class="stat-value">7+</div>
+                        <div class="stat-label">Fitur</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">QRIS</div>
+                        <div class="stat-label">Payment</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">Auto</div>
+                        <div class="stat-label">Delivery</div>
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="desc-text">
+                    <strong style="color: var(--text);">TS Telebot Apprem</strong> adalah bot Telegram otomatis untuk
+                    penjualan <strong style="color: var(--cyan);">aplikasi premium</strong>, <strong
+                        style="color: var(--purple);">license key</strong>, dan produk non-fisik lainnya. Dilengkapi
+                    dengan pembayaran <strong style="color: var(--green);">QRIS realtime</strong>, pengelolaan produk
+                    lengkap, sistem tiket CS, fitur affiliate, dan panel admin yang mudah digunakan. Dibangun dengan
+                    <strong style="color: var(--text);">Node.js + Telegraf + MongoDB</strong>.
+                </div>
+
+                <!-- Features -->
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">📦</span>
+                        Sistem Produk
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>Tambah / edit / hapus kategori</li>
+                        <li>Tambah / edit / hapus varian produk</li>
+                        <li>Sorting kategori A–Z otomatis</li>
+                        <li>Stok otomatis (auto berkurang setelah beli)</li>
+                        <li>SNK (Syarat & Ketentuan) multiline</li>
+                    </ul>
+                </div>
+
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">💳</span>
+                        Pembayaran QRIS Realtime
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>Generate QRIS otomatis via Tokopay</li>
+                        <li>Auto polling status pembayaran</li>
+                        <li>Auto cancel setelah 5 menit timeout</li>
+                        <li>Update saldo otomatis setelah bayar</li>
+                        <li>Log transaksi ke channel Telegram</li>
+                    </ul>
+                </div>
+
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">🛒</span>
+                        Sistem Order
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>Cek stok otomatis sebelum order</li>
+                        <li>Auto-delivery akun / license key</li>
+                        <li>Simpan semua transaksi ke database</li>
+                        <li>Riwayat transaksi lengkap per user</li>
+                    </ul>
+                </div>
+
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">🎫</span>
+                        Tiket Customer Service
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>User buat tiket CS multi-line</li>
+                        <li>Admin balas tiket langsung dari panel</li>
+                        <li>Admin tutup tiket via tombol</li>
+                        <li>Filter tiket: Open / Pending / Closed</li>
+                        <li>Delete tiket satuan atau semua</li>
+                    </ul>
+                </div>
+
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">📊</span>
+                        Polling System
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>Broadcast polling ke semua user</li>
+                        <li>Hasil polling digabung realtime</li>
+                        <li>Laporan polling ringkas otomatis</li>
+                        <li>Hapus polling satuan atau semua</li>
+                    </ul>
+                </div>
+
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">🤝</span>
+                        Affiliate System
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>Komisi global (berlaku semua produk)</li>
+                        <li>Komisi per produk (custom setiap item)</li>
+                        <li>Komisi per user (custom setiap affiliate)</li>
+                        <li>Auto-hitung komisi per transaksi</li>
+                    </ul>
+                </div>
+
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleSection(this)">
+                        <span class="icon">👥</span>
+                        User & Admin Panel
+                        <span class="arrow">▼</span>
+                    </div>
+                    <ul class="feature-list">
+                        <li>Auto-register user saat pertama /start</li>
+                        <li>Panel admin lengkap dengan inline keyboard</li>
+                        <li>Saldo & deposit management</li>
+                        <li>Notifikasi log ke channel</li>
+                    </ul>
+                </div>
+
+                <!-- Requirements -->
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleReq(this)">
+                        <span class="icon">⚙️</span>
+                        Requirements
+                        <span class="arrow">▼</span>
+                    </div>
+                    <div class="req-grid">
+                        <div class="req-item"><span class="icon">🟢</span> Node.js 16+</div>
+                        <div class="req-item"><span class="icon">📦</span> NPM / Yarn</div>
+                        <div class="req-item"><span class="icon">🍃</span> MongoDB</div>
+                        <div class="req-item"><span class="icon">🤖</span> Bot Token</div>
+                        <div class="req-item"><span class="icon">💳</span> Tokopay API</div>
+                        <div class="req-item"><span class="icon">📢</span> Channel Log</div>
+                    </div>
+                </div>
+
+                <!-- Config Example -->
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleCode(this)">
+                        <span class="icon">📝</span>
+                        Contoh config.js
+                        <span class="arrow">▼</span>
+                    </div>
+                    <div class="code-block">module.exports = {
+                        token: "BOT_TOKEN",
+                        mongoURI: "mongodb+srv://...",
+                        ownerId: "123456789",
+                        adminList: ["123456789"],
+                        logChannel: -100123456789,
+                        tokopay: {
+                        merchant_id: "",
+                        apiKey: ""
+                        }
+                        };</div>
+                </div>
+
+                <!-- How it works -->
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleFlow(this)">
+                        <span class="icon">🔄</span>
+                        Alur Order User
+                        <span class="arrow">▼</span>
+                    </div>
+                    <div class="flow-steps">
+                        <div class="flow-step">
+                            <div class="flow-num">1</div>
+                            <div class="flow-text"><strong>Pilih Kategori</strong> — User browse produk yang tersedia
+                            </div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">2</div>
+                            <div class="flow-text"><strong>Pilih Varian</strong> — Pilih paket / varian yang diinginkan
+                            </div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">3</div>
+                            <div class="flow-text"><strong>Tekan "Pesan"</strong> — Konfirmasi order</div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">4</div>
+                            <div class="flow-text"><strong>Scan QRIS</strong> — Bot generate QRIS Tokopay secara
+                                realtime</div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">5</div>
+                            <div class="flow-text"><strong>Bayar</strong> — User scan & bayar via e-wallet / m-banking
+                            </div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">6</div>
+                            <div class="flow-text"><strong>Auto Validasi</strong> — Bot otomatis cek status pembayaran
+                            </div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">7</div>
+                            <div class="flow-text"><strong>Terima Produk</strong> — Akun / license key dikirim otomatis
+                                🎉</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instalasi -->
+                <div class="feature-section">
+                    <div class="feature-title" onclick="toggleFlow2(this)">
+                        <span class="icon">🚀</span>
+                        Cara Instalasi
+                        <span class="arrow">▼</span>
+                    </div>
+                    <div class="flow-steps" id="install-steps">
+                        <div class="flow-step">
+                            <div class="flow-num">1</div>
+                            <div class="flow-text"><strong>npm install</strong> — Install semua dependencies</div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">2</div>
+                            <div class="flow-text"><strong>Isi config.js</strong> — Masukkan token, MongoDB, Tokopay API
+                            </div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">3</div>
+                            <div class="flow-text"><strong>node index.js</strong> — Jalankan bot</div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">4</div>
+                            <div class="flow-text"><strong>Tambahkan ke channel</strong> — Add bot ke channel log</div>
+                        </div>
+                        <div class="flow-step">
+                            <div class="flow-num">5</div>
+                            <div class="flow-text"><strong>Setup produk</strong> — Gunakan menu admin untuk tambah
+                                produk</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Guarantee -->
+        <div class="guarantee">
+            <span class="icon">🛡️</span>
+            <div class="guarantee-text">
+                <strong>Garansi Full Support</strong> — Jika ada kendala dalam instalasi atau penggunaan bot, kami bantu
+                sampai bisa jalan. Termasuk panduan setup MongoDB & Tokopay.
+            </div>
+        </div>
+
+        <!-- Warning -->
+        <div class="warning-box">
+            <span class="icon">⚠️</span>
+            <div>
+                <strong>Catatan:</strong> Produk ini adalah source code bot. Kamu perlu VPS / hosting Node.js untuk
+                menjalankannya. Pembeli mendapat full source code tanpa enkripsi.
+            </div>
+        </div>
+
+        <!-- Bottom CTA -->
+        <div class="bottom-cta">
+            <h3>Siap Bikin Toko Otomatis? 🚀</h3>
+            <p>Mulai jualan produk digital secara otomatis via Telegram. Setup cuma 5 menit!</p>
+            <a href="https://wa.me/628151616315?text=Halo%2C%20saya%20mau%20order%20TS%20Telebot%20Apprem!"
+                class="order-btn pulse" style="margin-bottom: 0;">
+                💬 Order Sekarang — Rp 99.000
+            </a>
+        </div>
+
+        <!-- Footer -->
+        <div class="page-footer">
+            <p>© 2026 TemanScript. All rights reserved.</p>
+            <p style="margin-top: 4px;">Powered with ❤️ by TemanScript</p>
+        </div>
+    </div>
+
+    <!-- Floating Bar -->
+    <div class="floating-bar">
+        <div class="floating-price">
+            <div class="old">Rp 250.000</div>
+            <div class="new">Rp 99.000</div>
+        </div>
+        <a href="https://wa.me/628151616315?text=Halo%2C%20saya%20mau%20order%20TS%20Telebot%20Apprem!"
+            class="floating-btn">
+            💬 Order via WhatsApp
+        </a>
+    </div>
+
+    <script>
+        function toggleSection(el) {
+            const list = el.nextElementSibling;
+            el.classList.toggle('open');
+            list.classList.toggle('open');
+        }
+        function toggleReq(el) {
+            const grid = el.nextElementSibling;
+            el.classList.toggle('open');
+            grid.classList.toggle('open');
+        }
+        function toggleCode(el) {
+            const code = el.nextElementSibling;
+            el.classList.toggle('open');
+            code.classList.toggle('open');
+        }
+        function toggleFlow(el) {
+            const steps = el.nextElementSibling;
+            el.classList.toggle('open');
+            steps.classList.toggle('open');
+        }
+        function toggleFlow2(el) {
+            const steps = document.getElementById('install-steps');
+            el.classList.toggle('open');
+            steps.classList.toggle('open');
+        }
+
+        // Auto-open first two sections
+        setTimeout(() => {
+            const first = document.querySelector('.feature-title');
+            if (first) { first.classList.add('open'); first.nextElementSibling.classList.add('open'); }
+        }, 500);
+
+        // Hide floating bar when at top
+        const floatingBar = document.querySelector('.floating-bar');
+        window.addEventListener('scroll', () => {
+            floatingBar.style.transform = window.scrollY > 300 ? 'translateY(0)' : 'translateY(100%)';
+        });
+        floatingBar.style.transform = 'translateY(100%)';
+        floatingBar.style.transition = 'transform 0.3s ease';
+
+        // Add padding bottom for floating bar
+        document.body.style.paddingBottom = '80px';
+    </script>
+</body>
+
+</html>

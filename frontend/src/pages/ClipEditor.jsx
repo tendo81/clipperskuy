@@ -229,10 +229,21 @@ export default function ClipEditor() {
         duration: 5,       // 0 = permanent, 3, 5
         position: 'top',   // top, bottom
         fontSize: 48,
-        textColor: '#FFFFFF',
-        bgColor: '#FF0000',
-        bgOpacity: '0.85'
+        hookStyle: 'podcast',
+        textColor: '#000000',
+        bgColor: '#FFFFFF',
+        borderColor: '#FF0000',
+        bgOpacity: '1.0'
     });
+
+    const HOOK_STYLE_PRESETS = [
+        { id: 'podcast', label: '🎙️ Podcast', text: '#000000', bg: '#FFFFFF', border: '#FF0000', desc: 'White bg, red border' },
+        { id: 'kdm', label: '🏆 KDM', text: '#000000', bg: '#FFD700', border: '#000000', desc: 'Gold bg, black border' },
+        { id: 'neon', label: '⚡ Neon', text: '#000000', bg: '#00E5FF', border: '#FFFFFF', desc: 'Cyan bg, white border' },
+        { id: 'drama', label: '🔥 Drama', text: '#FFFFFF', bg: '#FF0000', border: '#000000', desc: 'Red bg, black border' },
+        { id: 'dark', label: '🌙 Dark', text: '#FFFFFF', bg: '#1A1A2E', border: '#8B5CF6', desc: 'Dark bg, purple border' },
+        { id: 'custom', label: '🎨 Custom', text: '#FFFFFF', bg: '#FF0000', border: '#000000', desc: 'Pick your own colors' },
+    ];
 
     // Load data
     useEffect(() => {
@@ -1087,27 +1098,26 @@ export default function ClipEditor() {
                                     <div style={{
                                         position: 'absolute',
                                         left: '5%', right: '5%',
-                                        [hookSettings.position === 'bottom' ? 'bottom' : 'top']: hookSettings.position === 'bottom' ? '20%' : '4%',
+                                        [hookSettings.position === 'bottom' ? 'bottom' : 'top']: hookSettings.position === 'bottom' ? '20%' : '8%',
                                         display: 'flex', justifyContent: 'center',
                                         pointerEvents: 'none', zIndex: 15,
                                     }}>
                                         <div style={{
-                                            background: hookSettings.bgColor || '#FF0000',
-                                            opacity: parseFloat(hookSettings.bgOpacity || 0.85),
+                                            background: hookSettings.bgColor || '#FFFFFF',
+                                            border: `3px solid ${hookSettings.borderColor || '#FF0000'}`,
                                             padding: `${Math.max(6, hookSettings.fontSize / 6)}px ${Math.max(12, hookSettings.fontSize / 3)}px`,
-                                            borderRadius: 4,
+                                            borderRadius: 2,
                                             maxWidth: '90%',
                                             textAlign: 'center',
                                         }}>
                                             <span style={{
-                                                color: hookSettings.textColor || '#FFFFFF',
+                                                color: hookSettings.textColor || '#000000',
                                                 fontWeight: 800,
                                                 fontSize: Math.max(10, hookSettings.fontSize / 4),
                                                 textTransform: 'uppercase',
                                                 letterSpacing: 1,
                                                 lineHeight: 1.3,
                                                 display: 'block',
-                                                textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
                                             }}>
                                                 {hookText}
                                             </span>
@@ -2327,16 +2337,48 @@ export default function ClipEditor() {
                             />
                         </div>
 
+                        {/* Hook Style Presets */}
+                        <div style={{ marginBottom: 12 }}>
+                            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Hook Style</label>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+                                {HOOK_STYLE_PRESETS.map(s => (
+                                    <button key={s.id}
+                                        onClick={() => {
+                                            setHookSettings(prev => ({ ...prev, hookStyle: s.id, textColor: s.text, bgColor: s.bg, borderColor: s.border }));
+                                            setHasChanges(true);
+                                        }}
+                                        title={s.desc}
+                                        style={{
+                                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                                            padding: '6px 4px', borderRadius: 6, cursor: 'pointer',
+                                            background: hookSettings.hookStyle === s.id ? 'rgba(139,92,246,0.15)' : 'var(--bg-tertiary)',
+                                            border: hookSettings.hookStyle === s.id ? '2px solid #8b5cf6' : '1px solid var(--border-color)',
+                                            transition: 'all 0.15s'
+                                        }}>
+                                        {/* Mini preview box */}
+                                        <div style={{
+                                            width: '100%', height: 20, borderRadius: 3,
+                                            background: s.bg, border: `3px solid ${s.border}`,
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}>
+                                            <span style={{ color: s.text, fontSize: 7, fontWeight: 800, letterSpacing: 0.5 }}>ABC</span>
+                                        </div>
+                                        <span style={{ fontSize: 10, fontWeight: 600, color: hookSettings.hookStyle === s.id ? '#8b5cf6' : 'var(--text-secondary)' }}>{s.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         {/* Live preview */}
                         {hookText && (
                             <div style={{
-                                marginBottom: 12, padding: '10px 16px', borderRadius: 8,
-                                background: hookSettings.bgColor || '#FF0000',
-                                opacity: parseFloat(hookSettings.bgOpacity || 0.85),
+                                marginBottom: 12, padding: '10px 16px', borderRadius: 2,
+                                background: hookSettings.bgColor || '#FFFFFF',
+                                border: `4px solid ${hookSettings.borderColor || '#FF0000'}`,
                                 textAlign: 'center'
                             }}>
                                 <span style={{
-                                    color: hookSettings.textColor || '#FFFFFF',
+                                    color: hookSettings.textColor || '#000000',
                                     fontWeight: 800, fontSize: hookSettings.fontSize ? hookSettings.fontSize / 3 : 16,
                                     textTransform: 'uppercase', letterSpacing: 1, lineHeight: 1.3,
                                     display: 'block'
@@ -2407,61 +2449,40 @@ export default function ClipEditor() {
                             />
                         </div>
 
-                        {/* Colors */}
-                        <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
-                            <div style={{ flex: 1 }}>
-                                <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Text Color</label>
-                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                    {['#FFFFFF', '#FFFF00', '#000000'].map(c => (
-                                        <div
-                                            key={c}
-                                            onClick={() => {
-                                                setHookSettings(prev => ({ ...prev, textColor: c }));
-                                                setHasChanges(true);
-                                            }}
-                                            style={{
-                                                width: 24, height: 24, borderRadius: 4, cursor: 'pointer',
-                                                background: c, border: hookSettings.textColor === c ? '2px solid var(--accent-purple)' : '1px solid var(--border)'
-                                            }}
-                                        />
-                                    ))}
-                                    <input
-                                        type="color" value={hookSettings.textColor}
-                                        onChange={(e) => {
-                                            setHookSettings(prev => ({ ...prev, textColor: e.target.value }));
-                                            setHasChanges(true);
-                                        }}
-                                        style={{ width: 24, height: 24, border: 'none', padding: 0, cursor: 'pointer' }}
-                                    />
+                        {/* Custom Colors — only show for custom style */}
+                        {hookSettings.hookStyle === 'custom' && (
+                            <div style={{ marginBottom: 10 }}>
+                                <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Text Color</label>
+                                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                            <input type="color" value={hookSettings.textColor}
+                                                onChange={(e) => { setHookSettings(prev => ({ ...prev, textColor: e.target.value })); setHasChanges(true); }}
+                                                style={{ width: 32, height: 26, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{hookSettings.textColor}</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>BG Color</label>
+                                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                            <input type="color" value={hookSettings.bgColor}
+                                                onChange={(e) => { setHookSettings(prev => ({ ...prev, bgColor: e.target.value })); setHasChanges(true); }}
+                                                style={{ width: 32, height: 26, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{hookSettings.bgColor}</span>
+                                        </div>
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Border</label>
+                                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                            <input type="color" value={hookSettings.borderColor}
+                                                onChange={(e) => { setHookSettings(prev => ({ ...prev, borderColor: e.target.value })); setHasChanges(true); }}
+                                                style={{ width: 32, height: 26, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+                                            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{hookSettings.borderColor}</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div style={{ flex: 1 }}>
-                                <label style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }}>Box Color</label>
-                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                    {['#FF0000', '#FFFF00', '#000000', '#7c3aed'].map(c => (
-                                        <div
-                                            key={c}
-                                            onClick={() => {
-                                                setHookSettings(prev => ({ ...prev, bgColor: c }));
-                                                setHasChanges(true);
-                                            }}
-                                            style={{
-                                                width: 24, height: 24, borderRadius: 4, cursor: 'pointer',
-                                                background: c, border: hookSettings.bgColor === c ? '2px solid var(--accent-purple)' : '1px solid var(--border)'
-                                            }}
-                                        />
-                                    ))}
-                                    <input
-                                        type="color" value={hookSettings.bgColor}
-                                        onChange={(e) => {
-                                            setHookSettings(prev => ({ ...prev, bgColor: e.target.value }));
-                                            setHasChanges(true);
-                                        }}
-                                        style={{ width: 24, height: 24, border: 'none', padding: 0, cursor: 'pointer' }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
+                        )}
 
                         {hookText && (
                             <div className="text-sm text-muted" style={{ fontSize: 10, marginTop: 4 }}>

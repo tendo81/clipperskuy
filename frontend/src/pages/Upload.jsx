@@ -286,7 +286,9 @@ export default function UploadPage() {
                             <div className="chip-group">
                                 {reframingModes.map((m) => {
                                     const Icon = m.icon;
-                                    const isLocked = m.id === 'face_track' && licenseTier === 'free';
+                                    const isLocked = (m.id === 'face_track' && licenseTier === 'free') ||
+                                        (m.id === 'face_track_blur' && !['pro', 'enterprise'].includes(licenseTier)) ||
+                                        (m.id === 'podcast' && licenseTier === 'free');
                                     return (
                                         <button key={m.id}
                                             className={`chip ${reframing === m.id ? 'active' : ''}`}

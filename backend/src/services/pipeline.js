@@ -151,13 +151,39 @@ async function processProject(projectId, io) {
 
         log('info', `Project: "${project.name}"`);
         log('info', `Source: ${path.basename(project.source_path)}`);
+
+        // Auto-repair missing resolution (0x0) by re-probing source video
+        if (!project.width || !project.height) {
+            try {
+                log('warn', 'Resolution 0×0 detected — re-probing source video...');
+                const { getVideoInfo } = require('./ffmpeg');
+                const videoInfo = await getVideoInfo(project.source_path);
+                if (videoInfo.width && videoInfo.height) {
+                    run('UPDATE projects SET width = ?, height = ?, fps = ? WHERE id = ?',
+                        [videoInfo.width, videoInfo.height, videoInfo.fps || 30, projectId]);
+                    project.width = videoInfo.width;
+                    project.height = videoInfo.height;
+                    project.fps = videoInfo.fps || 30;
+                    if (!project.duration && videoInfo.duration) {
+                        run('UPDATE projects SET duration = ? WHERE id = ?', [videoInfo.duration, projectId]);
+                        project.duration = videoInfo.duration;
+                    }
+                    log('success', `Resolution fixed: ${project.width}×${project.height}`);
+                }
+            } catch (e) {
+                log('warn', `Could not re-probe video: ${e.message}`);
+            }
+        }
+
         log('info', `Duration: ${formatDuration(project.duration || 0)} | Resolution: ${project.width}×${project.height}`);
 
         // ===== Check source duration limit (free tier) =====
         const tierLimits = getRenderLimits();
         const maxDurationMin = tierLimits.maxSourceDurationMin;
         const videoDurationMin = (project.duration || 0) / 60;
-        if (maxDurationMin < Infinity && videoDurationMin > maxDurationMin) {
+        // -1 means unlimited (JSON-safe representation of Infinity)
+        const isUnlimited = maxDurationMin === -1 || maxDurationMin === Infinity || maxDurationMin <= 0;
+        if (!isUnlimited && videoDurationMin > maxDurationMin) {
             log('warn', `🔒 Free tier: max source video ${maxDurationMin} menit. Video ini ${videoDurationMin.toFixed(1)} menit.`);
             throw new Error(`Free tier hanya mendukung video sampai ${maxDurationMin} menit. Video ini ${videoDurationMin.toFixed(1)} menit. Upgrade ke PRO untuk video tanpa batas!`);
         }
@@ -374,6 +400,24 @@ async function processProject(projectId, io) {
         // ===== STEP 4: Save Clips =====
         log('info', '── STEP 4: Saving Results ──');
         emit('save', 90, 'Saving clips to database...');
+
+        // Preserve user-customized data (hook, captions, music, etc.) before wiping clips
+        const existingClips = all('SELECT * FROM clips WHERE project_id = ?', [projectId]);
+        const customDataByNumber = {};
+        for (const ec of existingClips) {
+            customDataByNumber[ec.clip_number] = {
+                hook_text: ec.hook_text,
+                hook_settings: ec.hook_settings,
+                hook_style: ec.hook_style,
+                caption_style: ec.caption_style,
+                caption_settings: ec.caption_settings,
+                music_track_id: ec.music_track_id,
+                music_volume: ec.music_volume,
+                social_copy: ec.social_copy,
+            };
+        }
+        log('info', `Preserved custom data for ${existingClips.length} existing clip(s)`);
+
         run('DELETE FROM clips WHERE project_id = ?', [projectId]);
 
         for (const clip of clips) {
@@ -386,12 +430,33 @@ async function processProject(projectId, io) {
                 clip.score_hook, clip.score_content, clip.score_emotion, clip.score_share, clip.score_complete,
                 clip.improvement_tips, clip.hashtags
             ]);
+
+            // Restore custom data if this clip_number existed before
+            const prev = customDataByNumber[clip.clip_number];
+            if (prev) {
+                const fields = [];
+                const vals = [];
+                if (prev.hook_text != null) { fields.push('hook_text = ?'); vals.push(prev.hook_text); }
+                if (prev.hook_settings != null) { fields.push('hook_settings = ?'); vals.push(prev.hook_settings); }
+                if (prev.hook_style != null) { fields.push('hook_style = ?'); vals.push(prev.hook_style); }
+                if (prev.caption_style != null) { fields.push('caption_style = ?'); vals.push(prev.caption_style); }
+                if (prev.caption_settings != null) { fields.push('caption_settings = ?'); vals.push(prev.caption_settings); }
+                if (prev.music_track_id != null) { fields.push('music_track_id = ?'); vals.push(prev.music_track_id); }
+                if (prev.music_volume != null) { fields.push('music_volume = ?'); vals.push(prev.music_volume); }
+                if (prev.social_copy != null) { fields.push('social_copy = ?'); vals.push(prev.social_copy); }
+                if (fields.length > 0) {
+                    vals.push(clip.id);
+                    run(`UPDATE clips SET ${fields.join(', ')} WHERE id = ?`, vals);
+                    log('info', `  ↪ Restored custom data for clip #${clip.clip_number} (${fields.length} fields)`);
+                }
+            }
         }
-        log('success', `${clips.length} clips saved to database`);
+        log('success', `${clips.length} clips saved to database (custom data preserved)`);
 
         // ===== Clip count limit (free tier) =====
         const maxClips = tierLimits.maxClipsPerProject;
-        if (maxClips < Infinity && clips.length > maxClips) {
+        const clipsUnlimited = maxClips === -1 || maxClips === Infinity || maxClips <= 0;
+        if (!clipsUnlimited && clips.length > maxClips) {
             log('warn', `🔒 Free tier: max ${maxClips} clips per project. ${clips.length - maxClips} clip(s) disembunyikan.`);
             // Mark excess clips as 'locked'
             const excessClips = all('SELECT id FROM clips WHERE project_id = ? ORDER BY virality_score DESC LIMIT -1 OFFSET ?', [projectId, maxClips]);

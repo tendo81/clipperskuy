@@ -5,8 +5,25 @@ const {
     activateLicense,
     deactivateLicense,
     canCreateProject,
-    getMachineId
+    getMachineId,
+    checkDailyExportLimit,
+    getRenderLimits,
+    startTrial
 } = require('../services/license');
+
+// POST /api/license/trial — Manually start 7-day trial
+router.post('/trial', async (req, res) => {
+    try {
+        const result = await startTrial();
+        if (result.success) {
+            res.json(result);
+        } else {
+            res.status(400).json(result);
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // GET /api/license — Get current license status (includes trial info)
 router.get('/', (req, res) => {
@@ -59,6 +76,21 @@ router.get('/can-create-project', (req, res) => {
 router.get('/machine-id', (req, res) => {
     try {
         res.json({ machineId: getMachineId() });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/license/export-limit — Check daily export limit
+router.get('/export-limit', (req, res) => {
+    try {
+        const limit = checkDailyExportLimit();
+        const renderLimits = getRenderLimits();
+        res.json({
+            ...limit,
+            tier: renderLimits.tier,
+            qualityLocked: renderLimits.tier === 'free' // free = fast only
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

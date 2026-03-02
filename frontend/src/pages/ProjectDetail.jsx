@@ -9,12 +9,18 @@ const API = 'http://localhost:5000/api';
 const CAPTION_STYLES = [
     { id: 'hormozi', name: 'Hormozi', emoji: '🟡' },
     { id: 'bold_impact', name: 'Bold Impact', emoji: '⚡' },
-    { id: 'minimal_clean', name: 'Minimal Clean', emoji: '📝' },
-    { id: 'karaoke_pop', name: 'Karaoke Pop', emoji: '🎤' },
-    { id: 'ali_abdaal', name: 'Ali Abdaal', emoji: '📘' },
+    { id: 'minimal', name: 'Minimal Clean', emoji: '✨' },
+    { id: 'karaoke', name: 'Karaoke Pop', emoji: '🎤' },
+    { id: 'ali_abdaal', name: 'Ali Abdaal', emoji: '📚' },
     { id: 'gaming', name: 'Gaming', emoji: '🎮' },
+    { id: 'news', name: 'News Ticker', emoji: '📺' },
+    { id: 'podcast', name: 'Podcast', emoji: '🎙️' },
     { id: 'cinema', name: 'Cinema', emoji: '🎬' },
     { id: 'tiktok_og', name: 'TikTok OG', emoji: '📱' },
+    { id: 'raymond', name: 'Raymond', emoji: '🎯' },
+    { id: 'clean_box', name: 'Clean Box', emoji: '🔲' },
+    { id: 'neon_box', name: 'Neon Box', emoji: '💚' },
+    { id: 'pastel_box', name: 'Pastel Box', emoji: '🌸' },
 ];
 
 function formatDuration(seconds) {
@@ -97,11 +103,23 @@ export default function ProjectDetail() {
     const [showHookMenu, setShowHookMenu] = useState(false);
     const [bulkHookSettings, setBulkHookSettings] = useState({
         duration: 5, position: 'top', fontSize: 48,
-        textColor: '#FFFFFF', bgColor: '#FF0000', bgOpacity: '0.85'
+        textColor: '#000000', bgColor: '#FFFFFF', bgOpacity: '1.0',
+        hookStyle: 'podcast', borderColor: '#FF0000'
     });
+
+    const HOOK_STYLE_PRESETS = [
+        { id: 'podcast', label: '🎙️ Podcast', text: '#000000', bg: '#FFFFFF', border: '#FF0000', desc: 'White bg, red border' },
+        { id: 'kdm', label: '🏆 KDM', text: '#000000', bg: '#FFD700', border: '#000000', desc: 'Gold bg, black border' },
+        { id: 'neon', label: '⚡ Neon', text: '#000000', bg: '#00E5FF', border: '#FFFFFF', desc: 'Cyan bg, white border' },
+        { id: 'drama', label: '🔥 Drama', text: '#FFFFFF', bg: '#FF0000', border: '#000000', desc: 'Red bg, black border' },
+        { id: 'dark', label: '🌙 Dark', text: '#FFFFFF', bg: '#1A1A2E', border: '#8B5CF6', desc: 'Dark bg, purple border' },
+        { id: 'custom', label: '🎨 Custom', text: '#FFFFFF', bg: '#FF0000', border: '#000000', desc: 'Pick your own colors' },
+    ];
 
     // Social Copy Generator state
     const [socialModal, setSocialModal] = useState(null); // { clipId, loading, data, error, activeTab, hookStyle }
+    const [generatingHooks, setGeneratingHooks] = useState(false);
+    const [hookGenProgress, setHookGenProgress] = useState({ current: 0, total: 0, style: '' });
 
     const hookStyles = [
         { id: 'drama', label: '🎭 Drama', desc: 'Emosional & bikin nangis' },
@@ -135,6 +153,38 @@ export default function ProjectDetail() {
         } catch (err) {
             setSocialModal(prev => ({ ...prev, loading: false, error: err.message }));
         }
+    };
+
+    // Generate AI Hook Text for all/selected clips (batch)
+    const generateBulkHooks = async (hookStyle) => {
+        setShowHookMenu(false);
+        setGeneratingHooks(true);
+        const targetClips = selectedClips.size > 0 ? clips.filter(c => selectedClips.has(c.id)) : clips;
+        setHookGenProgress({ current: 0, total: targetClips.length, style: hookStyle });
+        setBulkStyleMsg(`🎯 Generating ${hookStyle} hooks for ${targetClips.length} clips...`);
+
+        let successCount = 0;
+        for (let i = 0; i < targetClips.length; i++) {
+            const clip = targetClips[i];
+            setHookGenProgress(prev => ({ ...prev, current: i + 1 }));
+            setBulkStyleMsg(`🎯 Generating hook ${i + 1}/${targetClips.length}: "${clip.title?.substring(0, 30)}..."`);
+            try {
+                const res = await fetch(`${API}/projects/clips/${clip.id}/generate-hook`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hook_style: hookStyle })
+                });
+                const result = await res.json();
+                if (result.success) successCount++;
+            } catch (err) {
+                console.error(`Hook gen failed for clip ${clip.id}:`, err);
+            }
+        }
+
+        setGeneratingHooks(false);
+        setBulkStyleMsg(`✅ Generated ${successCount}/${targetClips.length} hook titles (${hookStyle})`);
+        setTimeout(() => setBulkStyleMsg(''), 5000);
+        loadProject();
     };
 
     const copySocialText = (text) => {
@@ -755,7 +805,53 @@ export default function ProjectDetail() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
                         <div><div className="form-label" style={{ marginBottom: 2 }}>Platform</div><div className="font-semibold" style={{ textTransform: 'capitalize' }}>{project.platform}</div></div>
-                        <div><div className="form-label" style={{ marginBottom: 2 }}>Reframing</div><div className="font-semibold" style={{ textTransform: 'capitalize' }}>{project.reframing_mode?.replace('_', ' ')}</div></div>
+                        <div><div className="form-label" style={{ marginBottom: 2 }}>Reframing</div>
+                            <select
+                                value={project.reframing_mode || 'center'}
+                                onChange={async (e) => {
+                                    const newMode = e.target.value;
+                                    const prevMode = project.reframing_mode || 'center';
+                                    // Check tier restrictions
+                                    const tierRestrictions = {
+                                        face_track: ['free'],
+                                        face_track_blur: ['free', 'trial'],
+                                        podcast: ['free'],
+                                    };
+                                    const blocked = tierRestrictions[newMode] || [];
+                                    try {
+                                        const licRes = await fetch(`${API}/license`);
+                                        const licData = await licRes.json();
+                                        let currentTier = licData.tier || 'free';
+                                        // Also check preview_free_tier from localStorage
+                                        if (localStorage.getItem('previewFreeTier') === 'true') currentTier = 'free';
+                                        if (blocked.includes(currentTier)) {
+                                            const needsPro = newMode === 'face_track_blur' ? 'Pro' : 'Trial/Pro';
+                                            alert(`🔒 Mode "${newMode}" membutuhkan lisensi ${needsPro}.\n\nUpgrade di @Skuy_bot Telegram untuk unlock semua fitur!`);
+                                            // Reset select back to previous value
+                                            setProject(prev => ({ ...prev, reframing_mode: prevMode }));
+                                            return;
+                                        }
+                                        await fetch(`${API}/projects/${id}`, {
+                                            method: 'PUT',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ reframing_mode: newMode })
+                                        });
+                                        setProject(prev => ({ ...prev, reframing_mode: newMode }));
+                                        // Notify user that clips need re-rendering
+                                        alert(`✅ Mode berubah ke "${newMode}".\n\nKlik "Re-process" lalu render ulang clip untuk melihat hasilnya.`);
+                                    } catch (err) { console.error('Update mode failed:', err); }
+                                }}
+                                className="input-field"
+                                style={{ fontSize: 13, padding: '4px 8px', fontWeight: 600, minWidth: 150, cursor: 'pointer' }}
+                            >
+                                <option value="center">Center Crop</option>
+                                <option value="face_track">Face Track</option>
+                                <option value="face_track_blur">Face + Blur (Pro)</option>
+                                <option value="split">Split Screen</option>
+                                <option value="fit">Fit (Blur)</option>
+                                <option value="podcast">Podcast</option>
+                            </select>
+                        </div>
                         <div><div className="form-label" style={{ marginBottom: 2 }}>Language</div><div className="font-semibold" style={{ textTransform: 'capitalize' }}>{project.language === 'auto' ? 'Auto-detect' : project.language}</div></div>
                         <div><div className="form-label" style={{ marginBottom: 2 }}>Clip Count</div><div className="font-semibold" style={{ textTransform: 'capitalize' }}>{project.clip_count_target}</div></div>
                         <div><div className="form-label" style={{ marginBottom: 2 }}>Duration Range</div><div className="font-semibold">{project.min_duration}s – {project.max_duration}s</div></div>
@@ -978,145 +1074,223 @@ export default function ProjectDetail() {
                                 <div style={{ position: 'relative' }}>
                                     <button className="btn btn-ghost btn-sm" onClick={() => { setShowHookMenu(!showHookMenu); setShowStyleMenu(false); }}
                                         style={{ fontSize: 12, gap: 4, color: '#ef4444' }}
-                                        title="Apply hook title settings to all clips">
-                                        🎯 Hook Title
+                                        title="Generate AI hook titles & apply settings"
+                                        disabled={generatingHooks}>
+                                        {generatingHooks ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : '🎯'} Hook Title
                                         <ChevronDown size={12} />
                                     </button>
                                     {showHookMenu && (
                                         <div style={{
                                             position: 'absolute', top: '100%', right: 0, zIndex: 999, marginTop: 4,
                                             background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
-                                            borderRadius: 10, padding: 14, width: 280,
-                                            boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+                                            borderRadius: 12, padding: 0, width: 340,
+                                            boxShadow: '0 12px 40px rgba(0,0,0,0.4)', maxHeight: '70vh', overflowY: 'auto'
                                         }}>
-                                            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--text-primary)' }}>
-                                                🎯 Hook Title Settings (Batch)
-                                            </div>
-                                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
-                                                Apply hook overlay to {selectedClips.size > 0 ? `${selectedClips.size} selected` : 'all'} clips using each clip's AI hook text.
-                                            </div>
-
-                                            {/* Duration */}
-                                            <div style={{ marginBottom: 8 }}>
-                                                <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Duration</label>
-                                                <div style={{ display: 'flex', gap: 4 }}>
-                                                    {[3, 5, 0].map(d => (
-                                                        <button key={d} className="btn btn-ghost btn-sm"
+                                            {/* AI Generate Hook Text Section */}
+                                            <div style={{ padding: '14px 14px 10px' }}>
+                                                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <Sparkles size={14} style={{ color: '#f59e0b' }} /> AI Generate Hook Text
+                                                </div>
+                                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                                                    Generate hook text for {selectedClips.size > 0 ? `${selectedClips.size} selected` : 'all'} clips using AI
+                                                </div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                                                    {hookStyles.map(hs => (
+                                                        <button key={hs.id}
+                                                            disabled={generatingHooks}
                                                             style={{
-                                                                flex: 1, fontSize: 11, padding: '4px 6px',
-                                                                background: bulkHookSettings.duration === d ? 'rgba(139,92,246,0.2)' : 'none',
-                                                                border: bulkHookSettings.duration === d ? '1px solid rgba(139,92,246,0.5)' : '1px solid var(--border-color)',
-                                                                color: bulkHookSettings.duration === d ? '#8b5cf6' : 'var(--text-secondary)'
+                                                                display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                                                                padding: '7px 8px', background: 'none', border: '1px solid var(--border-color)',
+                                                                color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer',
+                                                                borderRadius: 6, textAlign: 'left', transition: 'all 0.15s',
                                                             }}
-                                                            onClick={() => setBulkHookSettings(s => ({ ...s, duration: d }))}>
-                                                            {d === 0 ? '∞ Permanent' : `${d}s`}
+                                                            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(139,92,246,0.15)'; e.currentTarget.style.borderColor = 'rgba(139,92,246,0.4)'; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
+                                                            onClick={() => generateBulkHooks(hs.id)}
+                                                            title={hs.desc}>
+                                                            <span style={{ fontSize: 13 }}>{hs.label.split(' ')[0]}</span>
+                                                            <span style={{ fontSize: 11, fontWeight: 500 }}>{hs.label.split(' ').slice(1).join(' ')}</span>
                                                         </button>
                                                     ))}
                                                 </div>
                                             </div>
 
-                                            {/* Position */}
-                                            <div style={{ marginBottom: 8 }}>
-                                                <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Position</label>
-                                                <div style={{ display: 'flex', gap: 4 }}>
-                                                    {['top', 'bottom'].map(p => (
-                                                        <button key={p} className="btn btn-ghost btn-sm"
-                                                            style={{
-                                                                flex: 1, fontSize: 11, padding: '4px 6px',
-                                                                background: bulkHookSettings.position === p ? 'rgba(139,92,246,0.2)' : 'none',
-                                                                border: bulkHookSettings.position === p ? '1px solid rgba(139,92,246,0.5)' : '1px solid var(--border-color)',
-                                                                color: bulkHookSettings.position === p ? '#8b5cf6' : 'var(--text-secondary)'
-                                                            }}
-                                                            onClick={() => setBulkHookSettings(s => ({ ...s, position: p }))}>
-                                                            {p === 'top' ? '⬆ Top' : '⬇ Bottom'}
-                                                        </button>
-                                                    ))}
+                                            <div style={{ height: 1, background: 'var(--border-color)', margin: '0 14px' }} />
+
+                                            {/* Visual Hook Overlay Settings */}
+                                            <div style={{ padding: '10px 14px 14px' }}>
+                                                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
+                                                    🎨 Hook Overlay Settings (Visual)</div>
+
+                                                {/* Hook Style Selector */}
+                                                <div style={{ marginBottom: 10 }}>
+                                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Hook Style</label>
+                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+                                                        {HOOK_STYLE_PRESETS.map(s => (
+                                                            <button key={s.id} onClick={() => setBulkHookSettings(prev => ({ ...prev, hookStyle: s.id, textColor: s.text, bgColor: s.bg, borderColor: s.border }))}
+                                                                title={s.desc}
+                                                                style={{
+                                                                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                                                                    padding: '6px 4px', borderRadius: 6, cursor: 'pointer',
+                                                                    background: bulkHookSettings.hookStyle === s.id ? 'rgba(139,92,246,0.15)' : 'var(--bg-tertiary)',
+                                                                    border: bulkHookSettings.hookStyle === s.id ? '2px solid #8b5cf6' : '1px solid var(--border-color)',
+                                                                    transition: 'all 0.15s'
+                                                                }}>
+                                                                {/* Mini preview box */}
+                                                                <div style={{
+                                                                    width: '100%', height: 20, borderRadius: 3,
+                                                                    background: s.bg, border: `3px solid ${s.border}`,
+                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                                }}>
+                                                                    <span style={{ color: s.text, fontSize: 7, fontWeight: 800, letterSpacing: 0.5 }}>ABC</span>
+                                                                </div>
+                                                                <span style={{ fontSize: 10, fontWeight: 600, color: bulkHookSettings.hookStyle === s.id ? '#8b5cf6' : 'var(--text-secondary)' }}>{s.label}</span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {/* Font Size */}
-                                            <div style={{ marginBottom: 8 }}>
-                                                <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span>Font Size</span><span>{bulkHookSettings.fontSize}px</span>
-                                                </label>
-                                                <input type="range" min={20} max={80} value={bulkHookSettings.fontSize}
-                                                    onChange={e => setBulkHookSettings(s => ({ ...s, fontSize: parseInt(e.target.value) }))}
-                                                    style={{ width: '100%', accentColor: '#8b5cf6' }} />
-                                            </div>
-
-                                            {/* Colors */}
-                                            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                                                <div style={{ flex: 1 }}>
-                                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Text Color</label>
-                                                    <input type="color" value={bulkHookSettings.textColor}
-                                                        onChange={e => setBulkHookSettings(s => ({ ...s, textColor: e.target.value }))}
-                                                        style={{ width: '100%', height: 28, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+                                                {/* Duration */}
+                                                <div style={{ marginBottom: 8 }}>
+                                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Duration</label>
+                                                    <div style={{ display: 'flex', gap: 4 }}>
+                                                        {[3, 5, 0].map(d => (
+                                                            <button key={d} className="btn btn-ghost btn-sm"
+                                                                style={{
+                                                                    flex: 1, fontSize: 11, padding: '4px 6px',
+                                                                    background: bulkHookSettings.duration === d ? 'rgba(139,92,246,0.2)' : 'none',
+                                                                    border: bulkHookSettings.duration === d ? '1px solid rgba(139,92,246,0.5)' : '1px solid var(--border-color)',
+                                                                    color: bulkHookSettings.duration === d ? '#8b5cf6' : 'var(--text-secondary)'
+                                                                }}
+                                                                onClick={() => setBulkHookSettings(s => ({ ...s, duration: d }))}>
+                                                                {d === 0 ? '∞ Permanent' : `${d}s`}
+                                                            </button>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                                <div style={{ flex: 1 }}>
-                                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>BG Color</label>
-                                                    <input type="color" value={bulkHookSettings.bgColor}
-                                                        onChange={e => setBulkHookSettings(s => ({ ...s, bgColor: e.target.value }))}
-                                                        style={{ width: '100%', height: 28, border: 'none', borderRadius: 4, cursor: 'pointer' }} />
+
+                                                {/* Position */}
+                                                <div style={{ marginBottom: 8 }}>
+                                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 3 }}>Position</label>
+                                                    <div style={{ display: 'flex', gap: 4 }}>
+                                                        {['top', 'bottom'].map(p => (
+                                                            <button key={p} className="btn btn-ghost btn-sm"
+                                                                style={{
+                                                                    flex: 1, fontSize: 11, padding: '4px 6px',
+                                                                    background: bulkHookSettings.position === p ? 'rgba(139,92,246,0.2)' : 'none',
+                                                                    border: bulkHookSettings.position === p ? '1px solid rgba(139,92,246,0.5)' : '1px solid var(--border-color)',
+                                                                    color: bulkHookSettings.position === p ? '#8b5cf6' : 'var(--text-secondary)'
+                                                                }}
+                                                                onClick={() => setBulkHookSettings(s => ({ ...s, position: p }))}>
+                                                                {p === 'top' ? '⬆ Top' : '⬇ Bottom'}
+                                                            </button>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {/* Preview */}
-                                            <div style={{
-                                                background: bulkHookSettings.bgColor, padding: '6px 12px', borderRadius: 4,
-                                                textAlign: 'center', marginBottom: 10, opacity: parseFloat(bulkHookSettings.bgOpacity)
-                                            }}>
-                                                <span style={{
-                                                    color: bulkHookSettings.textColor, fontWeight: 800, fontSize: 13,
-                                                    textTransform: 'uppercase', letterSpacing: 1
-                                                }}>Hook Title Preview</span>
-                                            </div>
+                                                {/* Font Size */}
+                                                <div style={{ marginBottom: 8 }}>
+                                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                                                        <span>Font Size</span><span>{bulkHookSettings.fontSize}px</span>
+                                                    </label>
+                                                    <input type="range" min={20} max={80} value={bulkHookSettings.fontSize}
+                                                        onChange={e => setBulkHookSettings(s => ({ ...s, fontSize: parseInt(e.target.value) }))}
+                                                        style={{ width: '100%', accentColor: '#8b5cf6' }} />
+                                                </div>
 
-                                            {/* Apply buttons */}
-                                            <div style={{ display: 'flex', gap: 6 }}>
-                                                <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11, gap: 4 }}
-                                                    onClick={async () => {
-                                                        setShowHookMenu(false);
-                                                        try {
-                                                            const res = await fetch(`${API}/projects/${id}/clips/bulk-hook`, {
-                                                                method: 'PUT',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({
-                                                                    clipIds: selectedClips.size > 0 ? Array.from(selectedClips) : [],
-                                                                    hook_settings: bulkHookSettings
-                                                                })
-                                                            });
-                                                            const data = await res.json();
-                                                            setBulkStyleMsg(`✅ 🎯 Hook title applied to ${data.updated} clips`);
-                                                            setTimeout(() => setBulkStyleMsg(''), 3000);
-                                                            loadProject();
-                                                        } catch (err) {
-                                                            setBulkStyleMsg(`❌ Error: ${err.message}`);
-                                                        }
-                                                    }}>
-                                                    ✅ Apply Hook
-                                                </button>
-                                                <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, gap: 4, color: '#ef4444' }}
-                                                    onClick={async () => {
-                                                        setShowHookMenu(false);
-                                                        try {
-                                                            const res = await fetch(`${API}/projects/${id}/clips/bulk-hook`, {
-                                                                method: 'PUT',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({
-                                                                    clipIds: selectedClips.size > 0 ? Array.from(selectedClips) : [],
-                                                                    hook_settings: null
-                                                                })
-                                                            });
-                                                            const data = await res.json();
-                                                            setBulkStyleMsg(`✅ Hook title removed from ${data.updated} clips`);
-                                                            setTimeout(() => setBulkStyleMsg(''), 3000);
-                                                            loadProject();
-                                                        } catch (err) {
-                                                            setBulkStyleMsg(`❌ Error: ${err.message}`);
-                                                        }
-                                                    }}>
-                                                    ❌ Remove
-                                                </button>
+                                                {/* Custom Colors — only show for custom style */}
+                                                {bulkHookSettings.hookStyle === 'custom' && (
+                                                    <div style={{ marginBottom: 10 }}>
+                                                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Text Color</label>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                                                            <input type="color" value={bulkHookSettings.textColor}
+                                                                onChange={e => setBulkHookSettings(s => ({ ...s, textColor: e.target.value }))}
+                                                                style={{ width: 36, height: 28, border: 'none', borderRadius: 4, cursor: 'pointer', flexShrink: 0 }} />
+                                                            <input type="text" value={bulkHookSettings.textColor}
+                                                                onChange={e => { const v = e.target.value; if (/^#[0-9A-Fa-f]{0,6}$/.test(v)) setBulkHookSettings(s => ({ ...s, textColor: v })); }}
+                                                                placeholder="#FFFFFF"
+                                                                style={{ flex: 1, fontSize: 12, padding: '4px 6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 4, color: 'var(--text-primary)', fontFamily: 'monospace' }} />
+                                                        </div>
+                                                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>BG Color</label>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                                                            <input type="color" value={bulkHookSettings.bgColor}
+                                                                onChange={e => setBulkHookSettings(s => ({ ...s, bgColor: e.target.value }))}
+                                                                style={{ width: 36, height: 28, border: 'none', borderRadius: 4, cursor: 'pointer', flexShrink: 0 }} />
+                                                            <input type="text" value={bulkHookSettings.bgColor}
+                                                                onChange={e => { const v = e.target.value; if (/^#[0-9A-Fa-f]{0,6}$/.test(v)) setBulkHookSettings(s => ({ ...s, bgColor: v })); }}
+                                                                placeholder="#FF0000"
+                                                                style={{ flex: 1, fontSize: 12, padding: '4px 6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 4, color: 'var(--text-primary)', fontFamily: 'monospace' }} />
+                                                        </div>
+                                                        <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Border Color</label>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                                                            <input type="color" value={bulkHookSettings.borderColor}
+                                                                onChange={e => setBulkHookSettings(s => ({ ...s, borderColor: e.target.value }))}
+                                                                style={{ width: 36, height: 28, border: 'none', borderRadius: 4, cursor: 'pointer', flexShrink: 0 }} />
+                                                            <input type="text" value={bulkHookSettings.borderColor}
+                                                                onChange={e => { const v = e.target.value; if (/^#[0-9A-Fa-f]{0,6}$/.test(v)) setBulkHookSettings(s => ({ ...s, borderColor: v })); }}
+                                                                placeholder="#000000"
+                                                                style={{ flex: 1, fontSize: 12, padding: '4px 6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 4, color: 'var(--text-primary)', fontFamily: 'monospace' }} />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Preview — matches selected style */}
+                                                <div style={{ textAlign: 'center', marginBottom: 10, padding: '4px 0' }}>
+                                                    <div style={{
+                                                        display: 'inline-block', padding: '8px 18px', borderRadius: 2,
+                                                        background: bulkHookSettings.bgColor, color: bulkHookSettings.textColor,
+                                                        border: `4px solid ${bulkHookSettings.borderColor}`,
+                                                        fontWeight: 800, fontSize: 13, textTransform: 'uppercase', letterSpacing: 1
+                                                    }}>Hook Title Preview</div>
+                                                </div>
+
+                                                {/* Apply buttons */}
+                                                <div style={{ display: 'flex', gap: 6 }}>
+                                                    <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11, gap: 4 }}
+                                                        onClick={async () => {
+                                                            setShowHookMenu(false);
+                                                            try {
+                                                                const res = await fetch(`${API}/projects/${id}/clips/bulk-hook`, {
+                                                                    method: 'PUT',
+                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                    body: JSON.stringify({
+                                                                        clipIds: selectedClips.size > 0 ? Array.from(selectedClips) : [],
+                                                                        hook_settings: bulkHookSettings
+                                                                    })
+                                                                });
+                                                                const data = await res.json();
+                                                                setBulkStyleMsg(`✅ 🎯 Hook title applied to ${data.updated} clips`);
+                                                                setTimeout(() => setBulkStyleMsg(''), 3000);
+                                                                loadProject();
+                                                            } catch (err) {
+                                                                setBulkStyleMsg(`❌ Error: ${err.message}`);
+                                                            }
+                                                        }}>
+                                                        ✅ Apply Hook
+                                                    </button>
+                                                    <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, gap: 4, color: '#ef4444' }}
+                                                        onClick={async () => {
+                                                            setShowHookMenu(false);
+                                                            try {
+                                                                const res = await fetch(`${API}/projects/${id}/clips/bulk-hook`, {
+                                                                    method: 'PUT',
+                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                    body: JSON.stringify({
+                                                                        clipIds: selectedClips.size > 0 ? Array.from(selectedClips) : [],
+                                                                        hook_settings: null
+                                                                    })
+                                                                });
+                                                                const data = await res.json();
+                                                                setBulkStyleMsg(`✅ Hook title removed from ${data.updated} clips`);
+                                                                setTimeout(() => setBulkStyleMsg(''), 3000);
+                                                                loadProject();
+                                                            } catch (err) {
+                                                                setBulkStyleMsg(`❌ Error: ${err.message}`);
+                                                            }
+                                                        }}>
+                                                        ❌ Remove
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     )}
@@ -1152,17 +1326,31 @@ export default function ProjectDetail() {
                         )}
                     </div>
 
-                    {/* Bulk style message */}
+                    {/* Bulk style message / Hook generation progress */}
                     <AnimatePresence>
                         {bulkStyleMsg && (
                             <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                                 style={{
                                     padding: '8px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13,
-                                    background: bulkStyleMsg.includes('✅') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                    color: bulkStyleMsg.includes('✅') ? '#10b981' : '#ef4444',
-                                    border: `1px solid ${bulkStyleMsg.includes('✅') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`
+                                    background: bulkStyleMsg.includes('✅') ? 'rgba(16,185,129,0.1)' : bulkStyleMsg.includes('🎯') ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                                    color: bulkStyleMsg.includes('✅') ? '#10b981' : bulkStyleMsg.includes('🎯') ? '#f59e0b' : '#ef4444',
+                                    border: `1px solid ${bulkStyleMsg.includes('✅') ? 'rgba(16,185,129,0.2)' : bulkStyleMsg.includes('🎯') ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)'}`
                                 }}>
-                                {bulkStyleMsg}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    {generatingHooks && <Loader size={14} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />}
+                                    <span>{bulkStyleMsg}</span>
+                                </div>
+                                {generatingHooks && hookGenProgress.total > 0 && (
+                                    <div style={{ marginTop: 6 }}>
+                                        <div className="progress-bar" style={{ height: 4 }}>
+                                            <div className="progress-fill" style={{
+                                                width: `${(hookGenProgress.current / hookGenProgress.total) * 100}%`,
+                                                transition: 'width 0.3s ease',
+                                                background: 'linear-gradient(90deg, #f59e0b, #ef4444)'
+                                            }} />
+                                        </div>
+                                    </div>
+                                )}
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -1210,8 +1398,56 @@ export default function ProjectDetail() {
                                                 </div>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
                                                     <div className="font-semibold" style={{ marginBottom: 2 }}>{clip.title || `Clip ${i + 1}`}</div>
-                                                    <div className="text-sm text-muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                        {clip.hook_text}
+                                                    <div className="text-sm text-muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                        {clip.hook_text ? (
+                                                            <>
+                                                                <span style={{ color: '#f59e0b', overflow: 'hidden', textOverflow: 'ellipsis' }}>🎯 {clip.hook_text}</span>
+                                                                {clip.hook_style && (() => {
+                                                                    const styleMap = { drama: '🎭', gossip: '🗣️', edukasi: '📚', comedy: '😂', motivasi: '🔥', horror: '👻', storytelling: '📖', kontroversial: '⚡', clickbait: '🎯', aesthetic: '✨' };
+                                                                    return (
+                                                                        <span style={{
+                                                                            fontSize: 10, padding: '1px 6px', borderRadius: 8,
+                                                                            background: 'rgba(245,158,11,0.15)', color: '#f59e0b',
+                                                                            border: '1px solid rgba(245,158,11,0.3)', whiteSpace: 'nowrap', flexShrink: 0
+                                                                        }}>
+                                                                            {styleMap[clip.hook_style] || '🎯'} {clip.hook_style}
+                                                                        </span>
+                                                                    );
+                                                                })()}
+                                                                {clip.hook_settings ? (
+                                                                    <span style={{
+                                                                        fontSize: 10, padding: '1px 6px', borderRadius: 8,
+                                                                        background: 'rgba(34,197,94,0.15)', color: '#22c55e',
+                                                                        border: '1px solid rgba(34,197,94,0.3)', whiteSpace: 'nowrap', flexShrink: 0
+                                                                    }}>Hook ON</span>
+                                                                ) : (
+                                                                    <span style={{
+                                                                        fontSize: 10, padding: '1px 6px', borderRadius: 8,
+                                                                        background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)',
+                                                                        border: '1px solid var(--border-subtle)', whiteSpace: 'nowrap', flexShrink: 0
+                                                                    }}>Hook OFF</span>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No hook text</span>
+                                                        )}
+                                                    </div>
+                                                    {/* Subtitle style badge — subtitle is always ON when transcript exists */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                                                        {(() => {
+                                                            const style = CAPTION_STYLES.find(s => s.id === clip.caption_style);
+                                                            const styleName = style ? style.name : 'Hormozi';
+                                                            const styleEmoji = style ? style.emoji : '🟡';
+                                                            return (
+                                                                <span style={{
+                                                                    fontSize: 10, padding: '1px 6px', borderRadius: 8,
+                                                                    background: 'rgba(96,165,250,0.15)', color: '#60a5fa',
+                                                                    border: '1px solid rgba(96,165,250,0.3)', whiteSpace: 'nowrap'
+                                                                }}>
+                                                                    {styleEmoji} Sub: {styleName}
+                                                                </span>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </div>
                                                 <div style={{ textAlign: 'center', minWidth: 80 }}>

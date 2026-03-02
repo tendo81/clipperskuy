@@ -1,0 +1,1475 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClipperSkuy — AI Video Clip Generator | Turn Videos Into Viral Content</title>
+    <meta name="description"
+        content="ClipperSkuy automatically turns long videos into viral clips for TikTok, Reels & YouTube Shorts using AI. Download free now!">
+    <meta name="keywords"
+        content="ai video editor, clip generator, tiktok, reels, youtube shorts, auto subtitle, face tracking, viral clips">
+    <meta property="og:title" content="ClipperSkuy — AI Video Clip Generator">
+    <meta property="og:description" content="Turn long videos into viral content in minutes with the power of AI.">
+    <meta property="og:type" content="website">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a12;
+            --bg-secondary: #12121e;
+            --bg-card: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.06);
+            --text-primary: #f0f0f5;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --text-muted: rgba(255, 255, 255, 0.35);
+            --accent-purple: #7c3aed;
+            --accent-cyan: #22d3ee;
+            --accent-pink: #ec4899;
+            --accent-orange: #f59e0b;
+            --gradient-main: linear-gradient(135deg, #7c3aed 0%, #2dd4bf 50%, #22d3ee 100%);
+            --gradient-cta: linear-gradient(135deg, #7c3aed, #ec4899);
+            --gradient-card: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(34, 211, 238, 0.05));
+            --radius: 16px;
+            --radius-sm: 10px;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ===== NAVBAR ===== */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 16px 0;
+            background: rgba(10, 10, 18, 0.8);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            transition: all 0.3s;
+        }
+
+        .navbar.scrolled {
+            padding: 10px 0;
+            background: rgba(10, 10, 18, 0.95);
+        }
+
+        .nav-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 22px;
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-decoration: none;
+        }
+
+        .nav-brand span {
+            font-size: 26px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 32px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+            position: relative;
+        }
+
+        .nav-links a:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--gradient-main);
+            transition: width 0.3s;
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        .nav-cta {
+            padding: 10px 24px;
+            border-radius: 50px;
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--gradient-cta);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .nav-cta:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(124, 58, 237, 0.4);
+        }
+
+        .mobile-menu {
+            display: none;
+            background: none;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            font-size: 24px;
+        }
+
+        /* ===== HERO ===== */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 120px 24px 80px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -200px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(124, 58, 237, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+            animation: pulse 6s ease-in-out infinite;
+        }
+
+        .hero::after {
+            content: '';
+            position: absolute;
+            bottom: -300px;
+            right: -200px;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.1) 0%, transparent 70%);
+            pointer-events: none;
+            animation: pulse 8s ease-in-out infinite reverse;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 0.5;
+                transform: translateX(-50%) scale(1);
+            }
+
+            50% {
+                opacity: 1;
+                transform: translateX(-50%) scale(1.1);
+            }
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 2;
+            max-width: 800px;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 20px;
+            border-radius: 50px;
+            font-size: 13px;
+            font-weight: 600;
+            background: rgba(124, 58, 237, 0.15);
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            color: var(--accent-purple);
+            margin-bottom: 24px;
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .hero-badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        .hero h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: clamp(36px, 6vw, 64px);
+            font-weight: 900;
+            line-height: 1.1;
+            margin-bottom: 24px;
+            animation: fadeInUp 0.6s ease-out 0.1s both;
+        }
+
+        .hero h1 .gradient {
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p {
+            font-size: clamp(16px, 2vw, 20px);
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 40px;
+            line-height: 1.7;
+            animation: fadeInUp 0.6s ease-out 0.2s both;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+            animation: fadeInUp 0.6s ease-out 0.3s both;
+        }
+
+        .btn-primary {
+            padding: 16px 36px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 700;
+            background: var(--gradient-cta);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: transform 0.2s, box-shadow 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.6s;
+        }
+
+        .btn-primary:hover::before {
+            transform: translateX(100%);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 40px rgba(124, 58, 237, 0.5);
+        }
+
+        .btn-secondary {
+            padding: 16px 36px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            margin-top: 60px;
+            animation: fadeInUp 0.6s ease-out 0.4s both;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-family: 'Outfit';
+            font-size: 28px;
+            font-weight: 800;
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ===== SECTIONS ===== */
+        .section {
+            padding: 100px 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--accent-cyan);
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-family: 'Outfit';
+            font-size: clamp(28px, 4vw, 44px);
+            font-weight: 800;
+            margin-bottom: 16px;
+            line-height: 1.2;
+        }
+
+        .section-subtitle {
+            font-size: 18px;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin-bottom: 60px;
+        }
+
+        .section-center {
+            text-align: center;
+        }
+
+        .section-center .section-subtitle {
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* ===== FEATURES ===== */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+        }
+
+        .feature-card {
+            padding: 32px;
+            border-radius: var(--radius);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--gradient-main);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(124, 58, 237, 0.2);
+            transform: translateY(-4px);
+        }
+
+        .feature-card:hover::before {
+            opacity: 1;
+        }
+
+        .feature-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        .feature-card h3 {
+            font-family: 'Outfit';
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .feature-card p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* ===== HOW IT WORKS ===== */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            position: relative;
+        }
+
+        .steps::before {
+            content: '';
+            position: absolute;
+            left: 39px;
+            top: 30px;
+            bottom: 30px;
+            width: 2px;
+            background: linear-gradient(to bottom, var(--accent-purple), var(--accent-cyan), var(--accent-pink));
+        }
+
+        .step {
+            display: flex;
+            gap: 32px;
+            align-items: flex-start;
+            padding: 32px 0;
+            position: relative;
+        }
+
+        .step-number {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit';
+            font-size: 28px;
+            font-weight: 900;
+            background: var(--bg-secondary);
+            border: 2px solid var(--accent-purple);
+            color: var(--accent-purple);
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-content {
+            flex: 1;
+            padding-top: 16px;
+        }
+
+        .step-content h3 {
+            font-family: 'Outfit';
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .step-content p {
+            font-size: 15px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            max-width: 500px;
+        }
+
+        /* ===== PRICING ===== */
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+
+        .pricing-card {
+            padding: 36px;
+            border-radius: var(--radius);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .pricing-card.popular {
+            border-color: var(--accent-purple);
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(34, 211, 238, 0.04));
+        }
+
+        .pricing-card.popular::before {
+            content: '🔥 MOST POPULAR';
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 20px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 700;
+            background: var(--gradient-cta);
+            color: #fff;
+            white-space: nowrap;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-4px);
+        }
+
+        .pricing-tier {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .pricing-price {
+            font-family: 'Outfit';
+            font-size: 48px;
+            font-weight: 900;
+            margin-bottom: 4px;
+        }
+
+        .pricing-price .currency {
+            font-size: 20px;
+            font-weight: 600;
+            vertical-align: top;
+            margin-right: 2px;
+            color: var(--text-secondary);
+        }
+
+        .pricing-price .period {
+            font-size: 16px;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+
+        .pricing-desc {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 28px;
+        }
+
+        .pricing-features {
+            list-style: none;
+            margin-bottom: 32px;
+        }
+
+        .pricing-features li {
+            padding: 10px 0;
+            font-size: 14px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .pricing-features li::before {
+            content: '✓';
+            color: #22c55e;
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .pricing-features li.locked::before {
+            content: '✕';
+            color: rgba(255, 255, 255, 0.2);
+        }
+
+        .pricing-features li.locked {
+            color: var(--text-muted);
+        }
+
+        .pricing-btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border-radius: 50px;
+            font-size: 15px;
+            font-weight: 700;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .pricing-btn.primary {
+            background: var(--gradient-cta);
+            color: #fff;
+            border: none;
+        }
+
+        .pricing-btn.primary:hover {
+            box-shadow: 0 8px 30px rgba(124, 58, 237, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .pricing-btn.outline {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .pricing-btn.outline:hover {
+            border-color: var(--accent-purple);
+            background: rgba(124, 58, 237, 0.05);
+        }
+
+        /* ===== FAQ ===== */
+        .faq-list {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .faq-item {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .faq-q {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            width: 100%;
+            text-align: left;
+            font-family: inherit;
+            transition: color 0.2s;
+        }
+
+        .faq-q:hover {
+            color: var(--accent-cyan);
+        }
+
+        .faq-q .arrow {
+            font-size: 20px;
+            transition: transform 0.3s;
+            color: var(--text-muted);
+        }
+
+        .faq-q.active .arrow {
+            transform: rotate(180deg);
+        }
+
+        .faq-a {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease, padding 0.3s;
+            font-size: 15px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        .faq-a.open {
+            max-height: 300px;
+            padding-bottom: 24px;
+        }
+
+        /* ===== CTA ===== */
+        .cta-section {
+            text-align: center;
+            padding: 100px 24px;
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.08) 0%, rgba(34, 211, 238, 0.05) 100%);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-section::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 600px;
+            height: 400px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(124, 58, 237, 0.12) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .cta-section h2 {
+            font-family: 'Outfit';
+            font-size: clamp(28px, 4vw, 44px);
+            font-weight: 800;
+            margin-bottom: 16px;
+            position: relative;
+        }
+
+        .cta-section p {
+            font-size: 18px;
+            color: var(--text-secondary);
+            margin-bottom: 36px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            position: relative;
+        }
+
+        /* ===== FOOTER ===== */
+        .footer {
+            padding: 48px 24px 32px;
+            text-align: center;
+            border-top: 1px solid var(--border);
+        }
+
+        .footer-brand {
+            font-family: 'Outfit';
+            font-size: 20px;
+            font-weight: 800;
+            background: var(--gradient-main);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 12px;
+        }
+
+        .footer p {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 24px;
+            justify-content: center;
+            margin: 16px 0;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--accent-cyan);
+        }
+
+        /* ===== SCROLL ANIMATIONS ===== */
+        .reveal {
+            opacity: 0;
+            transform: translateY(40px);
+            transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+
+            .mobile-menu {
+                display: block;
+            }
+
+            .hero-stats {
+                gap: 24px;
+            }
+
+            .steps::before {
+                left: 24px;
+            }
+
+            .step-number {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+            }
+
+            .step {
+                gap: 20px;
+            }
+
+            .pricing-grid {
+                grid-template-columns: 1fr;
+                max-width: 420px;
+                margin: 0 auto;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ===== FLOATING PARTICLES ===== */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .particle {
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            border-radius: 50%;
+            background: rgba(124, 58, 237, 0.3);
+            animation: float linear infinite;
+        }
+
+        @keyframes float {
+            0% {
+                transform: translateY(100vh) rotate(0deg);
+                opacity: 0;
+            }
+
+            10% {
+                opacity: 1;
+            }
+
+            90% {
+                opacity: 1;
+            }
+
+            100% {
+                transform: translateY(-10vh) rotate(360deg);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Floating Particles -->
+    <div class="particles" id="particles"></div>
+
+    <!-- Navbar -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-inner">
+            <a href="#" class="nav-brand"><span>⚡</span> ClipperSkuy</a>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#how">How It Works</a></li>
+                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="#activate">Activate</a></li>
+                <li><a href="#faq">FAQ</a></li>
+                <li><a href="guide-en.html">📖 Guide</a></li>
+            </ul>
+            <a href="index.html"
+                style="color: var(--text-secondary); text-decoration: none; font-size: 13px; font-weight: 600; margin-right: 12px; padding: 6px 14px; border-radius: 50px; border: 1px solid var(--border); transition: all 0.2s;"
+                onmouseover="this.style.borderColor='rgba(255,255,255,0.2)'"
+                onmouseout="this.style.borderColor='rgba(255,255,255,0.06)'">🇮🇩 Indonesia</a>
+            <a href="#pricing" class="nav-cta">🚀 Download Free</a>
+            <button class="mobile-menu"
+                onclick="document.querySelector('.nav-links').classList.toggle('show')">☰</button>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="dot"></span>
+                7-Day Free Trial — All Features Unlocked
+            </div>
+            <h1>
+                Turn Long Videos Into<br>
+                <span class="gradient">Viral Content</span> in Minutes
+            </h1>
+            <p>
+                Our AI automatically detects the best moments, cuts, adds subtitles, and optimizes for TikTok, Reels &
+                YouTube Shorts.
+            </p>
+            <div class="hero-buttons">
+                <a href="#pricing" class="btn-primary">
+                    🚀 Download Now — Free
+                </a>
+                <a href="#how" class="btn-secondary">
+                    ▶ See How It Works
+                </a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat">
+                    <div class="stat-number">10+</div>
+                    <div class="stat-label">AI Features</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">9:16</div>
+                    <div class="stat-label">Auto Format</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">100%</div>
+                    <div class="stat-label">Offline</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number">7 Days</div>
+                    <div class="stat-label">Free Trial</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="section section-center" id="features">
+        <div class="reveal">
+            <div class="section-label">✨ Key Features</div>
+            <h2 class="section-title">Everything You Need</h2>
+            <p class="section-subtitle">Complete tools to turn long videos into short viral content that attracts
+                millions of views.</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(124,58,237,0.12);">🧠</div>
+                <h3>AI Clip Detection</h3>
+                <p>AI analyzes transcripts and finds the most viral moments — strong hooks, surprises, emotions,
+                    punchlines. Each clip gets a viral score.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(34,211,238,0.12);">💬</div>
+                <h3>Auto Subtitle</h3>
+                <p>Whisper AI creates super accurate subtitles. Multi-language, custom styling, word-by-word animation —
+                    burned directly into the video.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(236,72,153,0.12);">🎯</div>
+                <h3>Face Tracking</h3>
+                <p>AI dynamically follows the speaker's face. Auto-crop to 9:16 format with smooth tracking — like a
+                    professional editor.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(245,158,11,0.12);">🎙️</div>
+                <h3>Podcast Mode</h3>
+                <p>Automatically detects 1 or 2 speakers. Split screen with different zoom levels — perfect for podcasts
+                    and interviews.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(34,197,94,0.12);">🔇</div>
+                <h3>Audio Enhancement</h3>
+                <p>AI noise reduction removes AC noise, fans, traffic. Voice clarity boost makes audio clearer and
+                    sharper.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(59,130,246,0.12);">📊</div>
+                <h3>Progress Bar & Hook</h3>
+                <p>Retention progress bar increases watch time. Auto-generate hook text for the first 3 seconds that
+                    grabs attention.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(168,85,247,0.12);">🎬</div>
+                <h3>Auto B-Roll</h3>
+                <p>Auto-insert stock footage from Pexels based on context. Makes videos more dynamic and engaging
+                    without effort.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(239,68,68,0.12);">📱</div>
+                <h3>Multi-Platform Export</h3>
+                <p>One-click export to TikTok, Reels, YouTube Shorts format. Automatic resolution, bitrate, and aspect
+                    ratio optimization.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon" style="background: rgba(20,184,166,0.12);">🖥️</div>
+                <h3>100% Offline & Private</h3>
+                <p>Run on your own PC. No cloud uploads — your data and videos stay on your computer. Privacy
+                    guaranteed.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="section" id="how">
+        <div class="reveal section-center">
+            <div class="section-label">🎯 How It Works</div>
+            <h2 class="section-title">From Video to Viral Content</h2>
+            <p class="section-subtitle">4 easy steps to produce high-quality viral content.</p>
+        </div>
+        <div class="steps">
+            <div class="step reveal">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h3>Upload Video or Paste YouTube Link</h3>
+                    <p>Drag & drop video files or just paste a YouTube URL. Supports MP4, MOV, AVI, MKV, WebM up to 5GB.
+                    </p>
+                </div>
+            </div>
+            <div class="step reveal">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h3>AI Analysis & Auto Detection</h3>
+                    <p>AI transcribes audio, analyzes content, and finds the most viral moments automatically. Each clip
+                        gets a viral score and platform recommendation.</p>
+                </div>
+            </div>
+            <div class="step reveal">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h3>Edit, Preview & Customize</h3>
+                    <p>Preview each clip, edit subtitles, choose reframing mode (face track, blur, split screen), add
+                        hook text and progress bar.</p>
+                </div>
+            </div>
+            <div class="step reveal">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h3>Export & Upload to Platform 🔥</h3>
+                    <p>Export in optimal format for TikTok, Reels, or YouTube Shorts. Upload directly and reach millions
+                        of views!</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="section section-center" id="pricing">
+        <div class="reveal">
+            <div class="section-label">💎 Pricing</div>
+            <h2 class="section-title">Choose Your Plan</h2>
+            <p class="section-subtitle">Start free with a 7-day trial. Upgrade anytime for unlimited premium features.
+            </p>
+        </div>
+        <div class="pricing-grid">
+            <!-- Free -->
+            <div class="pricing-card reveal">
+                <div class="pricing-tier">Free</div>
+                <div class="pricing-price">
+                    <span class="currency">Rp</span>0
+                </div>
+                <div class="pricing-desc">After 7-day trial ends</div>
+                <ul class="pricing-features">
+                    <li>3 projects (total)</li>
+                    <li>3 exports per day</li>
+                    <li>720p Resolution</li>
+                    <li>Auto subtitles</li>
+                    <li>Center crop & Fit mode</li>
+                    <li class="locked">Face Tracking</li>
+                    <li class="locked">Face + Blur Background</li>
+                    <li class="locked">Audio Enhancement</li>
+                    <li class="locked">Batch Export</li>
+                    <li class="locked">Best/Balanced Quality</li>
+                </ul>
+                <a href="#" class="pricing-btn outline">Download Free</a>
+            </div>
+            <!-- Pro -->
+            <div class="pricing-card popular reveal">
+                <div class="pricing-tier">Pro</div>
+                <div class="pricing-price">
+                    <span
+                        style="text-decoration: line-through; color: var(--text-muted); font-size: 22px; font-weight: 500; margin-right: 8px;">Rp80rb</span>
+                    <span class="currency">Rp</span>69rb<span class="period">/mo</span>
+                </div>
+                <div class="pricing-desc">For serious creators & professionals</div>
+                <ul class="pricing-features">
+                    <li>Unlimited projects</li>
+                    <li>Unlimited exports</li>
+                    <li>1080p Full HD Resolution</li>
+                    <li>Auto subtitles + premium styling</li>
+                    <li>Face Tracking AI</li>
+                    <li>Face + Blur Background</li>
+                    <li>Audio Enhancement</li>
+                    <li>Batch Export</li>
+                    <li>GPU Acceleration</li>
+                    <li>Best & Balanced Quality</li>
+                </ul>
+                <a href="https://t.me/Skuy_bot?start=buy_pro" class="pricing-btn primary">🤖 Order via Telegram Bot</a>
+            </div>
+            <!-- Enterprise -->
+            <div class="pricing-card reveal">
+                <div class="pricing-tier">Enterprise</div>
+                <div class="pricing-price" style="font-size: 36px;">
+                    Contact Admin
+                </div>
+                <div class="pricing-desc">For agencies & production teams</div>
+                <ul class="pricing-features">
+                    <li>All Pro features</li>
+                    <li>Unlimited everything</li>
+                    <li>API Access</li>
+                    <li>Custom Branding</li>
+                    <li>Lifetime key option</li>
+                    <li>Priority Support</li>
+                    <li>Multi-device license</li>
+                    <li>White-label ready</li>
+                    <li>Early access features</li>
+                    <li>Dedicated support</li>
+                </ul>
+                <a href="https://t.me/Skuy_bot?start=enterprise" class="pricing-btn outline">🤖 Contact via Telegram</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section section-center" id="faq">
+        <div class="reveal">
+            <div class="section-label">❓ FAQ</div>
+            <h2 class="section-title">Frequently Asked Questions</h2>
+            <p class="section-subtitle">Answers to commonly asked questions.</p>
+        </div>
+        <div class="faq-list">
+            <div class="faq-item reveal">
+                <button class="faq-q" onclick="toggleFaq(this)">
+                    Is ClipperSkuy really free?
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="faq-a">
+                    Yes! ClipperSkuy can be downloaded and used for free. You get a 7-day trial with all premium
+                    features unlocked. After the trial ends, you can still use basic features for free indefinitely.
+                </div>
+            </div>
+            <div class="faq-item reveal">
+                <button class="faq-q" onclick="toggleFaq(this)">
+                    Do I need an internet connection?
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="faq-a">
+                    ClipperSkuy runs 100% offline on your PC. Internet is only needed for downloading YouTube videos and
+                    license validation. All AI processing, editing, and rendering is done locally.
+                </div>
+            </div>
+            <div class="faq-item reveal">
+                <button class="faq-q" onclick="toggleFaq(this)">
+                    What AI models are used?
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="faq-a">
+                    ClipperSkuy uses Groq (LLaMA) and Google Gemini for content analysis and highlight detection. For
+                    subtitles, we use Whisper AI. You need a free API key from Groq or Gemini — a complete guide is
+                    available in the app.
+                </div>
+            </div>
+            <div class="faq-item reveal">
+                <button class="faq-q" onclick="toggleFaq(this)">
+                    What languages are supported?
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="faq-a">
+                    ClipperSkuy supports Indonesian, English, العربية, 中文, 日本語, 한국어, and many more languages.
+                    Auto-detect language is also available for ease of use.
+                </div>
+            </div>
+            <div class="faq-item reveal">
+                <button class="faq-q" onclick="toggleFaq(this)">
+                    How do I pay?
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="faq-a">
+                    Payment is fully automated via <strong>Telegram Bot @Skuy_bot</strong> — pick a product, scan QRIS,
+                    and your license key is delivered instantly! Supports GoPay, OVO, Dana, ShopeePay, and all
+                    e-wallets/m-banking.
+                </div>
+            </div>
+            <div class="faq-item reveal">
+                <button class="faq-q" onclick="toggleFaq(this)">
+                    Minimum PC specifications?
+                    <span class="arrow">▼</span>
+                </button>
+                <div class="faq-a">
+                    Windows 10/11, 8GB RAM (16GB recommended), 2GB free space. NVIDIA/AMD/Intel GPU optional for faster
+                    rendering. ClipperSkuy automatically detects the best hardware.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cara Aktivasi Lisensi -->
+    <section class="section section-center" id="activate">
+        <div class="reveal">
+            <div class="section-label">🔐 License Activation</div>
+            <h2 class="section-title">How to Enter Your License Key</h2>
+            <p class="section-subtitle">After purchasing a license key via <a href="https://t.me/Skuy_bot"
+                    style="color: var(--accent-cyan); text-decoration: none;">Telegram Bot</a>, follow these simple
+                steps to unlock
+                all premium features.</p>
+        </div>
+
+        <div style="max-width: 700px; margin: 0 auto;">
+            <!-- Step 1 -->
+            <div class="reveal" style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 32px;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    font-family: 'Outfit'; font-size: 22px; font-weight: 900;
+                    background: rgba(124,58,237,0.12); border: 2px solid var(--accent-purple);
+                    color: var(--accent-purple);">1</div>
+                <div style="flex: 1; text-align: left;">
+                    <h3 style="font-family: 'Outfit'; font-size: 18px; font-weight: 700; margin-bottom: 6px;">Open the
+                        License Page in the App</h3>
+                    <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7;">
+                        Open ClipperSkuy → click <strong style="color: var(--text-primary);">⚙️ Settings</strong> in the
+                        left sidebar → scroll to the <strong style="color: var(--text-primary);">🔐 License</strong>
+                        section, or open the <strong style="color: var(--text-primary);">License</strong> page directly
+                        from the sidebar.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="reveal" style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 32px;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    font-family: 'Outfit'; font-size: 22px; font-weight: 900;
+                    background: rgba(34,211,238,0.12); border: 2px solid var(--accent-cyan);
+                    color: var(--accent-cyan);">2</div>
+                <div style="flex: 1; text-align: left;">
+                    <h3 style="font-family: 'Outfit'; font-size: 18px; font-weight: 700; margin-bottom: 6px;">Enter Your
+                        License Key</h3>
+                    <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7;">
+                        Paste the license key you received into the "License Key" field.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="reveal" style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 32px;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    font-family: 'Outfit'; font-size: 22px; font-weight: 900;
+                    background: rgba(236,72,153,0.12); border: 2px solid var(--accent-pink);
+                    color: var(--accent-pink);">3</div>
+                <div style="flex: 1; text-align: left;">
+                    <h3 style="font-family: 'Outfit'; font-size: 18px; font-weight: 700; margin-bottom: 6px;">Click
+                        "Activate"</h3>
+                    <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7;">
+                        Click the <strong style="color: var(--text-primary);">🔓 Activate License</strong> button. The
+                        system will validate your key and activate premium features instantly. The license is bound to
+                        your PC (Machine ID).
+                    </p>
+                </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="reveal" style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 40px;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    font-family: 'Outfit'; font-size: 22px; font-weight: 900;
+                    background: rgba(34,197,94,0.12); border: 2px solid #22c55e;
+                    color: #22c55e;">✓</div>
+                <div style="flex: 1; text-align: left;">
+                    <h3 style="font-family: 'Outfit'; font-size: 18px; font-weight: 700; margin-bottom: 6px;">Done! All
+                        Features Unlocked 🎉</h3>
+                    <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7;">
+                        Your license status changes to <strong style="color: #22c55e;">Licensed</strong>. Your tier
+                        (Pro/Enterprise) is immediately active — all premium features are available. Check expiry and
+                        license details on the License page.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Info box -->
+            <div class="reveal"
+                style="background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.15); border-radius: 12px; padding: 20px 24px; text-align: left;">
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <span style="font-size: 20px;">⚠️</span>
+                    <div>
+                        <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 8px;">
+                            <strong style="color: var(--text-primary);">Important:</strong> 1 License Key = 1 PC. The
+                            key is bound to your computer's Machine ID.
+                        </p>
+                        <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 8px;">
+                            🔄 Want to switch PCs? Contact admin via <a href="https://t.me/skuysdazen"
+                                style="color: var(--accent-purple); text-decoration: none;">Telegram</a> or <a
+                                href="https://wa.me/628151616315"
+                                style="color: #22c55e; text-decoration: none;">WhatsApp</a> to reset activation.
+                        </p>
+                        <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7;">
+                            📋 Machine ID can be found on the License page → click the <strong
+                                style="color: var(--text-primary);">Copy Machine ID</strong> button.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trial info -->
+            <div class="reveal"
+                style="background: rgba(34,211,238,0.06); border: 1px solid rgba(34,211,238,0.15); border-radius: 12px; padding: 20px 24px; text-align: left; margin-top: 16px;">
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <span style="font-size: 20px;">💡</span>
+                    <div>
+                        <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 8px;">
+                            <strong style="color: var(--text-primary);">Don't have a license key yet?</strong> No
+                            problem!
+                            You automatically get a <strong style="color: var(--accent-cyan);">7-day free trial</strong>
+                            when you first open the app.
+                        </p>
+                        <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.7;">
+                            After the trial ends, you can still use basic features. Upgrade anytime from the <a
+                                href="#pricing"
+                                style="color: var(--accent-cyan); text-decoration: none; border-bottom: 1px solid rgba(34,211,238,0.3);">pricing
+                                page</a>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section">
+        <div class="reveal">
+            <h2>Ready to Create <span
+                    style="background: var(--gradient-main); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">Viral
+                    Content?</span>
+            </h2>
+            <p>Download for free and experience the power of AI for your video editing. 7-day trial — all premium
+                features unlocked.</p>
+            <a href="#pricing" class="btn-primary" style="position: relative;">🚀 Get Started — Free</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-brand">⚡ ClipperSkuy</div>
+        <div class="footer-links">
+            <a href="#features">Fitur</a>
+            <a href="#pricing">Harga</a>
+            <a href="#faq">FAQ</a>
+            <a href="mailto:support@clipperskuy.com">Contact</a>
+        </div>
+        <p>© 2026 ClipperSkuy. All rights reserved. Built with ❤️ in Indonesia.</p>
+    </footer>
+
+    <script>
+        // Navbar scroll effect
+        window.addEventListener('scroll', () => {
+            document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 50);
+        });
+
+        // FAQ toggle
+        function toggleFaq(btn) {
+            const answer = btn.nextElementSibling;
+            const wasOpen = answer.classList.contains('open');
+            // Close all
+            document.querySelectorAll('.faq-a').forEach(a => a.classList.remove('open'));
+            document.querySelectorAll('.faq-q').forEach(q => q.classList.remove('active'));
+            // Open clicked
+            if (!wasOpen) {
+                answer.classList.add('open');
+                btn.classList.add('active');
+            }
+        }
+
+        // Scroll reveal
+        const revealElements = document.querySelectorAll('.reveal');
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry, index) => {
+                if (entry.isIntersecting) {
+                    setTimeout(() => entry.target.classList.add('visible'), index * 80);
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1 });
+        revealElements.forEach(el => observer.observe(el));
+
+        // Floating particles
+        const particlesContainer = document.getElementById('particles');
+        for (let i = 0; i < 30; i++) {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.animationDuration = (15 + Math.random() * 25) + 's';
+            p.style.animationDelay = Math.random() * 20 + 's';
+            p.style.width = p.style.height = (2 + Math.random() * 3) + 'px';
+            p.style.background = ['rgba(124,58,237,0.25)', 'rgba(34,211,238,0.2)', 'rgba(236,72,153,0.2)'][Math.floor(Math.random() * 3)];
+            particlesContainer.appendChild(p);
+        }
+
+        // Smooth scroll for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(a => {
+            a.addEventListener('click', e => {
+                e.preventDefault();
+                const target = document.querySelector(a.getAttribute('href'));
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+    </script>
+</body>
+
+</html>

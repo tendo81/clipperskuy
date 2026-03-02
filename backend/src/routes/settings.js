@@ -20,7 +20,7 @@ router.get('/', (req, res) => {
 router.put('/', (req, res) => {
     try {
         for (const [key, value] of Object.entries(req.body)) {
-            run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime("now"))', [key, String(value)]);
+            run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))', [key, String(value)]);
         }
 
         const rows = all('SELECT * FROM settings');
