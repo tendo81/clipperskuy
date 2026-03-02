@@ -52,6 +52,27 @@ async function start() {
     startAutoSave();
     console.log('[DB] Database ready (auto-save enabled)');
 
+    // Auto-reset projects stuck in processing states (from previous crashed session)
+    // These are projects that were transcribing/analyzing when the server last died.
+    try {
+      const { run, all } = require('./database');
+      const stuckProjects = all(
+        "SELECT id, name, status FROM projects WHERE status IN ('transcribing', 'analyzing', 'clipping')"
+      );
+      if (stuckProjects.length > 0) {
+        console.log(`[Startup] Resetting ${stuckProjects.length} stuck project(s) to 'failed':`);
+        for (const p of stuckProjects) {
+          run(
+            "UPDATE projects SET status = 'failed', error_message = 'Processing interrupted (server restarted)', updated_at = datetime('now') WHERE id = ?",
+            [p.id]
+          );
+          console.log(`  → Reset: "${p.name}" (${p.id}) — was ${p.status}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Startup] Could not reset stuck projects:', e.message);
+    }
+
     // Routes (loaded after DB init)
     const projectRoutes = require('./routes/projects');
     const settingsRoutes = require('./routes/settings');

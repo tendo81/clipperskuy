@@ -336,7 +336,24 @@ export default function ProjectDetail() {
 
             if (!res.ok) {
                 setProcessing(false);
-                alert(`Error: ${data.error}`);
+                // If project is stuck in processing state, offer to reset
+                if (res.status === 400 && data.error && data.error.includes('already being processed')) {
+                    const shouldReset = window.confirm(
+                        '⚠️ Project masih dalam status "processing" dari sesi sebelumnya.\n\nKlik OK untuk reset status dan coba re-process ulang.'
+                    );
+                    if (shouldReset) {
+                        try {
+                            await fetch(`${API}/projects/${id}/reset-status`, { method: 'POST' });
+                            // Reload project then retry
+                            await loadProject();
+                            setTimeout(() => startProcessing(), 500);
+                        } catch (resetErr) {
+                            alert(`Reset gagal: ${resetErr.message}`);
+                        }
+                    }
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
             }
         } catch (err) {
             setProcessing(false);

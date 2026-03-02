@@ -579,7 +579,7 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
                 : '15 menit';
 
             const text = `
-💳 <b>PEMBAYARAN QRIS</b>
+💳 <b>PEMBAYARAN</b>
 ━━━━━━━━━━━━━━━━━━
 
 🆔 <b>Order:</b> <code>${orderId}</code>
@@ -588,34 +588,27 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
 🔢 <b>Kode unik:</b> +${uniqueCode}
 💳 <b>Total bayar: ${formatPrice(finalAmount)}</b>
 
-<i>Scan QRIS di bawah — nominal sudah otomatis terisi!</i>
-(GoPay, OVO, Dana, ShopeePay, LinkAja, m-banking, dll)
+1️⃣ Tap tombol <b>"Bayar Sekarang"</b> di bawah
+2️⃣ Pilih metode bayar (GoPay, Dana, OVO, dll)
+3️⃣ Konfirmasi pembayaran
+4️⃣ License key otomatis dikirim ke sini ✅
 
-⏱ Expired: <b>${expiredAt}</b>
-🔑 License key otomatis dikirim setelah bayar.`;
+⏱ Expired: <b>${expiredAt}</b>`;
 
             await ctx.editMessageText(text, { parse_mode: 'HTML' });
 
-            // Kirim QR image
-            if (payment.qris_image_url) {
-                await ctx.replyWithPhoto(payment.qris_image_url, {
-                    caption: `💳 Scan & Bayar <b>${formatPrice(finalAmount)}</b>\n🆔 Order: <code>${orderId}</code>\n\n✅ Nominal otomatis terisi — tinggal scan & bayar!`,
-                    parse_mode: 'HTML'
-                });
-            } else if (payment.payment_url) {
-                // Fallback: kirim link bayar
-                await ctx.reply(
-                    `🔗 <b>Link Pembayaran:</b>\n${payment.payment_url}\n\nAtau scan QR di link tersebut.`,
-                    { parse_mode: 'HTML' }
-                );
+            // Tombol langsung ke halaman bayar
+            const buttons = [];
+            if (payment.payment_url) {
+                buttons.push([Markup.button.url('💳 Bayar Sekarang', payment.payment_url)]);
             }
+            buttons.push([Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)]);
+            buttons.push([Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]);
 
-            await ctx.reply('⏳ Bot akan otomatis cek pembayaran...', Markup.inlineKeyboard([
-                [Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)],
-                [Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]
-            ]));
+            await ctx.reply('⏳ Tap tombol di bawah untuk bayar. Bot otomatis cek tiap 15 detik.',
+                Markup.inlineKeyboard(buttons)
+            );
 
-            // Simpan invoice_id untuk pengecekan
             order.status = 'waiting_payment';
             order.payment_method = 'bayargg';
             order.bayargg_invoice = payment.invoice_id;

@@ -298,6 +298,28 @@ router.post('/:id/process', async (req, res) => {
     }
 });
 
+// POST /api/projects/:id/reset-status — Force-reset stuck processing status
+router.post('/:id/reset-status', (req, res) => {
+    try {
+        const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+
+        const previousStatus = project.status;
+        run(
+            "UPDATE projects SET status = 'failed', error_message = 'Manually reset by user', updated_at = datetime('now') WHERE id = ?",
+            [req.params.id]
+        );
+
+        const io = req.app.get('io');
+        if (io) io.emit('project:updated', { id: req.params.id, status: 'failed' });
+
+        console.log(`[Reset] Project ${req.params.id} reset from '${previousStatus}' → 'failed'`);
+        res.json({ message: `Status reset from '${previousStatus}' to 'failed'`, projectId: req.params.id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/projects/:id/retranscribe — Re-transcribe to get word-level timestamps
 router.post('/:id/retranscribe', async (req, res) => {
     try {

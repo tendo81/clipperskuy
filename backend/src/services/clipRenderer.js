@@ -13,6 +13,8 @@ const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
 
 fs.ensureDirSync(CLIPS_DIR);
 
+
+
 /**
  * Run FFmpeg with given args, returning a promise
  * - Closes stdin immediately to prevent FFmpeg from waiting for input
@@ -141,7 +143,47 @@ async function renderClip(clipId, io) {
     const settings = {};
     settingsRows.forEach(r => { settings[r.key] = r.value; });
 
+
     let { outW, outH } = getOutputDimensions(aspectRatio, settings.output_resolution || '1080p');
+
+    // ===== Validate clip timing vs actual video duration =====
+    try {
+        const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+        const { exec } = require('child_process');
+        const probeOut = await new Promise((resolve, reject) => {
+            exec(
+                `"${ffprobePath}" -v quiet -show_entries format=duration -of csv=p=0 "${project.source_path}"`,
+                { timeout: 10000 },
+                (err, stdout) => err ? reject(err) : resolve(stdout.trim())
+            );
+        });
+        const videoDuration = parseFloat(probeOut);
+        if (!isNaN(videoDuration) && clip.start_time >= videoDuration) {
+            const msg = `Clip start (${clip.start_time}s) exceeds video duration (${videoDuration.toFixed(1)}s) — skipping`;
+            console.error(`[Render] ${msg}`);
+            run("UPDATE clips SET status = 'failed' WHERE id = ?", [clipId]);
+            emit(0, `⚠️ ${msg}`);
+            throw new Error(msg);
+        }
+        if (!isNaN(videoDuration) && clip.end_time > videoDuration) {
+            console.warn(`[Render] Clip end (${clip.end_time}s) > video duration (${videoDuration.toFixed(1)}s) — clamped`);
+            clip.end_time = Math.floor(videoDuration);
+        }
+        // Enforce minimum clip duration (≥5s) after clamping
+        const clampedDuration = clip.end_time - clip.start_time;
+        if (clampedDuration < 5) {
+            const msg = `Clip too short after clamping (${clampedDuration.toFixed(1)}s < 5s) — skipping`;
+            console.error(`[Render] ${msg}`);
+            run("UPDATE clips SET status = 'failed' WHERE id = ?", [clipId]);
+            emit(0, `⚠️ ${msg}`);
+            throw new Error(msg);
+        }
+    } catch (e) {
+        if (e.message && (e.message.includes('exceeds video duration') || e.message.includes('too short'))) throw e;
+        console.warn('[Render] Could not validate clip timing:', e.message ? e.message.substring(0, 100) : e);
+    }
+
+    // Duration is calculated AFTER clamping end_time above
     const duration = clip.end_time - clip.start_time;
 
     // ===== Apply license tier restrictions =====
@@ -197,11 +239,15 @@ async function renderClip(clipId, io) {
     // ===== Check source video resolution → warn if low =====
     let sourceW = 0;
     try {
-        const { execSync } = require('child_process');
-        const probeResult = execSync(
-            `"${FFPROBE_PATH}" -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${project.source_path}"`,
-            { encoding: 'utf-8', timeout: 10000 }
-        ).trim();
+        const { exec: execCb } = require('child_process');
+        const probeResult = await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(''), 8000);
+            execCb(
+                `"${FFPROBE_PATH}" -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${project.source_path}"`,
+                { encoding: 'utf-8', timeout: 9000 },
+                (err, stdout) => { clearTimeout(timer); resolve((stdout || '').trim()); }
+            );
+        });
         const [srcW, srcH] = probeResult.split(',').map(Number);
         if (srcW && srcH) {
             sourceW = srcW;
@@ -212,6 +258,7 @@ async function renderClip(clipId, io) {
             }
         }
     } catch (e) { /* ignore */ }
+
 
     // Output path
     const safeTitle = (clip.title || `clip${clip.clip_number}`)
@@ -405,7 +452,9 @@ async function renderClip(clipId, io) {
     }
 
     // ===== Encoder selection (hardware acceleration) =====
-    const { encoder, encoderArgs } = getEncoder(settings);
+    const { encoder, encoderArgs } = await getEncoder(settings);
+    console.log(`[Render] Encoder: ${encoder}`);
+
 
     const qualityPreset = settings.quality_preset || 'balanced';
     const preset = qualityPreset === 'best' ? 'slow' : qualityPreset === 'fast' ? 'ultrafast' : 'medium';
@@ -531,7 +580,7 @@ async function renderClip(clipId, io) {
     }
 
     // ===== Hook Title =====
-    const hookTitleResult = buildHookTitleFilter(clip, outW, outH, duration, clipTempDir);
+    const hookTitleResult = await buildHookTitleFilter(clip, outW, outH, duration, clipTempDir);
     let hookTitleFilter = '';
     let hookOverlay = null;
     if (hookTitleResult) {
@@ -659,7 +708,29 @@ async function renderClip(clipId, io) {
     //
     // pass1 = reframing + hook overlay + music + watermark (everything complex)
     // pass2 = subtitle + text overlays (always via -vf, no filter_complex)
+    //
+    // ── Face Track + Hook overlay ─────────────────────────────────────────────
+    // Dynamic crop filter uses 'if(between(t,...))' with single-quotes that
+    // conflict with filter_complex escaping on Windows (FFmpeg shell parsing).
+    // When face tracking is active (podcastFilter with crop keyframes), we CANNOT
+    // safely put hook PNG overlay inside filter_complex.
+    // Solution: treat hook as pass-2 via drawtext (hookTitleFilter) for face-track clips.
+    const isFaceTrackMode = podcastFilter && !podcastIsSplit; // face tracking, not split screen
+    if (isFaceTrackMode && hookOverlay) {
+        // Move hook from PNG overlay (pass1 filter_complex) to drawtext pass2
+        const hookFallback = await buildHookTitleFilter({ ...clip, _forceFallback: true }, outW, outH, duration, null);
+        if (typeof hookFallback === 'string' && hookFallback) {
+            hookTitleFilter = hookFallback;
+        }
+        hookOverlay = null; // disable PNG overlay in pass1
+    }
+
+    // IMPORTANT: Re-evaluate needsOverlay AFTER hookOverlay may have been set to null above.
+    // (needsOverlay was computed before isFaceTrackMode check which can null hookOverlay)
+    const needsOverlay2 = hookOverlay && hookInputIdx >= 0;
     const needsSubtitlePass2 = (isComplexVf || mustUseComplex) && (subFilter || hookTitleFilter || progressBarFilter);
+
+
     const extraFiltersPass1 = needsSubtitlePass2
         ? [textWatermarkFilter].filter(Boolean).join(',')   // only non-problematic text in pass1
         : extraFilters;                                      // all filters in single pass
@@ -667,29 +738,36 @@ async function renderClip(clipId, io) {
         ? [progressBarFilter, subFilter, hookTitleFilter].filter(Boolean).join(',')
         : '';
 
-    console.log(`[Render] Filter debug: isComplexVf=${isComplexVf}, mustUseComplex=${mustUseComplex}, needsOverlay=${needsOverlay}, needsSubtitlePass2=${needsSubtitlePass2}`);
-    console.log(`[Render] pass1 extra: ${extraFiltersPass1 || 'EMPTY'}`);
-    console.log(`[Render] pass2 extra (subtitle): ${extraFiltersPass2 || 'EMPTY'}`);
+    console.log(`[Render] isComplexVf=${isComplexVf} mustUseComplex=${mustUseComplex} needsOverlay2=${needsOverlay2} needsSubP2=${!!needsSubtitlePass2}`);
 
     if (mustUseComplex && watermarkFilter) {
         // ── Complex filter with watermark IMAGE overlay ──
         // Label sequence: [0:v] → crop/scale → [vid] → watermark overlay → [wm_out] → hook overlay → [outv2]
         let fullFilter;
         if (isComplexVf) {
-            fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
+            // isComplexVf means vf already starts with [0:v] and ends with terminal (e.g. vstack)
+            // Tag vstack output → [vsout] then route to filters → [vid]
+            const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
+            if (vstackTagged !== vf) {
+                fullFilter = vstackTagged + (extraFiltersPass1
+                    ? `;[vsout]${extraFiltersPass1}[vid]`
+                    : `;[vsout]null[vid]`);
+            } else {
+                fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
+            }
         } else {
             fullFilter = `[0:v]${vf}` + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
         }
         // Watermark filter expects [vid] input and produces [outv]
         fullFilter += `;${watermarkFilter}`; // watermarkFilter must produce [outv]
-        if (needsOverlay) {
+        if (needsOverlay2) {
             // Hook PNG overlay: [outv] + [hookIdx:v] → [outv2]
-            fullFilter += `;[outv][${hookInputIdx}:v]overlay=x=${hookOverlay.overlayX}:y=${hookOverlay.overlayY},format=yuv420p[outv2]`;
+            const hookEnable = hookOverlay.enableExpr ? `:${hookOverlay.enableExpr}` : '';
+            fullFilter += `;[outv][${hookInputIdx}:v]overlay=x=${hookOverlay.overlayX}:y=${hookOverlay.overlayY}${hookEnable},format=yuv420p[outv2]`;
         } else {
             fullFilter += `;[outv]format=yuv420p[outv2]`;
         }
         if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
-        console.log('[Render] Pass1 filter_complex (with watermark):', fullFilter.substring(0, 300));
         args1.push('-filter_complex', fullFilter);
         args1.push('-map', '[outv2]');
         if (audioArgs.map) args1.push('-map', audioArgs.map);
@@ -700,20 +778,38 @@ async function renderClip(clipId, io) {
         // Label: [0:v] → crop/scale/etc → [outv] → (hook overlay) → [outv2]
         let fullFilter;
         if (isComplexVf) {
-            fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
+            // For podcast split: vf ends with 'vstack=inputs=3' (NO trailing label)
+            // We must add label via SEMICOLON notation: ';[label_from_vstack][outv]'
+            // BUT vstack output is unlabelled by default — we need to relabel it.
+            // Solution: replace the LAST terminal filter to add output label,
+            // then chain hook overlay if needed.
+            // Simpler: just append ';' + extraFiltersPass1 as a new filter on [outv],
+            // and label the vstack output in place.
+            // We tag vstack output by replacing 'vstack=inputs=N' → 'vstack=inputs=N[vsout]'
+            // then route [vsout] → extraFilters → [outv]
+            const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
+            if (vstackTagged !== vf) {
+                // Successfully tagged vstack output
+                if (extraFiltersPass1) {
+                    fullFilter = vstackTagged + `;[vsout]${extraFiltersPass1}[outv]`;
+                } else {
+                    fullFilter = vstackTagged + `;[vsout]null[outv]`;
+                }
+            } else {
+                // Fallback: vstack not found, append comma-style (may fail for some filters)
+                fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
+            }
         } else {
             fullFilter = `[0:v]${vf}` + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
         }
-        if (needsOverlay) {
-            // Hook PNG overlay on top of video — no enable= to avoid quote escaping issues
-            // Hook PNG is typically 5s but since it's an overlay input, we just overlay it for full clip.
-            // The PNG itself is opaque only where drawn; transparent elsewhere.
-            fullFilter += `;[outv][${hookInputIdx}:v]overlay=x=${hookOverlay.overlayX}:y=${hookOverlay.overlayY},format=yuv420p[outv2]`;
+        if (needsOverlay2) {
+            // Hook PNG overlay on top of video
+            const hookEnable = hookOverlay.enableExpr ? `:${hookOverlay.enableExpr}` : '';
+            fullFilter += `;[outv][${hookInputIdx}:v]overlay=x=${hookOverlay.overlayX}:y=${hookOverlay.overlayY}${hookEnable},format=yuv420p[outv2]`;
         } else {
-            fullFilter += `,format=yuv420p[outv2]`;
+            fullFilter += `;[outv]format=yuv420p[outv2]`;
         }
         if (audioArgs.complex) fullFilter += `;${audioArgs.complex}`;
-        console.log('[Render] Pass1 filter_complex (no watermark):', fullFilter.substring(0, 300));
         args1.push('-filter_complex', fullFilter);
         args1.push('-map', '[outv2]');
         if (audioArgs.map) args1.push('-map', audioArgs.map);
@@ -751,7 +847,7 @@ async function renderClip(clipId, io) {
     }
     const gpuBitrate = baseBitrate[qualityPreset] || baseBitrate.balanced;
     const gpuMaxrate = baseMax[qualityPreset] || baseMax.balanced;
-    console.log(`[Render] Bitrate for ${outW}x${outH}: target=${gpuBitrate}, max=${gpuMaxrate}`);
+    console.log(`[Render] Bitrate: ${gpuBitrate} max=${gpuMaxrate}`);
 
     // For GPU encoders, replace -crf with appropriate quality param
     if (encoder !== 'libx264') {
@@ -765,25 +861,21 @@ async function renderClip(clipId, io) {
                 // Still need bitrate cap for GPU encoders (they don't auto-limit like CRF)
                 if (!args1.includes('-b:v') && !args1.includes('-maxrate')) {
                     args1.push('-b:v', gpuBitrate, '-maxrate', gpuMaxrate, '-bufsize', '16M');
-                    console.log(`[Render] GPU bitrate cap (hasQuality): target=${gpuBitrate}, max=${gpuMaxrate}`);
                 }
             } else if (encoder.includes('nvenc')) {
                 args1[crfIdx] = '-cq';
                 // NVENC: add bitrate cap to prevent excessive bitrate on 720p
                 args1.push('-maxrate', gpuMaxrate, '-bufsize', '16M');
-                console.log(`[Render] NVENC bitrate cap: cq=${crf}, maxrate=${gpuMaxrate}`);
             } else if (encoder.includes('amf')) {
                 // AMF doesn't support CRF - use quality + bitrate cap
                 args1[crfIdx] = '-quality';
                 args1[crfIdx + 1] = qualityPreset === 'best' ? 'quality' : qualityPreset === 'fast' ? 'speed' : 'balanced';
                 // Add bitrate control (AMF without -b:v produces ~19 Mbps, way too high for 720p)
                 args1.push('-b:v', gpuBitrate, '-maxrate', gpuMaxrate, '-bufsize', '16M');
-                console.log(`[Render] AMF bitrate: target=${gpuBitrate}, max=${gpuMaxrate}`);
             } else if (encoder.includes('qsv')) {
                 args1[crfIdx] = '-global_quality';
                 // QSV: add bitrate cap to prevent excessive bitrate on 720p
                 args1.push('-maxrate', gpuMaxrate, '-bufsize', '16M');
-                console.log(`[Render] QSV bitrate cap: global_quality=${crf}, maxrate=${gpuMaxrate}`);
             }
         }
     }
@@ -792,6 +884,14 @@ async function renderClip(clipId, io) {
     args1.push('-t', String(duration), outputPath);
 
     const result1 = await runFFmpeg(args1, duration, emit, io, project.id);
+
+
+
+    // Always log FFmpeg stderr for debugging (last 800 chars)
+    if (result1.stderr) {
+        const stderrSnip = result1.stderr.slice(-800);
+        console.log(`[Render] Pass1 FFmpeg stderr (last 800):\n${stderrSnip}`);
+    }
 
     if (result1.success && validateOutput(outputPath)) {
         // ===== PASS 2: Subtitle + text overlays burn-in (if deferred from pass 1) =====
@@ -948,6 +1048,20 @@ async function renderClip(clipId, io) {
     console.error(`[Render]   Attempt 1: ${result1.errorMsg || 'invalid output'}`);
     console.error(`[Render]   Attempt 2: ${result2.errorMsg || 'invalid output'}`);
     console.error(`[Render]   Attempt 3: ${result3.errorMsg || 'invalid output'}`);
+    // Dump FFmpeg stderrs to a log file for easier debugging
+    try {
+        const logPath = require('path').join(require('os').tmpdir(), `clip_fail_${clip.clip_number}_${Date.now()}.log`);
+        const logContent = [
+            `=== CLIP #${clip.clip_number} "${clip.title}" RENDER FAILURE ===`,
+            `Start: ${clip.start_time}s, End: ${clip.end_time}s, Duration: ${clip.end_time - clip.start_time}s`,
+            `\n--- ATTEMPT 1 STDERR ---\n${result1.stderr || 'N/A'}`,
+            `\n--- ATTEMPT 2 STDERR ---\n${result2.stderr || 'N/A'}`,
+            `\n--- ATTEMPT 3 STDERR ---\n${result3.stderr || 'N/A'}`,
+        ].join('\n');
+        require('fs').writeFileSync(logPath, logContent, 'utf-8');
+        console.error(`[Render] Full stderr log saved to: ${logPath}`);
+    } catch (e) { /* ignore log write errors */ }
+
 
     run("UPDATE clips SET status = 'failed' WHERE id = ?", [clipId]);
     emit(0, `Render failed: ${finalError}`);
@@ -960,7 +1074,7 @@ async function renderClip(clipId, io) {
  * then overlays it on the video via FFmpeg.
  * Falls back to drawtext if PowerShell fails.
  */
-function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
+async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     const hookText = clip.hook_text;
     if (!hookText || !hookText.trim()) return '';
     if (!clip.hook_settings) return '';
@@ -971,7 +1085,11 @@ function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     } catch (e) { return ''; }
     // Hook is valid if there's text — settings may have defaults, don't block on missing fields
     // Only skip if settings is completely empty (no recognizable fields at all)
-    if (!settings.position && !settings.textColor && !settings.bgColor && !settings.hookStyle && !settings.fontSize && !settings.duration) return '';
+    // Only skip if ALL known fields are missing (truly empty settings object)
+    const hasAnyHookSetting = settings.position || settings.textColor || settings.bgColor ||
+        settings.hookStyle || settings.fontSize || settings.duration !== undefined ||
+        settings.style;
+    if (!hasAnyHookSetting) return '';
 
     const hookDuration = settings.duration != null ? settings.duration : 5;
     const position = settings.position || 'top';
@@ -1004,17 +1122,18 @@ function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     // =====================================================
     //  Try PNG overlay approach (supports emoji via WPF!)
     // =====================================================
-    if (clipDir) {
+    if (clipDir && !clip._forceFallback) {
+
         try {
             const hookImgPath = path.join(clipDir, 'hook_overlay.png');
-            const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'hook_gen.ps1');
+            const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'hook_gen_gdi.ps1');
             const padX = Math.round(fontSize * 0.5);
             const padY = Math.round(fontSize * 0.35);
             const maxW = outW - Math.round(outW * 0.14);
             const psFontSize = Math.round(fontSize * 0.75);
 
             // Write text to temp file (preserves emoji/Unicode through pipeline)
-            const { execSync } = require('child_process');
+            const { exec } = require('child_process');
             const textFilePath = path.join(clipDir, '_hook_text.txt');
             fs.writeFileSync(textFilePath, cleanText, 'utf-8');
 
@@ -1025,10 +1144,17 @@ function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
                 maxW, `"${hookImgPath}"`
             ].join(' ');
 
-            const result = execSync(
-                `powershell -NoProfile -ExecutionPolicy Bypass -Sta -File "${scriptPath}" ${args}`,
-                { timeout: 15000, encoding: 'utf-8' }
-            ).trim();
+            // Use async exec to avoid blocking Node.js event loop
+            // GDI+ version: no -Sta needed, much faster than WPF
+            const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" ${args}`;
+            const result = await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('Hook PNG timeout')), 15000);
+                exec(psCmd, { timeout: 16000, encoding: 'utf-8' }, (err, stdout) => {
+                    clearTimeout(timer);
+                    if (err) reject(err);
+                    else resolve((stdout || '').trim());
+                });
+            });
 
             // Cleanup text file
             try { fs.unlinkSync(textFilePath); } catch (e) { }
@@ -1199,7 +1325,8 @@ function getOutputDimensions(aspectRatio, resolution = '1080p') {
 /**
  * Detect and return the best available encoder
  */
-function getEncoder(settings) {
+async function getEncoder(settings) {
+
     const hwAccel = settings.hw_accel || 'auto';
     const encoderSetting = settings.encoder || 'auto';
 
@@ -1243,43 +1370,78 @@ function getEncoder(settings) {
         return { encoder: 'h264_qsv', encoderArgs: ['-preset', 'medium'] };
     }
 
-    // 'auto'/'auto' ΓÇö try to detect GPU encoder from FFmpeg
-    try {
-        const { execSync } = require('child_process');
-        const encoders = execSync('ffmpeg -encoders 2>&1', { timeout: 5000 }).toString();
+    // 'auto' — use cached async GPU detection (only runs once per process)
+    if (!detectGpuEncoder._cache) {
+        detectGpuEncoder._cache = await _detectGpuEncoderAsync();
+    }
+    return detectGpuEncoder._cache || cpuEncoder;
+}
 
-        // Also detect actual GPU
-        let gpuName = '';
-        try {
-            const gpuResult = execSync('wmic path win32_VideoController get name /value', { timeout: 3000 }).toString();
-            const match = gpuResult.match(/Name=(.+)/);
-            if (match) gpuName = match[1].trim().toLowerCase();
-        } catch (e) { /* ignore */ }
+// Async GPU detection helper (result cached in detectGpuEncoder._cache)
+async function _detectGpuEncoderAsync() {
+    const cpuEncoder = { encoder: 'libx264', encoderArgs: ['-preset', 'fast', '-tune', 'film'] };
+    const { exec: execCb } = require('child_process');
 
-        // Match GPU to encoder
-        if ((gpuName.includes('nvidia') || gpuName.includes('geforce') || gpuName.includes('rtx') || gpuName.includes('gtx'))
-            && encoders.includes('h264_nvenc')) {
-            console.log(`[Render] Auto-detected NVIDIA GPU (${gpuName}) ΓåÆ using h264_nvenc`);
-            return { encoder: 'h264_nvenc', encoderArgs: ['-preset', 'p4', '-tune', 'hq'] };
-        }
-        if ((gpuName.includes('amd') || gpuName.includes('radeon'))
-            && encoders.includes('h264_amf')) {
-            console.log(`[Render] Auto-detected AMD GPU (${gpuName}) ΓåÆ using h264_amf`);
-            return { encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced'] };
-        }
-        if ((gpuName.includes('intel') || gpuName.includes('uhd') || gpuName.includes('iris'))
-            && encoders.includes('h264_qsv')) {
-            console.log(`[Render] Auto-detected Intel GPU (${gpuName}) ΓåÆ using h264_qsv`);
-            return { encoder: 'h264_qsv', encoderArgs: ['-preset', 'medium'] };
-        }
-    } catch (e) {
-        console.warn('[Render] GPU auto-detection failed:', e.message);
+    // Helper: test if an encoder actually works by doing a quick 1-frame encode
+    // Success = output contains "frame=" indicating encoding completed
+    function testEncoder(enc) {
+        return new Promise((resolve) => {
+            const t = setTimeout(() => resolve(false), 8000);
+            execCb(
+                `ffmpeg -f lavfi -i color=c=black:size=64x64:r=1 -frames:v 1 -c:v ${enc} -f null - 2>&1`,
+                { timeout: 9000 },
+                (err, out) => {
+                    clearTimeout(t);
+                    // Success = "frame=    1" appears in output AND no fatal encoder error
+                    const hasFrame = out && /frame=\s*1/.test(out);
+                    const hasFatal = out && (out.includes('Failed to create') || out.includes('AMFQueryVersion failed') || out.includes('Could not open encoder'));
+                    resolve(hasFrame && !hasFatal);
+                }
+            );
+        });
     }
 
-    // Final fallback to CPU
-    console.log('[Render] No GPU detected, using CPU encoder (libx264)');
+    try {
+        const gpuOut = await new Promise((res) => {
+            const t = setTimeout(() => res(''), 3000);
+            execCb('wmic path win32_VideoController get name /value', { timeout: 4000 }, (e, o) => { clearTimeout(t); res(o || ''); });
+        });
+
+        let gpuName = '';
+        const m = gpuOut.match(/Name=(.+)/);
+        if (m) gpuName = m[1].trim().toLowerCase();
+        console.log(`[Render] GPU detected: ${gpuName || 'unknown'}`);
+
+        // Try GPU H.264 encoders in order — always H.264, never AV1/HEVC
+        const candidates = [];
+        if (gpuName.includes('nvidia') || gpuName.includes('geforce') || gpuName.includes('rtx') || gpuName.includes('gtx')) {
+            candidates.push({ encoder: 'h264_nvenc', encoderArgs: ['-preset', 'p4', '-tune', 'hq'] });
+        }
+        if (gpuName.includes('amd') || gpuName.includes('radeon')) {
+            candidates.push({ encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced'] });
+        }
+        if (gpuName.includes('intel') || gpuName.includes('uhd') || gpuName.includes('iris') || gpuName.includes('arc')) {
+            candidates.push({ encoder: 'h264_qsv', encoderArgs: ['-preset', 'medium'] });
+        }
+        // CPU libx264 as final fallback — reliable with all filter modes including podcast filter_complex
+        candidates.push(cpuEncoder);
+
+        for (const candidate of candidates) {
+            const works = await testEncoder(candidate.encoder);
+            if (works) {
+                console.log(`[Render] GPU auto-detect: ${candidate.encoder} ✅ works`);
+                return candidate;
+            } else {
+                console.log(`[Render] GPU auto-detect: ${candidate.encoder} ❌ failed, trying next...`);
+            }
+        }
+    } catch (e) {
+        console.warn('[Render] GPU auto-detect failed:', e.message);
+    }
+    console.log('[Render] Falling back to CPU encoder (libx264)');
     return cpuEncoder;
 }
+
 
 // ===== RETENTION PROGRESS BAR =====
 
@@ -1642,7 +1804,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // If subtitles appear TOO LATE after this change: reduce to 0.3
     // Subtitle delay (seconds): 0.3s compensates for Whisper early detection.
     // Lower = subtitles appear earlier (less delay). Raise if subs still appear too early.
-    const SUBTITLE_DELAY = 0.3;
+    const SUBTITLE_DELAY = 0.7;
 
     // Per-word highlight: all words visible, only the current word gets highlight color
     // This matches the preview behavior exactly

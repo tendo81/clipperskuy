@@ -45,9 +45,10 @@ function prepareTranscriptForAnalysis(transcript, maxChars = 10000) {
  * Build the clip detection prompt — emphasizes duration requirements + language matching
  */
 function buildPrompt(compactTranscript, projectInfo) {
-    const { min_duration, max_duration, clip_count_target, platform } = projectInfo;
+    const { min_duration, max_duration, clip_count_target, platform, duration: videoDur } = projectInfo;
     const minDur = min_duration || 15;
     const maxDur = max_duration || 60;
+    const videoDurationInfo = videoDur ? `\nVIDEO DURATION: ${Math.floor(videoDur / 60)}:${String(Math.round(videoDur % 60)).padStart(2, '0')} (${videoDur.toFixed(0)} seconds total). Do NOT generate clips that start in the last ${minDur} seconds of the video (after ${(videoDur - minDur).toFixed(0)}s).` : '';
 
     // Support both text labels AND custom numbers
     const countGuide = {
@@ -66,7 +67,7 @@ function buildPrompt(compactTranscript, projectInfo) {
 
     console.log(`[ClipDetect] Clip count target: "${clip_count_target}" → prompt: "${clipCount}"`);
 
-    return `You are a viral short-form video expert. Analyze the timestamped transcript below and identify ${clipCount} viral-worthy clips for ${platform || 'TikTok/Reels/Shorts'}.
+    return `You are a viral short-form video expert. Analyze the timestamped transcript below and identify ${clipCount} viral-worthy clips for ${platform || 'TikTok/Reels/Shorts'}.${videoDurationInfo}
 
 LANGUAGE RULE (MOST IMPORTANT):
 - Detect the language of the transcript below.
@@ -264,25 +265,54 @@ function parseClipsJson(text, projectInfo = {}) {
 
     const minDur = projectInfo.min_duration || 15;
     const maxDur = projectInfo.max_duration || 60;
+    const videoDuration = projectInfo.duration || Infinity; // video length in seconds
 
-    const parsed = clips.map((clip, i) => {
+    const parsed = [];
+    for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i];
         let startTime = parseFloat(clip.start_time) || 0;
         let endTime = parseFloat(clip.end_time) || 0;
-        let duration = endTime - startTime;
 
-        // Fix clips that are too short — extend end_time
-        if (duration < minDur) {
-            endTime = startTime + minDur;
-            duration = minDur;
+        // ── Step 1: reject if start_time is beyond video ──
+        if (startTime >= videoDuration) {
+            console.warn(`[ClipDetect] Discarding clip "${clip.title}" — start_time (${startTime}s) >= video duration (${videoDuration.toFixed(1)}s)`);
+            continue;
         }
 
-        // Fix clips that are too long — trim end_time
+        // ── Step 2: clamp end_time to video boundary ──
+        if (endTime > videoDuration) {
+            endTime = videoDuration;
+        }
+
+        // ── Step 2: fix too-short duration ──
+        let duration = endTime - startTime;
+
+        if (duration < minDur) {
+            // Try to extend end_time first (up to maxDur, up to videoDuration)
+            const extendEnd = Math.min(startTime + minDur, videoDuration);
+            if (extendEnd - startTime >= minDur) {
+                endTime = extendEnd;
+            } else {
+                // Not enough room forward — pull start_time BACK instead
+                const neededStart = endTime - minDur;
+                if (neededStart >= 0) {
+                    startTime = neededStart;
+                } else {
+                    // Video too short for this clip entirely — discard
+                    console.warn(`[ClipDetect] Discarding clip "${clip.title}" — insufficient video content (only ${(endTime - Math.max(0, neededStart)).toFixed(1)}s available < ${minDur}s min)`);
+                    continue;
+                }
+            }
+            duration = endTime - startTime;
+        }
+
+        // ── Step 3: fix too-long duration ──
         if (duration > maxDur) {
             endTime = startTime + maxDur;
             duration = maxDur;
         }
 
-        return {
+        parsed.push({
             id: uuidv4(),
             clip_number: clip.clip_number || i + 1,
             title: clip.title || `Clip ${i + 1}`,
@@ -300,14 +330,18 @@ function parseClipsJson(text, projectInfo = {}) {
             score_complete: Math.min(100, Math.max(0, parseInt(clip.score_complete) || 50)),
             improvement_tips: clip.improvement_tips || '',
             hashtags: clip.hashtags || ''
-        };
-    });
+        });
+    }
+
+    if (parsed.length === 0) {
+        throw new Error('AI returned no valid clips after duration validation');
+    }
 
     // Sort by virality score descending
     parsed.sort((a, b) => b.virality_score - a.virality_score);
 
     // === DEDUPLICATION ===
-    // Remove clips that overlap >80% with a higher-scored clip
+    // Remove clips that overlap >30% with a higher-scored clip
     const deduplicated = [];
     for (const clip of parsed) {
         const isDuplicate = deduplicated.some(existing => {
@@ -340,6 +374,7 @@ function parseClipsJson(text, projectInfo = {}) {
 
     return finalClips;
 }
+
 
 /**
  * Detect clips with fallback + retry
