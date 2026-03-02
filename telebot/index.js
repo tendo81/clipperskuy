@@ -27,6 +27,11 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 const LOG_CHANNEL = process.env.LOG_CHANNEL_ID ? parseInt(process.env.LOG_CHANNEL_ID) : null;
 const PAKASIR_SLUG = process.env.PAKASIR_SLUG || '';
 const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY || '';
+const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY || '';
+// BAYARGG_METHOD: gopay_qris | qris_user | qris (default: gopay_qris)
+const BAYARGG_METHOD = process.env.BAYARGG_METHOD || 'gopay_qris';
+// Gunakan bayar.gg jika ada API key-nya, fallback ke Pakasir
+const USE_BAYARGG = !!BAYARGG_API_KEY;
 const SUPPORT_GROUP = process.env.SUPPORT_GROUP_LINK || 'https://t.me/+GANTI_DENGAN_LINK_GRUP';
 
 // ============ DATABASE (JSON file) ============
@@ -191,7 +196,63 @@ async function sendLog(bot, text) {
     } catch (e) { console.error('Log send error:', e.message); }
 }
 
-// ============ QRIS PAYMENT (Pakasir) ============
+// ============ QRIS PAYMENT (bayar.gg) ============
+async function createBayarGGPayment(orderId, amount, customerName) {
+    if (!BAYARGG_API_KEY) return null;
+    try {
+        const body = {
+            amount,
+            description: `ClipperSkuy License - Order ${orderId}`,
+            customer_name: customerName || 'Customer',
+            payment_method: BAYARGG_METHOD,
+            use_qris_converter: true  // QRIS dinamis dengan nominal tertanam
+        };
+        const res = await fetch('https://www.bayar.gg/api/create-payment.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': BAYARGG_API_KEY
+            },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        console.log('bayar.gg create response:', JSON.stringify(data));
+        if (data.success && data.data) {
+            return {
+                invoice_id: data.data.invoice_id,
+                payment_url: data.data.payment_url,
+                final_amount: data.data.final_amount,
+                unique_code: data.data.unique_code,
+                // QRIS image (dinamis dengan nominal tertanam)
+                qris_image_url: data.data.qris_converter?.qr_image_url || null,
+                qris_string: data.data.qris_converter?.converted_qris || null,
+                expires_at: data.data.expires_at
+            };
+        }
+        return null;
+    } catch (err) {
+        console.error('bayar.gg create error:', err.message);
+        return null;
+    }
+}
+
+async function checkBayarGGStatus(invoiceId) {
+    if (!BAYARGG_API_KEY || !invoiceId) return 'unknown';
+    try {
+        const res = await fetch(`https://www.bayar.gg/api/check-payment?invoice=${invoiceId}`, {
+            headers: { 'X-API-Key': BAYARGG_API_KEY }
+        });
+        const data = await res.json();
+        console.log('bayar.gg status:', JSON.stringify(data));
+        // status: pending | paid | expired | cancelled
+        return data.status || 'pending';
+    } catch (err) {
+        console.error('bayar.gg status error:', err.message);
+        return 'unknown';
+    }
+}
+
+// ============ QRIS PAYMENT (Pakasir) — Legacy fallback ============
 async function createPakasirQRIS(orderId, amount) {
     if (!PAKASIR_SLUG || !PAKASIR_API_KEY) return null;
     try {
@@ -207,9 +268,7 @@ async function createPakasirQRIS(orderId, amount) {
         });
         const data = await res.json();
         console.log('Pakasir create response:', JSON.stringify(data));
-        if (data.payment) {
-            return data.payment;
-        }
+        if (data.payment) return data.payment;
         return null;
     } catch (err) {
         console.error('Pakasir QRIS error:', err.message);
@@ -223,10 +282,8 @@ async function checkPakasirStatus(orderId, amount) {
         const url = `https://app.pakasir.com/api/transactiondetail?project=${PAKASIR_SLUG}&amount=${amount}&order_id=${orderId}&api_key=${PAKASIR_API_KEY}`;
         const res = await fetch(url);
         const data = await res.json();
-        console.log('Pakasir status:', JSON.stringify(data));
         return data.transaction?.status || 'pending';
     } catch (err) {
-        console.error('Pakasir status error:', err.message);
         return 'unknown';
     }
 }
@@ -237,17 +294,9 @@ async function cancelPakasirTransaction(orderId, amount) {
         await fetch('https://app.pakasir.com/api/transactioncancel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project: PAKASIR_SLUG,
-                order_id: orderId,
-                amount: amount,
-                api_key: PAKASIR_API_KEY
-            })
+            body: JSON.stringify({ project: PAKASIR_SLUG, order_id: orderId, amount, api_key: PAKASIR_API_KEY })
         });
-        console.log(`Pakasir transaction ${orderId} cancelled`);
-    } catch (err) {
-        console.error('Pakasir cancel error:', err.message);
-    }
+    } catch (err) { console.error('Pakasir cancel error:', err.message); }
 }
 
 // Simulate payment (Sandbox mode only)
@@ -257,18 +306,11 @@ async function simulatePakasirPayment(orderId, amount) {
         const res = await fetch('https://app.pakasir.com/api/paymentsimulation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                project: PAKASIR_SLUG,
-                order_id: orderId,
-                amount: amount,
-                api_key: PAKASIR_API_KEY
-            })
+            body: JSON.stringify({ project: PAKASIR_SLUG, order_id: orderId, amount, api_key: PAKASIR_API_KEY })
         });
         const data = await res.json();
-        console.log('Pakasir simulation response:', JSON.stringify(data));
         return { success: true, data };
     } catch (err) {
-        console.error('Pakasir simulation error:', err.message);
         return { success: false, error: err.message };
     }
 }
@@ -516,7 +558,68 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
     if (!order) return ctx.reply('❌ Order tidak ditemukan.');
     if (order.status === 'paid') return ctx.reply('✅ Order ini sudah dibayar.');
 
-    // Try Pakasir dynamic QRIS first
+    const customerName = ctx.from.first_name || 'Customer';
+
+    // ====== bayar.gg (priority) ======
+    if (USE_BAYARGG) {
+        const payment = await createBayarGGPayment(orderId, order.price, customerName);
+
+        if (payment) {
+            const finalAmount = payment.final_amount || order.price;
+            const uniqueCode = payment.unique_code || 0;
+            const expiredAt = payment.expires_at
+                ? new Date(payment.expires_at).toLocaleString('id-ID')
+                : '15 menit';
+
+            const text = `
+💳 <b>PEMBAYARAN QRIS</b>
+━━━━━━━━━━━━━━━━━━
+
+🆔 <b>Order:</b> <code>${orderId}</code>
+📦 <b>Produk:</b> ${order.product_name}
+💰 <b>Harga:</b> ${formatPrice(order.price)}
+🔢 <b>Kode unik:</b> +${uniqueCode}
+💳 <b>Total bayar: ${formatPrice(finalAmount)}</b>
+
+<i>Scan QRIS di bawah — nominal sudah otomatis terisi!</i>
+(GoPay, OVO, Dana, ShopeePay, LinkAja, m-banking, dll)
+
+⏱ Expired: <b>${expiredAt}</b>
+🔑 License key otomatis dikirim setelah bayar.`;
+
+            await ctx.editMessageText(text, { parse_mode: 'HTML' });
+
+            // Kirim QR image
+            if (payment.qris_image_url) {
+                await ctx.replyWithPhoto(payment.qris_image_url, {
+                    caption: `💳 Scan & Bayar <b>${formatPrice(finalAmount)}</b>\n🆔 Order: <code>${orderId}</code>\n\n✅ Nominal otomatis terisi — tinggal scan & bayar!`,
+                    parse_mode: 'HTML'
+                });
+            } else if (payment.payment_url) {
+                // Fallback: kirim link bayar
+                await ctx.reply(
+                    `🔗 <b>Link Pembayaran:</b>\n${payment.payment_url}\n\nAtau scan QR di link tersebut.`,
+                    { parse_mode: 'HTML' }
+                );
+            }
+
+            await ctx.reply('⏳ Bot akan otomatis cek pembayaran...', Markup.inlineKeyboard([
+                [Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)],
+                [Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]
+            ]));
+
+            // Simpan invoice_id untuk pengecekan
+            order.status = 'waiting_payment';
+            order.payment_method = 'bayargg';
+            order.bayargg_invoice = payment.invoice_id;
+            order.final_amount = finalAmount;
+            saveDB(db);
+            startPaymentPolling(ctx, orderId);
+            return;
+        }
+    }
+
+    // ====== Pakasir (fallback) ======
     const pakasir = await createPakasirQRIS(orderId, order.price);
 
     if (pakasir && pakasir.payment_number) {
@@ -604,10 +707,10 @@ Scan QRIS di bawah pakai e-wallet / m-banking:
     }
 });
 
-// ============ PAYMENT POLLING (Pakasir Auto-Check) ============
+// ============ PAYMENT POLLING (Auto-Check) ============
 async function startPaymentPolling(ctx, orderId) {
     let attempts = 0;
-    const maxAttempts = 40; // 40 x 15s = 10 minutes
+    const maxAttempts = 40; // 40 x 15s = 10 menit
 
     const interval = setInterval(async () => {
         attempts++;
@@ -632,8 +735,17 @@ async function startPaymentPolling(ctx, orderId) {
             return;
         }
 
-        const status = await checkPakasirStatus(orderId, order.price);
-        if (status === 'completed') {
+        // Cek status sesuai metode
+        let isPaid = false;
+        if (order.payment_method === 'bayargg' && order.bayargg_invoice) {
+            const status = await checkBayarGGStatus(order.bayargg_invoice);
+            isPaid = (status === 'paid');
+        } else {
+            const status = await checkPakasirStatus(orderId, order.price);
+            isPaid = (status === 'completed');
+        }
+
+        if (isPaid) {
             clearInterval(interval);
             await processSuccessfulPayment(ctx, orderId);
         }
@@ -649,11 +761,19 @@ bot.action(/^check_(.+)$/, async (ctx) => {
     if (!order) return ctx.reply('❌ Order tidak ditemukan.');
     if (order.status === 'paid') return ctx.reply('✅ Sudah dibayar! License key sudah dikirim.');
 
-    const status = await checkPakasirStatus(orderId, order.price);
-    if (status === 'completed') {
+    let isPaid = false;
+    if (order.payment_method === 'bayargg' && order.bayargg_invoice) {
+        const status = await checkBayarGGStatus(order.bayargg_invoice);
+        isPaid = (status === 'paid');
+    } else {
+        const status = await checkPakasirStatus(orderId, order.price);
+        isPaid = (status === 'completed');
+    }
+
+    if (isPaid) {
         await processSuccessfulPayment(ctx, orderId);
     } else {
-        await ctx.reply(`⏳ Pembayaran belum terdeteksi.\nStatus: ${status}\n\nBot terus cek otomatis tiap 15 detik.`, Markup.inlineKeyboard([
+        await ctx.reply(`⏳ Pembayaran belum terdeteksi.\n\nBot terus cek otomatis tiap 15 detik.`, Markup.inlineKeyboard([
             [Markup.button.callback('🔄 Cek Lagi', `check_${orderId}`)],
             [Markup.button.callback('📞 Hubungi Admin', 'contact')]
         ]));
