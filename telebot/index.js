@@ -59,7 +59,8 @@ const PRODUCTS = {
     pro_30: {
         id: 'pro_30', name: '⚡ ClipperSkuy Pro',
         desc: '30 Hari', tier: 'pro', duration: 30,
-        price: 69000, originalPrice: 80000,
+        price: parseInt(process.env.PRICE_PRO_30) || 69000,
+        originalPrice: 80000,
         emoji: '⚡', features: [
             '✅ Unlimited Project & Export',
             '✅ 1080p Full HD',
@@ -72,13 +73,15 @@ const PRODUCTS = {
     pro_90: {
         id: 'pro_90', name: '⚡ ClipperSkuy Pro',
         desc: '90 Hari (3 Bulan)', tier: 'pro', duration: 90,
-        price: 150000, originalPrice: 179000,
+        price: parseInt(process.env.PRICE_PRO_90) || 150000,
+        originalPrice: 179000,
         emoji: '⚡', badge: '💰 HEMAT 16%'
     },
     pro_365: {
         id: 'pro_365', name: '⚡ ClipperSkuy Pro',
         desc: '365 Hari (1 Tahun)', tier: 'pro', duration: 365,
-        price: 250000, originalPrice: 599000,
+        price: parseInt(process.env.PRICE_PRO_365) || 250000,
+        originalPrice: 599000,
         emoji: '⚡', badge: '🔥 HEMAT 58%'
     },
     enterprise_30: {
