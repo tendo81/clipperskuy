@@ -831,6 +831,24 @@ bot.action(/^confirm_(.+)$/, async (ctx) => {
     );
 });
 
+// ============ ADMIN MANUAL KONFIRMASI ============
+bot.command('konfirmasi', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 2) return ctx.reply('❌ Format: /konfirmasi ORDER_ID\nContoh: /konfirmasi CS-MM97SULU9542');
+
+    const orderId = parts[1].trim();
+    const order = db.orders.find(o => o.id === orderId);
+    if (!order) return ctx.reply(`❌ Order <code>${orderId}</code> tidak ditemukan.`, { parse_mode: 'HTML' });
+    if (order.status === 'paid') return ctx.reply(`✅ Order <code>${orderId}</code> sudah dikonfirmasi sebelumnya.`, { parse_mode: 'HTML' });
+
+    await processSuccessfulPayment(ctx, orderId);
+    await ctx.reply(
+        `✅ <b>DIKONFIRMASI MANUAL</b>\n🆔 ${orderId}\n👤 ${order.user_name}\n📦 ${order.product_name}\n💰 ${formatPrice(order.price)}\n🔑 <code>${order.license_key || '-'}</code>`,
+        { parse_mode: 'HTML' }
+    );
+});
+
 // ============ ADMIN REJECT ============
 bot.action(/^reject_(.+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
