@@ -385,18 +385,16 @@ function validateLicenseKey(key) {
         return { valid: false, reason: 'Invalid key format. Expected: XXXX-XXXX-XXXX-XXXX' };
     }
 
-    // Method 1: Check local database first (for keys generated on this machine)
+    // Satu-satunya sumber kebenaran: database lokal (sudah dikonfirmasi server)
+    // Signature-based validation DIHAPUS — mencegah key tidak resmi lolos
     const dbKey = get('SELECT * FROM license_keys WHERE license_key = ?', [upperKey]);
 
     if (dbKey) {
         if (dbKey.status === 'revoked') {
-            return { valid: false, reason: 'This license key has been revoked' };
+            return { valid: false, reason: 'License key ini telah dicabut (revoked).' };
         }
-        // Expired keys CAN be re-activated (renewed) — recalculate expiry from new activation date
         if (dbKey.status === 'expired' || (dbKey.expires_at && new Date() > new Date(dbKey.expires_at))) {
-            // Reset status to 'active' so activateLicense() can proceed
             run("UPDATE license_keys SET status = 'active' WHERE id = ?", [dbKey.id]);
-            // Recalculate expiry from NOW (renewal)
             const durationDays = dbKey.duration_days || 0;
             let newExpiresAt = null;
             if (durationDays > 0) {
@@ -404,32 +402,13 @@ function validateLicenseKey(key) {
                 run("UPDATE license_keys SET expires_at = ? WHERE id = ?", [newExpiresAt, dbKey.id]);
             }
             console.log(`[License] Key renewed: ${upperKey}, new expiry: ${newExpiresAt || 'lifetime'}`);
-            return {
-                valid: true,
-                tier: dbKey.tier || 'pro',
-                source: 'database',
-                expires_at: newExpiresAt,
-                duration_days: durationDays,
-                renewed: true
-            };
+            return { valid: true, tier: dbKey.tier || 'pro', source: 'database', expires_at: newExpiresAt, duration_days: durationDays, renewed: true };
         }
-        return {
-            valid: true,
-            tier: dbKey.tier || 'pro',
-            source: 'database',
-            expires_at: dbKey.expires_at || null,
-            duration_days: dbKey.duration_days || 0
-        };
+        return { valid: true, tier: dbKey.tier || 'pro', source: 'database', expires_at: dbKey.expires_at || null, duration_days: dbKey.duration_days || 0 };
     }
 
-    // Method 2: Verify key using embedded signature (works on ANY computer)
-    const signatureResult = verifyKeySignature(upperKey);
-    if (signatureResult.valid) {
-        return signatureResult;
-    }
-
-    // Key not found and signature invalid
-    return { valid: false, reason: 'Invalid license key. Please check and try again.' };
+    // Key tidak ada di DB lokal → harus validasi online dulu (dilakukan saat aktivasi)
+    return { valid: false, reason: 'License key tidak ditemukan. Pastikan key yang dimasukkan benar atau belum pernah diaktifkan di perangkat ini.', needsOnlineCheck: true };
 }
 
 /**
@@ -500,66 +479,104 @@ function verifyKeySignature(key) {
  * Transfer protection is enforced by the ONLINE server (single source of truth).
  * Local DB is only used for offline fallback validation.
  */
-function activateLicense(key) {
-    const validation = validateLicenseKey(key);
-    if (!validation.valid) return validation;
+async function activateLicense(key) {
+    const upperKey = key.toUpperCase().trim();
+    const localValidation = validateLicenseKey(upperKey);
 
+    // Jika sudah ada di DB lokal dan valid → izinkan (sudah pernah dikonfirmasi server)
+    if (localValidation.valid && localValidation.source === 'database') {
+        console.log(`[License] Key ditemukan di DB lokal: ${upperKey.substring(0, 9)}...`);
+        return _finishActivation(upperKey, localValidation);
+    }
+
+    // Jika tidak ada di DB lokal → WAJIB konfirmasi online server
+    // Ini blokir key lama yang tidak terdaftar (diberikan gratis, dll)
+    if (!LICENSE_SERVER_URL) {
+        return { valid: false, reason: 'License server tidak terkonfigurasi. Hubungi admin.' };
+    }
+
+    console.log(`[License] Key tidak di DB lokal, cek ke server: ${upperKey.substring(0, 9)}...`);
+    let serverResult = null;
+    try {
+        serverResult = await serverRequest('activate', 'POST', {
+            key: upperKey,
+            machine_id: getMachineId(),
+            machine_name: os.hostname(),
+            app_version: require('../../package.json').version || '1.0.0'
+        });
+    } catch (e) {
+        console.warn('[License] Server request failed:', e.message);
+    }
+
+    if (!serverResult) {
+        return { valid: false, reason: 'Tidak dapat terhubung ke server lisensi. Periksa koneksi internet dan coba lagi.' };
+    }
+
+    // Server harus konfirmasi key valid
+    const serverValid = serverResult.valid === true || serverResult.success === true
+        || serverResult.status === 'active' || serverResult.activated === true;
+
+    if (!serverValid) {
+        const reason = serverResult.reason || serverResult.error || serverResult.message || 'License key tidak terdaftar di server.';
+        console.log(`[License] Server menolak key: ${reason}`);
+        return { valid: false, reason };
+    }
+
+    // Server konfirmasi valid — simpan ke DB lokal untuk penggunaan offline
+    const serverValidation = {
+        valid: true,
+        tier: serverResult.tier || 'pro',
+        source: 'server',
+        expires_at: serverResult.expires_at || null,
+        duration_days: serverResult.duration_days || serverResult.durationDays || 0
+    };
+
+    // Insert ke local DB
+    const keyId = require('crypto').randomUUID();
+    const durationDays = serverValidation.duration_days || 0;
+    let keyExpiresAt = serverValidation.expires_at;
+    if (!keyExpiresAt && durationDays > 0) {
+        keyExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+    }
+    run(`INSERT OR IGNORE INTO license_keys (id, license_key, tier, status, duration_days, expires_at, max_activations, created_at)
+         VALUES (?, ?, ?, 'active', ?, ?, 1, CURRENT_TIMESTAMP)`,
+        [keyId, upperKey, serverValidation.tier, durationDays, keyExpiresAt]);
+
+    console.log(`[License] ✅ Key dikonfirmasi server dan disimpan ke DB: ${upperKey.substring(0, 9)}...`);
+    return _finishActivation(upperKey, serverValidation);
+}
+
+/**
+ * Internal: Simpan aktivasi ke settings DB
+ */
+function _finishActivation(upperKey, validation) {
     const machineId = getMachineId();
     const now = new Date().toISOString();
-
-    // Track in local DB for offline reference
-    let dbKey = get('SELECT * FROM license_keys WHERE license_key = ?', [key.toUpperCase()]);
-
-    if (!dbKey && validation.source === 'signature') {
-        const keyId = require('crypto').randomUUID();
-        const durationDays = validation.duration_days || 0;
-        let keyExpiresAt = null;
-        if (durationDays > 0) {
-            keyExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-        }
-        run(`INSERT INTO license_keys (id, license_key, tier, status, duration_days, expires_at, max_activations, created_at) 
-             VALUES (?, ?, ?, 'active', ?, ?, 1, CURRENT_TIMESTAMP)`,
-            [keyId, key.toUpperCase(), validation.tier, durationDays, keyExpiresAt]);
-        dbKey = get('SELECT * FROM license_keys WHERE license_key = ?', [key.toUpperCase()]);
-    }
+    const dbKey = get('SELECT * FROM license_keys WHERE license_key = ?', [upperKey]);
 
     if (dbKey) {
-        // Record activation locally
         run('INSERT OR IGNORE INTO license_activations (license_key_id, machine_id, activated_at) VALUES (?, ?, ?)',
             [dbKey.id, machineId, now]);
-
         run(`UPDATE license_keys SET machine_id = ?, activated_at = ?, activated_by = ?, status = 'active' WHERE license_key = ?`,
-            [machineId, now, require('os').hostname(), key.toUpperCase()]);
+            [machineId, now, os.hostname(), upperKey]);
     }
 
-    // Calculate expiry from ACTIVATION date
-    let expiresAt = null;
+    let expiresAt = validation.expires_at || null;
     const durationDays = validation.duration_days || 0;
-    if (durationDays > 0) {
-        const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
-        expiresAt = expiryDate.toISOString();
+    if (!expiresAt && durationDays > 0) {
+        expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
     }
 
-    // Save to local settings
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        ['license_key', key.toUpperCase()]);
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        ['license_tier', validation.tier]);
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        ['license_activated_at', now]);
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        ['license_machine_id', machineId]);
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', ['license_key', upperKey]);
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', ['license_tier', validation.tier]);
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', ['license_activated_at', now]);
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', ['license_machine_id', machineId]);
     if (expiresAt) {
-        run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-            ['license_expires_at', expiresAt]);
+        run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', ['license_expires_at', expiresAt]);
     } else {
         run('DELETE FROM settings WHERE key = ?', ['license_expires_at']);
     }
-    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
-        ['license_duration_days', String(durationDays)]);
-
-    // Sync to online server — server enforces transfer limits, cooldown, max activations
-    syncActivationOnline(key.toUpperCase(), machineId);
+    run('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)', ['license_duration_days', String(durationDays)]);
 
     return {
         valid: true,

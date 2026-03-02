@@ -36,12 +36,12 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/license/activate — Activate a license key
-router.post('/activate', (req, res) => {
+router.post('/activate', async (req, res) => {
     try {
         const { key } = req.body;
         if (!key) return res.status(400).json({ error: 'License key is required' });
 
-        const result = activateLicense(key);
+        const result = await activateLicense(key);
         if (result.valid) {
             res.json({ success: true, ...result });
         } else {
