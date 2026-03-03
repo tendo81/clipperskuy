@@ -1419,12 +1419,13 @@
                 document.getElementById('gopay-section').style.display = 'block';
             }
 
-            // Amount
-            const finalAmount = data.amount || PLANS[selectedPlan]?.price || 0;
-            document.getElementById('pay-amount').textContent = formatRp(finalAmount);
-            if (data.unique_code) {
-                document.getElementById('pay-note').textContent = `Termasuk kode unik +${data.unique_code} agar mudah terdeteksi`;
-            }
+            // Amount — tampilkan harga dasar agar sesuai dengan nominal di QRIS
+            // (kode unik ada di bayar.gg backend, tapi QRIS static tidak bisa embed nominal dinamis)
+            const basePrice = PLANS[selectedPlan]?.price || data.amount || 0;
+            document.getElementById('pay-amount').textContent = formatRp(basePrice);
+            // Ganti note menjadi instruksi scan yang jelas
+            document.getElementById('pay-note').textContent = 'Scan QR di atas dan bayar nominal yang tertera di app kamu';
+
 
             // Timer
             currentInvoiceId = data.invoice_id;
