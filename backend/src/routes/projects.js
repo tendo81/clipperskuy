@@ -2152,4 +2152,92 @@ router.post('/clips/:clipId/broll-search', async (req, res) => {
     }
 });
 
+// ========================================
+// Render Templates — Save & Load render presets
+// ========================================
+
+// GET /api/projects/templates — List all saved templates
+router.get('/templates', (req, res) => {
+    try {
+        const templates = all('SELECT * FROM render_templates ORDER BY created_at DESC') || [];
+        res.json({ templates });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/templates — Save a new template
+router.post('/templates', (req, res) => {
+    try {
+        const { name, description, icon, settings } = req.body;
+        if (!name || !settings) return res.status(400).json({ error: 'Name and settings are required' });
+        const id = `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        run(
+            'INSERT INTO render_templates (id, name, description, icon, settings) VALUES (?, ?, ?, ?, ?)',
+            [id, name, description || '', icon || '🎨', JSON.stringify(settings)]
+        );
+        const tpl = get('SELECT * FROM render_templates WHERE id = ?', [id]);
+        res.json({ success: true, template: tpl });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/templates/:id/apply — Apply template to clips
+router.post('/templates/:id/apply', (req, res) => {
+    try {
+        const tpl = get('SELECT * FROM render_templates WHERE id = ?', [req.params.id]);
+        if (!tpl) return res.status(404).json({ error: 'Template not found' });
+
+        const settings = JSON.parse(tpl.settings);
+        const { clipIds } = req.body; // optional: array of clip IDs to apply to
+
+        const fields = [];
+        const vals = [];
+        if (settings.caption_style) { fields.push('caption_style = ?'); vals.push(settings.caption_style); }
+        if (settings.hook_style) { fields.push('hook_style = ?'); vals.push(settings.hook_style); }
+        if (settings.hook_settings) { fields.push('hook_settings = ?'); vals.push(JSON.stringify(settings.hook_settings)); }
+        if (settings.music_track_id !== undefined) { fields.push('music_track_id = ?'); vals.push(settings.music_track_id); }
+        if (settings.music_volume !== undefined) { fields.push('music_volume = ?'); vals.push(settings.music_volume); }
+
+        if (fields.length === 0) return res.status(400).json({ error: 'Template has no applicable settings' });
+
+        let updated = 0;
+        if (clipIds && Array.isArray(clipIds) && clipIds.length > 0) {
+            const placeholders = clipIds.map(() => '?').join(',');
+            const result = run(
+                `UPDATE clips SET ${fields.join(', ')} WHERE id IN (${placeholders})`,
+                [...vals, ...clipIds]
+            );
+            updated = result.changes;
+        } else {
+            // Apply to all clips in the project (from body)
+            const { projectId } = req.body;
+            if (projectId) {
+                const result = run(
+                    `UPDATE clips SET ${fields.join(', ')} WHERE project_id = ?`,
+                    [...vals, projectId]
+                );
+                updated = result.changes;
+            }
+        }
+
+        res.json({ success: true, updated, templateName: tpl.name });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/projects/templates/:id — Delete a template
+router.delete('/templates/:id', (req, res) => {
+    try {
+        const tpl = get('SELECT id FROM render_templates WHERE id = ?', [req.params.id]);
+        if (!tpl) return res.status(404).json({ error: 'Template not found' });
+        run('DELETE FROM render_templates WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

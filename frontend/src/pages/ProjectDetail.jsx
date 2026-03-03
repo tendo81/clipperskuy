@@ -117,11 +117,16 @@ export default function ProjectDetail() {
     ];
 
     // Social Copy Generator state
-    const [socialModal, setSocialModal] = useState(null); // { clipId, loading, data, error, activeTab, hookStyle }
+    const [socialModal, setSocialModal] = useState(null);
     const [generatingHooks, setGeneratingHooks] = useState(false);
     const [hookGenProgress, setHookGenProgress] = useState({ current: 0, total: 0, style: '' });
     // Thumbnail Picker state
-    const [thumbnailModal, setThumbnailModal] = useState(null); // { clipId, loading, thumbnails, error }
+    const [thumbnailModal, setThumbnailModal] = useState(null);
+    // Template state
+    const [templates, setTemplates] = useState([]);
+    const [showTemplateModal, setShowTemplateModal] = useState(false);
+    const [saveTemplateForm, setSaveTemplateForm] = useState(null); // { name, description, icon, settings }
+    const [templateMsg, setTemplateMsg] = useState('');
 
     const hookStyles = [
         { id: 'drama', label: '🎭 Drama', desc: 'Emosional & bikin nangis' },
@@ -171,6 +176,68 @@ export default function ProjectDetail() {
         } catch (err) {
             setThumbnailModal(prev => ({ ...prev, loading: false, error: err.message }));
         }
+    };
+
+    // Load templates from server
+    const loadTemplates = async () => {
+        try {
+            const res = await fetch(`${API}/projects/templates`);
+            const data = await res.json();
+            setTemplates(data.templates || []);
+        } catch (e) { }
+    };
+
+    // Save current bulk settings as template
+    const saveTemplate = async () => {
+        if (!saveTemplateForm?.name?.trim()) return;
+        try {
+            const res = await fetch(`${API}/projects/templates`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(saveTemplateForm)
+            });
+            const data = await res.json();
+            if (data.success) {
+                await loadTemplates();
+                setSaveTemplateForm(null);
+                setTemplateMsg(`✅ Template "${data.template.name}" tersimpan!`);
+                setTimeout(() => setTemplateMsg(''), 3000);
+            }
+        } catch (e) {
+            setTemplateMsg(`❌ Gagal simpan: ${e.message}`);
+        }
+    };
+
+    // Apply a template to selected/all clips
+    const applyTemplate = async (tplId, tplName) => {
+        try {
+            const body = selectedClips.size > 0
+                ? { clipIds: [...selectedClips] }
+                : { projectId: id };
+            const res = await fetch(`${API}/projects/templates/${tplId}/apply`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (data.success) {
+                setTemplateMsg(`✅ Template "${tplName}" applied ke ${data.updated} clips`);
+                setTimeout(() => setTemplateMsg(''), 3000);
+                setShowTemplateModal(false);
+                loadProject();
+            }
+        } catch (e) {
+            setTemplateMsg(`❌ Gagal apply: ${e.message}`);
+        }
+    };
+
+    // Delete a template
+    const deleteTemplate = async (tplId, tplName) => {
+        if (!confirm(`Hapus template "${tplName}"?`)) return;
+        try {
+            await fetch(`${API}/projects/templates/${tplId}`, { method: 'DELETE' });
+            await loadTemplates();
+        } catch (e) { }
     };
 
     // Generate AI Hook Text for all/selected clips (batch)
@@ -224,6 +291,7 @@ export default function ProjectDetail() {
 
     useEffect(() => {
         loadProject();
+        loadTemplates();
 
         // Connect socket for realtime progress
         const socket = socketIO('http://localhost:5000');
@@ -1343,6 +1411,14 @@ export default function ProjectDetail() {
                                 <button className="btn btn-ghost btn-sm" onClick={openOutputFolder} style={{ gap: 4, color: 'var(--text-secondary)' }} title="Open output folder">
                                     <FolderOpen size={14} /> Open Folder
                                 </button>
+                                <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => { loadTemplates(); setShowTemplateModal(true); }}
+                                    style={{ gap: 4, color: '#10b981' }}
+                                    title="Render Templates — save & load presets"
+                                >
+                                    🎨 Template
+                                </button>
                                 <button className="btn btn-ghost btn-sm" onClick={async () => {
                                     if (!confirm('Re-transcribe will delete the current transcript and re-process the video. This will improve subtitle sync accuracy. Continue?')) return;
                                     setProcessing(true);
@@ -2124,6 +2200,159 @@ export default function ProjectDetail() {
                                     )}
                                     <button className="btn btn-ghost btn-sm" onClick={() => setThumbnailModal(null)}>Tutup</button>
                                 </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Template Modal */}
+            <AnimatePresence>
+                {showTemplateModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+                        onClick={() => setShowTemplateModal(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.92, opacity: 0 }}
+                            onClick={e => e.stopPropagation()}
+                            style={{ background: 'var(--bg-secondary)', borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: '85vh', overflow: 'auto', border: '1px solid var(--border-subtle)' }}
+                        >
+                            {/* Header */}
+                            <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <span style={{ fontSize: 20 }}>🎨</span>
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: 16 }}>Render Templates</div>
+                                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Simpan & pakai ulang preset render</div>
+                                    </div>
+                                </div>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setShowTemplateModal(false)}><X size={18} /></button>
+                            </div>
+
+                            <div style={{ padding: 24 }}>
+                                {/* Template message */}
+                                {templateMsg && (
+                                    <div style={{
+                                        padding: '8px 14px', marginBottom: 16, borderRadius: 8, fontSize: 13,
+                                        background: templateMsg.includes('✅') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                                        color: templateMsg.includes('✅') ? '#10b981' : '#ef4444',
+                                        border: `1px solid ${templateMsg.includes('✅') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`
+                                    }}>{templateMsg}</div>
+                                )}
+
+                                {/* Save new template form */}
+                                {saveTemplateForm ? (
+                                    <div style={{ marginBottom: 24, padding: 16, background: 'rgba(16,185,129,0.05)', borderRadius: 10, border: '1px solid rgba(16,185,129,0.2)' }}>
+                                        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#10b981' }}>💾 Simpan Template Baru</div>
+                                        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                                            {['🎨', '🎬', '🎯', '🔥', '✨', '📱', '🎙️', '🌙'].map(ic => (
+                                                <button key={ic} onClick={() => setSaveTemplateForm(p => ({ ...p, icon: ic }))}
+                                                    style={{ fontSize: 18, padding: '4px 8px', borderRadius: 6, border: saveTemplateForm.icon === ic ? '2px solid #10b981' : '1px solid var(--border-subtle)', background: saveTemplateForm.icon === ic ? 'rgba(16,185,129,0.1)' : 'none', cursor: 'pointer' }}>
+                                                    {ic}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <input
+                                            className="input-field"
+                                            placeholder="Nama Template (e.g: TikTok Viral Style)"
+                                            value={saveTemplateForm.name}
+                                            onChange={e => setSaveTemplateForm(p => ({ ...p, name: e.target.value }))}
+                                            style={{ marginBottom: 8, fontSize: 13 }}
+                                        />
+                                        <input
+                                            className="input-field"
+                                            placeholder="Deskripsi (opsional)"
+                                            value={saveTemplateForm.description}
+                                            onChange={e => setSaveTemplateForm(p => ({ ...p, description: e.target.value }))}
+                                            style={{ marginBottom: 12, fontSize: 13 }}
+                                        />
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
+                                            <b>Settings yang akan disimpan:</b><br />
+                                            {saveTemplateForm.settings.caption_style && <span>📝 Caption: {saveTemplateForm.settings.caption_style} </span>}
+                                            {saveTemplateForm.settings.hook_style && <span>🎯 Hook: {saveTemplateForm.settings.hook_style} </span>}
+                                            {saveTemplateForm.settings.hook_settings && <span>⚙️ Hook overlay settings </span>}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <button className="btn btn-primary btn-sm" onClick={saveTemplate} style={{ gap: 6 }}
+                                                disabled={!saveTemplateForm.name.trim()}>
+                                                💾 Simpan
+                                            </button>
+                                            <button className="btn btn-ghost btn-sm" onClick={() => setSaveTemplateForm(null)}>Batal</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <button
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => setSaveTemplateForm({
+                                            name: '',
+                                            description: '',
+                                            icon: '🎨',
+                                            settings: {
+                                                caption_style: clips[0]?.caption_style || 'hormozi',
+                                                hook_style: bulkHookSettings.hookStyle,
+                                                hook_settings: { ...bulkHookSettings }
+                                            }
+                                        })}
+                                        style={{ gap: 6, marginBottom: 20, width: '100%', justifyContent: 'center' }}
+                                    >
+                                        + Simpan Pengaturan Sekarang sebagai Template
+                                    </button>
+                                )}
+
+                                {/* Template list */}
+                                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10 }}>
+                                    Template Tersimpan ({templates.length})
+                                </div>
+                                {templates.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                                        Belum ada template. Buat template pertamamu di atas!
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        {templates.map(tpl => {
+                                            const s = (() => { try { return JSON.parse(tpl.settings); } catch { return {}; } })();
+                                            return (
+                                                <div key={tpl.id} style={{
+                                                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+                                                    background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid var(--border-subtle)'
+                                                }}>
+                                                    <span style={{ fontSize: 22 }}>{tpl.icon || '🎨'}</span>
+                                                    <div style={{ flex: 1 }}>
+                                                        <div style={{ fontWeight: 600, fontSize: 14 }}>{tpl.name}</div>
+                                                        {tpl.description && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{tpl.description}</div>}
+                                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                            {s.caption_style && <span style={{ padding: '1px 6px', borderRadius: 8, background: 'rgba(96,165,250,0.15)', color: '#60a5fa' }}>Sub: {s.caption_style}</span>}
+                                                            {s.hook_style && <span style={{ padding: '1px 6px', borderRadius: 8, background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>Hook: {s.hook_style}</span>}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        <button
+                                                            className="btn btn-primary btn-sm"
+                                                            onClick={() => applyTemplate(tpl.id, tpl.name)}
+                                                            style={{ fontSize: 11, padding: '4px 10px' }}
+                                                        >
+                                                            Apply
+                                                        </button>
+                                                        <button
+                                                            className="btn btn-ghost btn-sm"
+                                                            onClick={() => deleteTemplate(tpl.id, tpl.name)}
+                                                            style={{ padding: '4px 6px', color: 'var(--color-error)', opacity: 0.6 }}
+                                                        >
+                                                            <Trash2 size={13} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)', alignItems: 'center' }}>
+                                <span>{selectedClips.size > 0 ? `Akan apply ke ${selectedClips.size} clip terpilih` : 'Akan apply ke semua clips'}</span>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setShowTemplateModal(false)}>Tutup</button>
                             </div>
                         </motion.div>
                     </motion.div>
