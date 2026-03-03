@@ -225,6 +225,8 @@ export default function ProjectDetail() {
                 setTimeout(() => setTemplateMsg(''), 3000);
                 setShowTemplateModal(false);
                 loadProject();
+            } else {
+                setTemplateMsg(`❌ ${data.error || 'Template tidak bisa diapply — settings kosong?'}`);
             }
         } catch (e) {
             setTemplateMsg(`❌ Gagal apply: ${e.message}`);

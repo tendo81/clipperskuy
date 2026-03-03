@@ -2202,10 +2202,12 @@ router.post('/clips/:clipId/thumbnails', async (req, res) => {
                 const cmd = `"${FFMPEG_PATH}" -ss ${ts.toFixed(3)} -i "${project.source_path}" -vframes 1 -q:v 3 -vf "scale=480:-2" -y "${outPath}"`;
                 exec(cmd, { timeout: 15000 }, (err) => {
                     if (!err && fs.existsSync(outPath) && fs.statSync(outPath).size > 1000) {
+                        const port = process.env.PORT || 5000;
+                        const host = req.headers.host?.split(':')[0] || 'localhost';
                         thumbnails.push({
                             index: i,
                             label,
-                            url: `http://localhost:5000/data/thumbnails/${clip.id}/${filename}`,
+                            url: `http://${host}:${port}/data/thumbnails/${clip.id}/${filename}`,
                             timestamp: ts.toFixed(1)
                         });
                     }

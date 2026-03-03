@@ -394,15 +394,9 @@ function validateLicenseKey(key) {
             return { valid: false, reason: 'License key ini telah dicabut (revoked).' };
         }
         if (dbKey.status === 'expired' || (dbKey.expires_at && new Date() > new Date(dbKey.expires_at))) {
-            run("UPDATE license_keys SET status = 'active' WHERE id = ?", [dbKey.id]);
-            const durationDays = dbKey.duration_days || 0;
-            let newExpiresAt = null;
-            if (durationDays > 0) {
-                newExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-                run("UPDATE license_keys SET expires_at = ? WHERE id = ?", [newExpiresAt, dbKey.id]);
-            }
-            console.log(`[License] Key renewed: ${upperKey}, new expiry: ${newExpiresAt || 'lifetime'}`);
-            return { valid: true, tier: dbKey.tier || 'pro', source: 'database', expires_at: newExpiresAt, duration_days: durationDays, renewed: true };
+            // Key sudah expired — TOLAK, jangan auto-renew
+            run("UPDATE license_keys SET status = 'expired' WHERE id = ?", [dbKey.id]);
+            return { valid: false, reason: 'License key sudah expired. Hubungi admin untuk perpanjang.' };
         }
         return { valid: true, tier: dbKey.tier || 'pro', source: 'database', expires_at: dbKey.expires_at || null, duration_days: dbKey.duration_days || 0 };
     }
