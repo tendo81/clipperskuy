@@ -114,12 +114,27 @@ function saveDB(db) {
 // Load DB: Redis first, fallback to local file
 let db = loadDB(); // sync init from file
 
+// Pastikan semua field DB selalu ada — prevent TypeError undefined
+function ensureDBFields(dbObj) {
+    if (!dbObj || typeof dbObj !== 'object') return EMPTY_DB();
+    if (!Array.isArray(dbObj.orders)) dbObj.orders = [];
+    if (!dbObj.users) dbObj.users = {};
+    if (!dbObj.stats) dbObj.stats = { total_orders: 0, total_revenue: 0 };
+    if (!dbObj.discounts) dbObj.discounts = {};
+    if (!dbObj.tickets) dbObj.tickets = [];
+    if (!dbObj.blocked_users) dbObj.blocked_users = {};
+    if (!dbObj.blacklisted_keys) dbObj.blacklisted_keys = {};
+    return dbObj;
+}
+
+db = ensureDBFields(db); // init fields on local load
+
 // Then async upgrade from Redis if available
 if (USE_REDIS) {
     console.log('[Redis] Configured ✅ — will load persistent DB on startup');
     loadDBFromRedis().then(redisDb => {
         if (redisDb) {
-            db = redisDb;
+            db = ensureDBFields(redisDb); // ← ensure fields after Redis overwrite
             // Also sync back to local file for offline use
             saveDB(db);
             console.log('[Redis] DB synced to local file');
@@ -2061,11 +2076,7 @@ bot.command('referral', async (ctx) => {
     );
 });
 
-// Apply referral code saat checkout (hook ke buy flow — cek pending_promo)
 // (Referral code sudah otomatis bekerja via sistem diskon yang sudah ada)
-
-// Track referral source saat user klik /start?ref=CODE
-bot.start(async (ctx) => { }); // placeholder — handled by existing /start above
 
 // ============================================================
 // FITUR #3 & #4 — AUTO NOTIF EXPIRED + LAPORAN HARIAN
@@ -2099,6 +2110,7 @@ async function runDailyTasks(botInstance) {
                             ...Markup.inlineKeyboard([[Markup.button.callback('🔄 Perpanjang Sekarang', 'renewal_menu')]])
                         }
                     );
+                    if (!db.users) db.users = {};
                     if (!db.users[order.user_id]) db.users[order.user_id] = {};
                     db.users[order.user_id][alreadySentKey] = true;
                     saveDB(db);
