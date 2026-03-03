@@ -484,7 +484,21 @@ Ketuk tier untuk lihat paket durasi:`;
     });
 });
 
-// ============ TIER PRO ============
+// ============ /myid — User lihat Telegram ID sendiri ============
+bot.command('myid', async (ctx) => {
+    const u = ctx.from;
+    await ctx.replyWithHTML(
+        `👤 <b>Info Akun Telegram Kamu</b>\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `🆔 <b>User ID:</b> <code>${u.id}</code>\n` +
+        `📛 <b>Nama:</b> ${u.first_name}${u.last_name ? ' ' + u.last_name : ''}\n` +
+        `🔖 <b>Username:</b> ${u.username ? '@' + u.username : '—'}\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `💡 <i>User ID ini dibutuhkan admin untuk kirim license key manual.</i>\n` +
+        `Kirimkan ke admin jika diminta: <code>${u.id}</code>`
+    );
+});
+
 bot.action('tier_pro', async (ctx) => {
     await ctx.answerCbQuery();
     const p30 = PRODUCTS.pro_30;
