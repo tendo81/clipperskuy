@@ -2019,10 +2019,14 @@ bot.action(/^promo_change_(.+)$/, async (ctx) => {
 });
 
 // Handle text input for promo code (when waiting)
-bot.on('text', async (ctx) => {
+bot.on('text', async (ctx, next) => {
+    // PENTING: skip jika ini adalah command (/download, /referral, dll)
+    if (ctx.message.text.startsWith('/')) return next();
+
     const userId = String(ctx.from.id);
     const user = db.users[userId];
-    if (!user?.waiting_promo_for) return;
+    // Jika user tidak sedang input promo, lanjut ke handler berikutnya
+    if (!user?.waiting_promo_for) return next();
 
     const productId = user.waiting_promo_for;
     const code = ctx.message.text.trim().toUpperCase();
