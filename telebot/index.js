@@ -34,25 +34,105 @@ const BAYARGG_METHOD = process.env.BAYARGG_METHOD || 'gopay_qris';
 const USE_BAYARGG = !!BAYARGG_API_KEY;
 const SUPPORT_GROUP = process.env.SUPPORT_GROUP_LINK || 'https://t.me/+GANTI_DENGAN_LINK_GRUP';
 
-// ============ DATABASE (JSON file) ============
+// ============ DATABASE (Redis + JSON fallback) ============
 const DB_FILE = path.join(__dirname, 'data', 'db.json');
+
+// Upstash Redis — optional persistent storage (set in .env / Render env vars)
+// Get free at: https://upstash.com → create Redis DB → copy REST URL & Token
+const UPSTASH_URL = (process.env.UPSTASH_REDIS_URL || '').replace(/\/$/, '');
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_TOKEN || '';
+const REDIS_KEY = 'clipperskuy_db';
+const USE_REDIS = !!(UPSTASH_URL && UPSTASH_TOKEN);
+
+async function redisGet(key) {
+    const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
+        headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
+    });
+    const data = await res.json();
+    return data.result || null;
+}
+
+async function redisSet(key, value) {
+    await fetch(`${UPSTASH_URL}/set/${key}`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${UPSTASH_TOKEN}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(value)   // Upstash REST: body is the raw value
+    });
+}
+
+const EMPTY_DB = () => ({ users: {}, orders: [], stats: { total_orders: 0, total_revenue: 0 }, discounts: {} });
+
+async function loadDBFromRedis() {
+    if (!USE_REDIS) return null;
+    try {
+        const raw = await redisGet(REDIS_KEY);
+        if (raw) {
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            console.log(`[Redis] ✅ DB loaded: ${parsed.orders?.length || 0} orders`);
+            return parsed;
+        }
+    } catch (e) {
+        console.warn('[Redis] Load failed:', e.message);
+    }
+    return null;
+}
 
 function loadDB() {
     try {
         if (fs.existsSync(DB_FILE)) {
             return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
         }
-    } catch (e) { console.error('DB load error:', e); }
-    return { users: {}, orders: [], stats: { total_orders: 0, total_revenue: 0 }, discounts: {} };
+    } catch (e) { console.error('[DB] Load error:', e); }
+    return EMPTY_DB();
 }
 
 function saveDB(db) {
-    const dir = path.dirname(DB_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    // Save to local file (always)
+    try {
+        const dir = path.dirname(DB_FILE);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    } catch (e) { console.error('[DB] File save error:', e); }
+
+    // Sync to Redis async (non-blocking)
+    if (USE_REDIS) {
+        const payload = JSON.stringify(db);
+        fetch(`${UPSTASH_URL}/set/${REDIS_KEY}`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${UPSTASH_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        }).catch(e => console.warn('[Redis] Sync failed:', e.message));
+    }
 }
 
-let db = loadDB();
+// Load DB: Redis first, fallback to local file
+let db = loadDB(); // sync init from file
+
+// Then async upgrade from Redis if available
+if (USE_REDIS) {
+    console.log('[Redis] Configured ✅ — will load persistent DB on startup');
+    loadDBFromRedis().then(redisDb => {
+        if (redisDb) {
+            db = redisDb;
+            // Also sync back to local file for offline use
+            saveDB(db);
+            console.log('[Redis] DB synced to local file');
+        } else {
+            // Redis empty → push local to Redis
+            console.log('[Redis] No data in Redis, pushing local DB...');
+            saveDB(db);
+        }
+    }).catch(e => console.warn('[Redis] Init failed:', e.message));
+} else {
+    console.log('[Redis] Not configured — using local db.json only (data may be lost on restart!)');
+    console.log('[Redis] Set UPSTASH_REDIS_URL + UPSTASH_REDIS_TOKEN to enable persistence.');
+}
 
 // ============ PRODUCTS ============
 const PRODUCTS = {
