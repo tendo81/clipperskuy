@@ -1147,6 +1147,20 @@
                                 <div class="key-copy">Klik untuk salin</div>
                             </div>
 
+                            <!-- Invoice ID untuk recovery -->
+                            <div
+                                style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px 18px;margin-bottom:20px;text-align:left;">
+                                <div
+                                    style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.35);margin-bottom:6px;">
+                                    📄 Invoice ID (simpan ini!)</div>
+                                <div id="success-invoice-id"
+                                    style="font-family:monospace;font-size:14px;color:#a78bfa;word-break:break-all;">-
+                                </div>
+                                <div style="font-size:11px;color:rgba(255,255,255,0.35);margin-top:6px;">⚠️ Lupa copy
+                                    key? Kunjungi <b style="color:rgba(255,255,255,0.5);">/beli.html</b> → scroll bawah
+                                    → masukkan Invoice ID ini untuk mendapatkan key kamu lagi.</div>
+                            </div>
+
                             <div class="activation-steps">
                                 <h4>📋 Cara Aktivasi:</h4>
                                 <ol>
@@ -1167,6 +1181,23 @@
                                 👥 Join Grup Support Premium
                             </a>
                         </div>
+                    </div>
+
+                    <!-- LOOKUP SECTION -->
+                    <div
+                        style="margin-top:20px;padding:24px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:16px;">
+                        <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:4px;">🔍
+                            Lupa copy key tadi?</div>
+                        <div style="font-size:12px;color:rgba(255,255,255,0.3);margin-bottom:12px;">Masukkan Invoice ID
+                            untuk ambil key kamu lagi.</div>
+                        <div style="display:flex;gap:8px;">
+                            <input id="lookup-invoice" class="form-input" type="text" placeholder="BAYAR-xxxx-xxxxxx"
+                                style="flex:1;font-size:13px;padding:10px 14px;">
+                            <button onclick="lookupKey()"
+                                style="background:var(--gradient);color:#fff;border:none;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit;">Cek
+                                Key</button>
+                        </div>
+                        <div id="lookup-result" style="margin-top:10px;font-size:13px;display:none;"></div>
                     </div>
                 </div>
             </div>
@@ -1415,7 +1446,7 @@
                 if (data.paid && data.key) {
                     clearInterval(pollingInterval);
                     clearInterval(timerInterval);
-                    showSuccess(data.key);
+                    showSuccess(data.key, invoiceId);
                 }
             } catch (e) { /* ignore */ }
         }
@@ -1424,16 +1455,39 @@
             pollingInterval = setInterval(() => checkStatusNow(invoiceId), 5000);
         }
 
-        function showSuccess(key) {
+        function showSuccess(key, invoiceId) {
             clearPaymentState(); // Hapus pending state
-            // Simpan license key sementara di localStorage (30 menit) agar bisa dilihat setelah refresh
-            localStorage.setItem('clipperskuy_license_key', JSON.stringify({ key, savedAt: Date.now() }));
+            // Simpan license key 7 hari di localStorage
+            const invoiceRef = invoiceId || currentInvoiceId || '';
+            localStorage.setItem('clipperskuy_license_key', JSON.stringify({ key, invoiceId: invoiceRef, savedAt: Date.now() }));
             document.getElementById('payment-ready').style.display = 'none';
             document.getElementById('payment-success').style.display = 'block';
             document.getElementById('license-key').textContent = key;
+            if (invoiceRef) document.getElementById('success-invoice-id').textContent = invoiceRef;
             document.getElementById('tab-1').classList.add('done');
             document.getElementById('tab-2').classList.add('done');
             document.getElementById('tab-3').classList.add('done');
+        }
+
+        async function lookupKey() {
+            const invoiceId = document.getElementById('lookup-invoice').value.trim();
+            const resultEl = document.getElementById('lookup-result');
+            if (!invoiceId) { resultEl.style.display = 'block'; resultEl.innerHTML = '<span style="color:#ef4444;">Masukkan Invoice ID dulu.</span>'; return; }
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = '⏳ Mencari...';
+            try {
+                const res = await fetch(`${LICENSE_API}/api/web-status?invoice_id=${encodeURIComponent(invoiceId)}`);
+                const data = await res.json();
+                if (data.paid && data.key) {
+                    resultEl.innerHTML = `✅ <b>Key ditemukan!</b><br><span style="font-family:monospace;color:#a78bfa;font-size:14px;cursor:pointer;user-select:all;" onclick="navigator.clipboard.writeText('${data.key}').then(()=>this.style.color='#22c55e')">${data.key}</span><br><small style="color:rgba(255,255,255,0.4);">Klik key untuk salin</small>`;
+                } else if (data.paid && !data.key) {
+                    resultEl.innerHTML = '⚠️ Pembayaran terdeteksi tapi key belum generate. Hubungi support @Skuy_bot';
+                } else {
+                    resultEl.innerHTML = '❌ Invoice ID tidak ditemukan atau belum dibayar.';
+                }
+            } catch {
+                resultEl.innerHTML = '❌ Koneksi error. Coba lagi.';
+            }
         }
 
         function copyKey(el) {
@@ -1465,14 +1519,14 @@
             // Cek license key yang baru dibeli
             try {
                 const savedKey = JSON.parse(localStorage.getItem('clipperskuy_license_key') || 'null');
-                if (savedKey && Date.now() - savedKey.savedAt < 30 * 60 * 1000) {
+                if (savedKey && Date.now() - savedKey.savedAt < 7 * 24 * 60 * 60 * 1000) { // 7 hari
                     // Tampilkan success langsung
                     document.getElementById('tab-1').classList.add('done');
                     document.getElementById('tab-2').classList.add('done');
                     document.getElementById('tab-3').classList.add('done');
                     goStep(3);
                     document.getElementById('payment-loading').style.display = 'none';
-                    showSuccess(savedKey.key);
+                    showSuccess(savedKey.key, savedKey.invoiceId);
                     return;
                 }
             } catch { }
