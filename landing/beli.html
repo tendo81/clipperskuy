@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beli ClipperSkuy Pro — Aktifkan Semua Fitur AI</title>
+    <meta name="description"
+        content="Beli license ClipperSkuy Pro. Bayar QRIS, license key langsung diterima otomatis.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;700;800;900&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #09090f;
+            --bg2: #111118;
+            --card: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-active: rgba(124, 58, 237, 0.5);
+            --text: #f0f0f5;
+            --text2: rgba(255, 255, 255, 0.6);
+            --text3: rgba(255, 255, 255, 0.35);
+            --purple: #7c3aed;
+            --cyan: #22d3ee;
+            --green: #22c55e;
+            --red: #ef4444;
+            --gradient: linear-gradient(135deg, #7c3aed, #22d3ee);
+            --gradient-cta: linear-gradient(135deg, #7c3aed, #ec4899);
+            --r: 16px;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* === NAVBAR === */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 14px 24px;
+            background: rgba(9, 9, 15, 0.85);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            max-width: 100%;
+        }
+
+        .logo {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 900;
+            font-size: 20px;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-decoration: none;
+        }
+
+        .nav-back {
+            font-size: 13px;
+            color: var(--text2);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.2s;
+        }
+
+        .nav-back:hover {
+            color: var(--text);
+        }
+
+        /* === HERO === */
+        .page-hero {
+            padding: 120px 24px 48px;
+            text-align: center;
+            position: relative;
+        }
+
+        .page-hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 700px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(124, 58, 237, 0.12) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .page-hero h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: clamp(28px, 5vw, 48px);
+            font-weight: 900;
+            line-height: 1.1;
+            margin-bottom: 12px;
+        }
+
+        .page-hero h1 span {
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .page-hero p {
+            font-size: 16px;
+            color: var(--text2);
+            max-width: 480px;
+            margin: 0 auto;
+        }
+
+        /* === MAIN LAYOUT === */
+        .checkout-wrap {
+            max-width: 1060px;
+            margin: 0 auto;
+            padding: 0 24px 80px;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 32px;
+        }
+
+        @media (max-width: 768px) {
+            .checkout-wrap {
+                grid-template-columns: 1fr;
+            }
+
+            .order-summary {
+                order: -1;
+            }
+        }
+
+        /* === STEPS === */
+        .steps-nav {
+            display: flex;
+            gap: 0;
+            margin-bottom: 32px;
+        }
+
+        .step-tab {
+            flex: 1;
+            padding: 14px 8px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text3);
+            border-bottom: 2px solid var(--border);
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .step-tab.active {
+            color: var(--purple);
+            border-bottom-color: var(--purple);
+        }
+
+        .step-tab.done {
+            color: var(--green);
+            border-bottom-color: var(--green);
+        }
+
+        .step-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            background: var(--card);
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .step-tab.active .step-num {
+            background: var(--purple);
+            border-color: var(--purple);
+            color: #fff;
+        }
+
+        .step-tab.done .step-num {
+            background: var(--green);
+            border-color: var(--green);
+            color: #fff;
+        }
+
+        /* === SECTIONS === */
+        .step-section {
+            display: none;
+        }
+
+        .step-section.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        /* === PLAN CARDS === */
+        .plan-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .plan-card {
+            padding: 20px 24px;
+            border-radius: var(--r);
+            border: 2px solid var(--border);
+            background: var(--card);
+            cursor: pointer;
+            transition: all 0.25s;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            position: relative;
+        }
+
+        .plan-card:hover {
+            border-color: rgba(124, 58, 237, 0.3);
+            background: rgba(124, 58, 237, 0.05);
+        }
+
+        .plan-card.selected {
+            border-color: var(--purple);
+            background: rgba(124, 58, 237, 0.08);
+        }
+
+        .plan-card.selected::after {
+            content: '✓';
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--purple);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .plan-radio {
+            display: none;
+        }
+
+        .plan-icon {
+            font-size: 28px;
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(124, 58, 237, 0.1);
+            flex-shrink: 0;
+        }
+
+        .plan-info {
+            flex: 1;
+        }
+
+        .plan-name {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 17px;
+            margin-bottom: 2px;
+        }
+
+        .plan-desc {
+            font-size: 13px;
+            color: var(--text2);
+        }
+
+        .plan-price {
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .plan-price .original {
+            font-size: 12px;
+            color: var(--text3);
+            text-decoration: line-through;
+        }
+
+        .plan-price .final {
+            font-family: 'Outfit', sans-serif;
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .plan-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 700;
+            background: rgba(34, 211, 238, 0.15);
+            color: var(--cyan);
+            margin-top: 4px;
+        }
+
+        .plan-badge.fire {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+        }
+
+        /* === FEATURES LIST === */
+        .features-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 28px;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: var(--text2);
+        }
+
+        .feature-item .icon {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: rgba(34, 197, 94, 0.12);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--green);
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        /* === FORM === */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text2);
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 13px 16px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 15px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+        }
+
+        .form-input:focus {
+            border-color: var(--purple);
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+        }
+
+        .form-input::placeholder {
+            color: var(--text3);
+        }
+
+        .form-hint {
+            font-size: 12px;
+            color: var(--text3);
+            margin-top: 6px;
+        }
+
+        /* === BUTTONS === */
+        .btn-main {
+            width: 100%;
+            padding: 16px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 700;
+            background: var(--gradient-cta);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-family: inherit;
+        }
+
+        .btn-main:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(124, 58, 237, 0.4);
+        }
+
+        .btn-main:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-outline {
+            width: 100%;
+            padding: 13px;
+            border-radius: 50px;
+            font-size: 14px;
+            font-weight: 600;
+            background: transparent;
+            color: var(--text2);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .btn-outline:hover {
+            border-color: var(--border-active);
+            color: var(--text);
+        }
+
+        /* === PAYMENT SECTION === */
+        .payment-box {
+            border-radius: var(--r);
+            border: 1px solid var(--border);
+            background: var(--card);
+            overflow: hidden;
+        }
+
+        .payment-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .payment-header h3 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .payment-body {
+            padding: 28px 24px;
+        }
+
+        .qr-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 24px;
+        }
+
+        .qr-img {
+            width: 220px;
+            height: 220px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .qr-amount {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .qr-amount .label {
+            font-size: 13px;
+            color: var(--text2);
+            margin-bottom: 4px;
+        }
+
+        .qr-amount .value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 32px;
+            font-weight: 900;
+        }
+
+        .qr-amount .note {
+            font-size: 12px;
+            color: var(--text3);
+            margin-top: 4px;
+        }
+
+        .timer-bar {
+            height: 4px;
+            border-radius: 50px;
+            background: var(--border);
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .timer-fill {
+            height: 100%;
+            border-radius: 50px;
+            background: var(--gradient);
+            transition: width 1s linear;
+        }
+
+        .timer-label {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text2);
+            margin-bottom: 20px;
+        }
+
+        .polling-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text2);
+            padding: 12px;
+            border-radius: 10px;
+            background: rgba(124, 58, 237, 0.06);
+            border: 1px solid rgba(124, 58, 237, 0.1);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse-anim 1.5s infinite;
+        }
+
+        @keyframes pulse-anim {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.4;
+                transform: scale(0.85);
+            }
+        }
+
+        /* === SUCCESS === */
+        .success-box {
+            text-align: center;
+            padding: 32px 24px;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(34, 197, 94, 0.12);
+            border: 2px solid var(--green);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            margin: 0 auto 20px;
+            animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+
+        @keyframes popIn {
+            from {
+                opacity: 0;
+                transform: scale(0.5);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .success-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 26px;
+            font-weight: 900;
+            margin-bottom: 8px;
+            color: var(--green);
+        }
+
+        .success-sub {
+            font-size: 15px;
+            color: var(--text2);
+            margin-bottom: 28px;
+        }
+
+        .key-box {
+            background: rgba(124, 58, 237, 0.08);
+            border: 1px solid rgba(124, 58, 237, 0.25);
+            border-radius: 16px;
+            padding: 20px 24px;
+            margin-bottom: 28px;
+            text-align: left;
+        }
+
+        .key-label {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text3);
+            margin-bottom: 10px;
+        }
+
+        .key-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            color: #a78bfa;
+            letter-spacing: 2px;
+            cursor: pointer;
+            user-select: all;
+            word-break: break-all;
+        }
+
+        .key-copy {
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--text3);
+        }
+
+        .activation-steps {
+            text-align: left;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+        }
+
+        .activation-steps h4 {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text2);
+            margin-bottom: 14px;
+        }
+
+        .activation-steps ol {
+            padding-left: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .activation-steps li {
+            font-size: 14px;
+            color: var(--text2);
+            line-height: 1.5;
+        }
+
+        /* === ORDER SUMMARY === */
+        .order-summary {
+            position: sticky;
+            top: 80px;
+            height: fit-content;
+        }
+
+        .summary-card {
+            border-radius: var(--r);
+            border: 1px solid var(--border);
+            background: var(--card);
+            overflow: hidden;
+        }
+
+        .summary-header {
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border);
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .summary-body {
+            padding: 20px 24px;
+        }
+
+        .summary-product {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px;
+            background: rgba(124, 58, 237, 0.06);
+            border: 1px solid rgba(124, 58, 237, 0.12);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .summary-product-icon {
+            font-size: 28px;
+        }
+
+        .summary-product-name {
+            font-weight: 700;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .summary-product-desc {
+            font-size: 12px;
+            color: var(--text2);
+        }
+
+        .summary-line {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: var(--text2);
+            margin-bottom: 12px;
+        }
+
+        .summary-line.total {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+            margin-top: 8px;
+        }
+
+        .summary-features {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+
+        .summary-features h4 {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text3);
+            margin-bottom: 12px;
+        }
+
+        .summary-features ul {
+            list-style: none;
+        }
+
+        .summary-features li {
+            font-size: 13px;
+            color: var(--text2);
+            padding: 5px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .summary-features li::before {
+            content: '✓';
+            color: var(--green);
+            font-weight: 700;
+        }
+
+        .guarantee-badge {
+            margin-top: 20px;
+            padding: 14px;
+            border-radius: 12px;
+            background: rgba(34, 197, 94, 0.06);
+            border: 1px solid rgba(34, 197, 94, 0.12);
+            text-align: center;
+        }
+
+        .guarantee-badge p {
+            font-size: 12px;
+            color: var(--text2);
+            line-height: 1.5;
+        }
+
+        .guarantee-badge span {
+            font-weight: 700;
+            color: var(--green);
+        }
+
+        .secure-badges {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .secure-badge {
+            font-size: 11px;
+            color: var(--text3);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* === ALERTS === */
+        .alert {
+            padding: 14px 18px;
+            border-radius: 12px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+            color: #fcd34d;
+        }
+
+        .alert-info {
+            background: rgba(34, 211, 238, 0.08);
+            border: 1px solid rgba(34, 211, 238, 0.15);
+            color: #67e8f9;
+        }
+
+        /* === DIVIDER === */
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin: 24px 0;
+        }
+
+        /* === SPINNER === */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2.5px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* === LOADING OVERLAY === */
+        .loading-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px 24px;
+            gap: 16px;
+        }
+
+        .loading-state p {
+            font-size: 15px;
+            color: var(--text2);
+        }
+
+        /* === GOPAY BUTTON === */
+        .gopay-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 14px;
+            border-radius: 50px;
+            background: rgba(0, 168, 76, 0.1);
+            border: 1px solid rgba(0, 168, 76, 0.25);
+            color: #4ade80;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+            margin-bottom: 12px;
+            font-family: inherit;
+        }
+
+        .gopay-btn:hover {
+            background: rgba(0, 168, 76, 0.2);
+        }
+
+        /* === TELEGRAM BOT LINK === */
+        .tg-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 12px;
+            font-size: 13px;
+            color: var(--text3);
+        }
+
+        .tg-link a {
+            color: var(--cyan);
+            text-decoration: none;
+        }
+
+        .tg-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <nav>
+        <a href="/" class="logo">⚡ ClipperSkuy</a>
+        <a href="/" class="nav-back">← Kembali ke Beranda</a>
+    </nav>
+
+    <!-- HERO -->
+    <div class="page-hero">
+        <h1>Upgrade ke <span>ClipperSkuy Pro</span></h1>
+        <p>Pilih paket, bayar QRIS, license key langsung diterima otomatis 🚀</p>
+    </div>
+
+    <!-- MAIN -->
+    <div class="checkout-wrap">
+        <!-- LEFT: CHECKOUT FORM -->
+        <div>
+            <!-- STEP TABS -->
+            <div class="steps-nav">
+                <div class="step-tab active" id="tab-1" onclick="goStep(1)">
+                    <div class="step-num">1</div> Pilih Paket
+                </div>
+                <div class="step-tab" id="tab-2">
+                    <div class="step-num">2</div> Detail
+                </div>
+                <div class="step-tab" id="tab-3">
+                    <div class="step-num">3</div> Bayar
+                </div>
+            </div>
+
+            <!-- STEP 1: PILIH PAKET -->
+            <div class="step-section active" id="step-1">
+                <div class="plan-grid">
+                    <label class="plan-card" onclick="selectPlan('pro_30')">
+                        <input class="plan-radio" type="radio" name="plan" value="pro_30">
+                        <div class="plan-icon">⚡</div>
+                        <div class="plan-info">
+                            <div class="plan-name">Pro — 30 Hari</div>
+                            <div class="plan-desc">Cocok untuk mulai. Semua fitur Pro.</div>
+                        </div>
+                        <div class="plan-price">
+                            <div class="original">Rp 80.000</div>
+                            <div class="final">Rp 69.000</div>
+                        </div>
+                    </label>
+                    <label class="plan-card" onclick="selectPlan('pro_90')">
+                        <input class="plan-radio" type="radio" name="plan" value="pro_90">
+                        <div class="plan-icon">💎</div>
+                        <div class="plan-info">
+                            <div class="plan-name">Pro — 90 Hari</div>
+                            <div class="plan-desc">3 bulan hemat. <span class="plan-badge">HEMAT 28%</span></div>
+                        </div>
+                        <div class="plan-price">
+                            <div class="original">Rp 179.000</div>
+                            <div class="final">Rp 129.000</div>
+                        </div>
+                    </label>
+                    <label class="plan-card" onclick="selectPlan('pro_365')">
+                        <input class="plan-radio" type="radio" name="plan" value="pro_365">
+                        <div class="plan-icon">🔥</div>
+                        <div class="plan-info">
+                            <div class="plan-name">Pro — 365 Hari</div>
+                            <div class="plan-desc">1 tahun penuh. <span class="plan-badge fire">HEMAT 58%</span></div>
+                        </div>
+                        <div class="plan-price">
+                            <div class="original">Rp 599.000</div>
+                            <div class="final">Rp 250.000</div>
+                        </div>
+                    </label>
+                </div>
+
+                <div style="margin-top: 24px;">
+                    <div class="features-list">
+                        <div class="feature-item">
+                            <div class="icon">✓</div> Unlimited Project & Export
+                        </div>
+                        <div class="feature-item">
+                            <div class="icon">✓</div> 1080p Full HD Quality
+                        </div>
+                        <div class="feature-item">
+                            <div class="icon">✓</div> Face Tracking AI
+                        </div>
+                        <div class="feature-item">
+                            <div class="icon">✓</div> Auto Subtitle & Audio Enhancement
+                        </div>
+                        <div class="feature-item">
+                            <div class="icon">✓</div> GPU Acceleration & Batch Export
+                        </div>
+                    </div>
+                    <button class="btn-main" onclick="nextStep(2)" id="btn-step1">
+                        Lanjut → Isi Detail
+                    </button>
+                </div>
+            </div>
+
+            <!-- STEP 2: DETAIL -->
+            <div class="step-section" id="step-2">
+                <div class="form-group">
+                    <label class="form-label" for="input-name">Nama Kamu *</label>
+                    <input class="form-input" type="text" id="input-name" placeholder="Contoh: Budi Santoso"
+                        maxlength="50">
+                    <div class="form-hint">Nama untuk identifikasi order kamu.</div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div id="error-msg" class="alert alert-error" style="display:none;"></div>
+
+                <button class="btn-main" onclick="submitOrder()" id="btn-step2">
+                    ⚡ Lanjut ke Pembayaran
+                </button>
+                <br>
+                <button class="btn-outline" onclick="goStep(1)" style="margin-top: 10px;">
+                    ← Kembali
+                </button>
+
+                <div class="tg-link">
+                    <span>Mau pakai kode promo?</span>
+                    <a href="https://t.me/Skuy_bot" target="_blank">Beli via Telegram @Skuy_bot</a>
+                </div>
+            </div>
+
+            <!-- STEP 3: BAYAR -->
+            <div class="step-section" id="step-3">
+                <div id="payment-loading" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Membuat invoice pembayaran...</p>
+                </div>
+
+                <div id="payment-ready" style="display:none;">
+                    <div id="gopay-section" style="display:none;">
+                        <a id="gopay-link" href="#" target="_blank" class="gopay-btn">
+                            💚 Bayar via GoPay / Payment Link
+                        </a>
+                    </div>
+
+                    <div class="payment-box">
+                        <div class="payment-header">
+                            <span style="font-size: 24px;">📱</span>
+                            <div>
+                                <h3>Scan QRIS untuk Bayar</h3>
+                                <p style="font-size: 13px; color: var(--text2);">Buka kamera atau app GoPay/OVO/DANA/BSI
+                                </p>
+                            </div>
+                        </div>
+                        <div class="payment-body">
+                            <div class="qr-wrap">
+                                <img id="qr-image" class="qr-img" src="" alt="QRIS Code"
+                                    onerror="this.style.display='none'; document.getElementById('qr-fallback').style.display='block'">
+                                <div id="qr-fallback"
+                                    style="display:none; width:220px; height:220px; border-radius:16px; border:1px solid var(--border); display:none; align-items:center; justify-content:center; text-align:center; padding:20px;">
+                                    <div style="font-size: 40px; margin-bottom: 12px;">📱</div>
+                                    <p style="font-size: 13px; color: var(--text2);">QRIS siap. Gunakan link GoPay di
+                                        atas atau scan via app bank kamu.</p>
+                                </div>
+                            </div>
+
+                            <div class="qr-amount">
+                                <div class="label">Total Pembayaran</div>
+                                <div class="value" id="pay-amount">Rp 0</div>
+                                <div class="note" id="pay-note"></div>
+                            </div>
+
+                            <div class="timer-bar">
+                                <div class="timer-fill" id="timer-fill"></div>
+                            </div>
+                            <div class="timer-label" id="timer-label">Expires in 30:00</div>
+
+                            <div class="polling-status">
+                                <div class="pulse-dot"></div>
+                                <span>Menunggu pembayaran... otomatis terdeteksi</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info" style="margin-top: 16px;">
+                        💡 Setelah bayar, license key akan muncul otomatis dalam <b>15–30 detik</b>. Jangan tutup
+                        halaman ini.
+                    </div>
+                </div>
+
+                <!-- SUCCESS -->
+                <div id="payment-success" style="display:none;">
+                    <div class="payment-box">
+                        <div class="success-box">
+                            <div class="success-icon">🎉</div>
+                            <div class="success-title">Pembayaran Berhasil!</div>
+                            <div class="success-sub">License key kamu siap digunakan 🔑</div>
+
+                            <div class="key-box">
+                                <div class="key-label">🔑 License Key Kamu</div>
+                                <div class="key-value" id="license-key" onclick="copyKey(this)">-</div>
+                                <div class="key-copy">Klik untuk salin</div>
+                            </div>
+
+                            <div class="activation-steps">
+                                <h4>📋 Cara Aktivasi:</h4>
+                                <ol>
+                                    <li>Buka ClipperSkuy di PC kamu</li>
+                                    <li>Buka menu <b>Settings → License</b></li>
+                                    <li>Paste license key di atas</li>
+                                    <li>Klik <b>"Activate License"</b></li>
+                                    <li>Selesai! Semua fitur premium aktif 🎊</li>
+                                </ol>
+                            </div>
+
+                            <div class="alert alert-warning" style="text-align: left;">
+                                ⚠️ <b>1 key = 1 PC.</b> Simpan key ini baik-baik, jangan dibagikan ke orang lain.
+                            </div>
+
+                            <a href="https://t.me/+E2oiOaKd3khkZmZl" target="_blank" class="btn-main"
+                                style="text-decoration:none; margin-top: 8px;">
+                                👥 Join Grup Support Premium
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: ORDER SUMMARY -->
+        <div class="order-summary">
+            <div class="summary-card">
+                <div class="summary-header">🧾 Ringkasan Pesanan</div>
+                <div class="summary-body">
+                    <div class="summary-product" id="summary-product">
+                        <div class="summary-product-icon">⚡</div>
+                        <div>
+                            <div class="summary-product-name" id="summary-name">Pilih paket dulu →</div>
+                            <div class="summary-product-desc" id="summary-desc">Klik salah satu paket di sebelah kiri
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="summary-line">
+                        <span>Harga</span>
+                        <span id="summary-price-original"
+                            style="text-decoration: line-through; color: var(--text3);">-</span>
+                    </div>
+                    <div class="summary-line">
+                        <span>Diskon</span>
+                        <span id="summary-discount" style="color: var(--green);">-</span>
+                    </div>
+                    <div class="summary-line total">
+                        <span>Total</span>
+                        <span id="summary-total">-</span>
+                    </div>
+
+                    <div class="summary-features">
+                        <h4>Yang Kamu Dapat:</h4>
+                        <ul>
+                            <li>Unlimited Export HD</li>
+                            <li>Face Tracking AI</li>
+                            <li>Auto Subtitle</li>
+                            <li>GPU Acceleration</li>
+                            <li>Batch Export</li>
+                            <li>License Key Instan</li>
+                        </ul>
+                    </div>
+
+                    <div class="guarantee-badge">
+                        <p>🔒 <span>Pembayaran Aman</span><br>
+                            Key dikirim otomatis setelah bayar QRIS</p>
+                    </div>
+
+                    <div class="secure-badges">
+                        <div class="secure-badge">🔐 Encrypted</div>
+                        <div class="secure-badge">⚡ Instant Key</div>
+                        <div class="secure-badge">💬 Support</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const LICENSE_API = 'https://clipperskuy-license.vercel.app';
+
+        const PLANS = {
+            pro_30: { name: 'Pro — 30 Hari', desc: '1 bulan akses penuh', icon: '⚡', price: 69000, original: 80000, discount: 11000 },
+            pro_90: { name: 'Pro — 90 Hari', desc: '3 bulan hemat 28%', icon: '💎', price: 129000, original: 179000, discount: 50000 },
+            pro_365: { name: 'Pro — 365 Hari', desc: '1 tahun hemat 58%!', icon: '🔥', price: 250000, original: 599000, discount: 349000 },
+        };
+
+        let selectedPlan = null;
+        let pollingInterval = null;
+        let timerInterval = null;
+        let currentInvoiceId = null;
+
+        function formatRp(n) {
+            return 'Rp ' + n.toLocaleString('id-ID');
+        }
+
+        function selectPlan(pid) {
+            selectedPlan = pid;
+            document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+            const el = document.querySelector(`[onclick="selectPlan('${pid}')"]`);
+            if (el) el.classList.add('selected');
+
+            const p = PLANS[pid];
+            document.getElementById('summary-name').textContent = 'ClipperSkuy ' + p.name;
+            document.getElementById('summary-desc').textContent = p.desc;
+            document.getElementById('summary-product').querySelector('.summary-product-icon').textContent = p.icon;
+            document.getElementById('summary-price-original').textContent = formatRp(p.original);
+            document.getElementById('summary-discount').textContent = '−' + formatRp(p.discount);
+            document.getElementById('summary-total').textContent = formatRp(p.price);
+        }
+
+        function goStep(n) {
+            [1, 2, 3].forEach(i => {
+                document.getElementById('step-' + i).classList.toggle('active', i === n);
+                const tab = document.getElementById('tab-' + i);
+                tab.classList.toggle('active', i === n);
+            });
+        }
+
+        function nextStep(n) {
+            if (n === 2 && !selectedPlan) {
+                alert('Pilih paket dulu ya! 😊');
+                return;
+            }
+            // Mark previous tabs as done
+            if (n > 1) document.getElementById('tab-1').classList.add('done');
+            if (n > 2) document.getElementById('tab-2').classList.add('done');
+            goStep(n);
+        }
+
+        async function submitOrder() {
+            const name = document.getElementById('input-name').value.trim();
+            if (!name) {
+                showError('Masukkan nama kamu dulu ya 😊');
+                return;
+            }
+            if (!selectedPlan) {
+                showError('Pilih paket dulu!');
+                return;
+            }
+
+            hideError();
+            const btn = document.getElementById('btn-step2');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner"></div> Membuat order...';
+
+            try {
+                const res = await fetch(`${LICENSE_API}/api/web-create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: selectedPlan, name })
+                });
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    showError(data.error || 'Gagal membuat order. Coba lagi.');
+                    btn.disabled = false;
+                    btn.innerHTML = '⚡ Lanjut ke Pembayaran';
+                    return;
+                }
+
+                // Move to step 3
+                document.getElementById('tab-2').classList.add('done');
+                goStep(3);
+                showPayment(data);
+
+            } catch (err) {
+                showError('Koneksi error. Periksa internet kamu.');
+                btn.disabled = false;
+                btn.innerHTML = '⚡ Lanjut ke Pembayaran';
+            }
+        }
+
+        function showPayment(data) {
+            document.getElementById('payment-loading').style.display = 'none';
+            document.getElementById('payment-ready').style.display = 'block';
+
+            // QR Image
+            const qrImg = document.getElementById('qr-image');
+            if (data.qr_image) {
+                qrImg.src = data.qr_image;
+                qrImg.style.display = 'block';
+            } else {
+                qrImg.style.display = 'none';
+                document.getElementById('qr-fallback').style.display = 'flex';
+            }
+
+            // GoPay link
+            if (data.payment_url && data.payment_url.startsWith('http')) {
+                document.getElementById('gopay-link').href = data.payment_url;
+                document.getElementById('gopay-section').style.display = 'block';
+            }
+
+            // Amount
+            const finalAmount = data.amount || PLANS[selectedPlan]?.price || 0;
+            document.getElementById('pay-amount').textContent = formatRp(finalAmount);
+            if (data.unique_code) {
+                document.getElementById('pay-note').textContent = `Termasuk kode unik +${data.unique_code} agar mudah terdeteksi`;
+            }
+
+            // Timer
+            currentInvoiceId = data.invoice_id;
+            startTimer(data.expires_at);
+            startPolling(data.invoice_id);
+        }
+
+        function startTimer(expiresAt) {
+            const fill = document.getElementById('timer-fill');
+            const label = document.getElementById('timer-label');
+            const totalMs = expiresAt ? (new Date(expiresAt) - Date.now()) : 30 * 60 * 1000;
+            const totalSec = Math.max(0, Math.floor(totalMs / 1000));
+
+            timerInterval = setInterval(() => {
+                const nowSec = Math.max(0, Math.floor((new Date(expiresAt || (Date.now() + totalMs)) - Date.now()) / 1000));
+                const pct = (nowSec / totalSec) * 100;
+                fill.style.width = Math.max(0, pct) + '%';
+                fill.style.background = pct > 50 ? 'linear-gradient(135deg, #7c3aed, #22d3ee)' : pct > 20 ? 'linear-gradient(135deg, #f59e0b, #ef4444)' : '#ef4444';
+                const m = String(Math.floor(nowSec / 60)).padStart(2, '0');
+                const s = String(nowSec % 60).padStart(2, '0');
+                label.textContent = `Kadaluarsa dalam ${m}:${s}`;
+                if (nowSec <= 0) clearInterval(timerInterval);
+            }, 1000);
+        }
+
+        function startPolling(invoiceId) {
+            pollingInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`${LICENSE_API}/api/web-status?invoice_id=${encodeURIComponent(invoiceId)}`);
+                    const data = await res.json();
+
+                    if (data.paid && data.key) {
+                        clearInterval(pollingInterval);
+                        clearInterval(timerInterval);
+                        showSuccess(data.key);
+                    }
+                } catch (e) { /* ignore */ }
+            }, 5000);
+        }
+
+        function showSuccess(key) {
+            document.getElementById('payment-ready').style.display = 'none';
+            document.getElementById('payment-success').style.display = 'block';
+            document.getElementById('license-key').textContent = key;
+            document.getElementById('tab-3').classList.add('done');
+        }
+
+        function copyKey(el) {
+            navigator.clipboard.writeText(el.textContent).then(() => {
+                const orig = el.nextElementSibling.textContent;
+                el.nextElementSibling.textContent = '✅ Tersalin!';
+                el.style.color = '#22c55e';
+                setTimeout(() => {
+                    el.nextElementSibling.textContent = orig;
+                    el.style.color = '';
+                }, 2000);
+            });
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-msg');
+            el.textContent = '❌ ' + msg;
+            el.style.display = 'flex';
+        }
+        function hideError() {
+            document.getElementById('error-msg').style.display = 'none';
+        }
+
+        // Default select first plan
+        selectPlan('pro_30');
+    </script>
+</body>
+
+</html>
