@@ -822,8 +822,12 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
             await ctx.editMessageText(text, { parse_mode: 'HTML' });
 
             const buttons = [];
-            if (payment.payment_url) {
+            // Validasi payment_url harus string URL yang valid (bukan angka/null)
+            const isValidUrl = payment.payment_url && typeof payment.payment_url === 'string' && payment.payment_url.startsWith('http');
+            if (isValidUrl) {
                 buttons.push([Markup.button.url('💳 Bayar Sekarang (GoPay)', payment.payment_url)]);
+            } else if (payment.qr_url && typeof payment.qr_url === 'string' && payment.qr_url.startsWith('http')) {
+                buttons.push([Markup.button.url('📷 Lihat QR Code', payment.qr_url)]);
             }
             buttons.push([Markup.button.callback('🔄 Cek Status Bayar', `check_${orderId}`)]);
             buttons.push([Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)]);
