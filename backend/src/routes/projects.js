@@ -2153,6 +2153,79 @@ router.post('/clips/:clipId/broll-search', async (req, res) => {
 });
 
 // ========================================
+// Auto Thumbnail Picker
+// ========================================
+
+// POST /api/projects/clips/:clipId/thumbnails — Generate thumbnail frames from clip
+router.post('/clips/:clipId/thumbnails', async (req, res) => {
+    try {
+        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
+        if (!clip) return res.status(404).json({ error: 'Clip not found' });
+
+        const project = get('SELECT * FROM projects WHERE id = ?', [clip.project_id]);
+        if (!project) return res.status(404).json({ error: 'Project not found' });
+        if (!project.source_path || !fs.existsSync(project.source_path)) {
+            return res.status(400).json({ error: 'Source video not found' });
+        }
+
+        const { exec } = require('child_process');
+        const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
+        const thumbDir = path.join(DATA_DIR, 'thumbnails', clip.id);
+        fs.ensureDirSync(thumbDir);
+
+        const startTime = clip.start_time || 0;
+        const endTime = clip.end_time || startTime + 60;
+        const duration = endTime - startTime;
+
+        // 6 positions: Opening(5%), Hook(15%), 25%, Middle(50%), 75%, Ending(90%)
+        const positions = [
+            { label: '🎬 Opening', pct: 0.05 },
+            { label: '🔥 Hook', pct: 0.15 },
+            { label: '25%', pct: 0.25 },
+            { label: '⭐ Middle', pct: 0.50 },
+            { label: '75%', pct: 0.75 },
+            { label: '🏁 Ending', pct: 0.90 }
+        ];
+
+        const thumbnails = [];
+        for (let i = 0; i < positions.length; i++) {
+            const { label, pct } = positions[i];
+            const ts = startTime + (duration * pct);
+
+            const filename = `thumb_${i}_${Date.now()}.jpg`;
+            const outPath = path.join(thumbDir, filename);
+
+            // Remove old thumb if exists
+            if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+
+            await new Promise((resolve) => {
+                const cmd = `"${FFMPEG_PATH}" -ss ${ts.toFixed(3)} -i "${project.source_path}" -vframes 1 -q:v 3 -vf "scale=480:-2" -y "${outPath}"`;
+                exec(cmd, { timeout: 15000 }, (err) => {
+                    if (!err && fs.existsSync(outPath) && fs.statSync(outPath).size > 1000) {
+                        thumbnails.push({
+                            index: i,
+                            label,
+                            url: `http://localhost:5000/data/thumbnails/${clip.id}/${filename}`,
+                            timestamp: ts.toFixed(1)
+                        });
+                    }
+                    resolve();
+                });
+            });
+        }
+
+        if (thumbnails.length === 0) {
+            return res.status(500).json({ error: 'Gagal generate thumbnail — cek source video' });
+        }
+
+        res.json({ success: true, thumbnails, clipId: clip.id });
+    } catch (err) {
+        console.error('[Thumbnail]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========================================
 // Render Templates — Save & Load render presets
 // ========================================
 
