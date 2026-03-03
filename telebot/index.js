@@ -1096,6 +1096,228 @@ bot.action(/^confirm_(.+)$/, async (ctx) => {
     );
 });
 
+// ============ ADMIN PANEL UTAMA ============
+bot.command('admin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+
+    const totalOrders = (db.orders || []).length;
+    const paidOrders = (db.orders || []).filter(o => o.status === 'paid').length;
+    const pendingOrders = (db.orders || []).filter(o => ['waiting_payment', 'pending', 'pending_confirm'].includes(o.status)).length;
+    const openTickets = (db.tickets || []).filter(t => t.status === 'open').length;
+    const totalUsers = Object.keys(db.users || {}).length;
+    const totalRev = db.stats?.total_revenue || 0;
+
+    // Revenue hari ini (WIB)
+    const nowWIB = new Date(Date.now() + 7 * 3600000);
+    const todayStr = nowWIB.toISOString().substring(0, 10);
+    const todayRev = (db.orders || [])
+        .filter(o => o.status === 'paid' && o.paid_at)
+        .filter(o => new Date(new Date(o.paid_at).getTime() + 7 * 3600000).toISOString().startsWith(todayStr))
+        .reduce((s, o) => s + (o.price || 0), 0);
+
+    await ctx.replyWithHTML(
+        `🔧 <b>ADMIN PANEL — ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `📊 <b>Ringkasan Hari Ini:</b>\n` +
+        `💰 Revenue hari ini: <b>${formatPrice(todayRev)}</b>\n` +
+        `✅ Total terjual: <b>${paidOrders}</b> order\n` +
+        `⏳ Pending bayar: <b>${pendingOrders}</b> order\n` +
+        `🎫 Tiket open: <b>${openTickets}</b>\n` +
+        `👥 Total user: <b>${totalUsers}</b>\n` +
+        `💳 Total revenue: <b>${formatPrice(totalRev)}</b>\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `Pilih aksi di bawah:`,
+        Markup.inlineKeyboard([
+            // Row 1 — Analytics
+            [Markup.button.callback('📊 Stats Lengkap', 'admin_full_stats'),
+            Markup.button.callback('📥 Export CSV', 'export_csv_action')],
+            // Row 2 — Order management
+            [Markup.button.callback('📋 Order Pending', 'admin_view_pending'),
+            Markup.button.callback('🎫 Tiket Open', 'view_open_tickets')],
+            // Row 3 — Key & User
+            [Markup.button.callback('🔑 Kirim Key Manual', 'admin_sendkey_guide'),
+            Markup.button.callback('✅ Konfirmasi Order', 'admin_konfirmasi_guide')],
+            // Row 4 — Broadcast & Promo
+            [Markup.button.callback('📡 Broadcast', 'admin_broadcast_guide'),
+            Markup.button.callback('⚡ Flash Sale', 'admin_flashsale_guide')],
+            // Row 5 — Security
+            [Markup.button.callback('🚫 Blacklist Key', 'admin_blacklist_guide'),
+            Markup.button.callback('🚫 Blokir User', 'admin_blockuser_guide')],
+            // Row 6 — All commands
+            [Markup.button.callback('📖 Semua Command Admin', 'admin_all_commands')],
+        ])
+    );
+});
+
+// Admin: Stats lengkap (sama dengan /stats)
+bot.action('admin_full_stats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    // Reuse ctx as command context
+    const now = new Date();
+    const WIB = new Date(now.getTime() + 7 * 3600000);
+    const todayStr = WIB.toISOString().substring(0, 10);
+    const thisMonthStr = WIB.toISOString().substring(0, 7);
+    const allOrders = db.orders || [];
+    const paidOrders = allOrders.filter(o => o.status === 'paid');
+    const todayOrders = paidOrders.filter(o => { const w = new Date(new Date(o.paid_at).getTime() + 7 * 3600000); return w.toISOString().startsWith(todayStr); });
+    const monthOrders = paidOrders.filter(o => { const w = new Date(new Date(o.paid_at).getTime() + 7 * 3600000); return w.toISOString().startsWith(thisMonthStr); });
+    const pendingOrders = allOrders.filter(o => ['waiting_payment', 'pending'].includes(o.status));
+    const productCount = {};
+    paidOrders.forEach(o => { productCount[o.product_id] = (productCount[o.product_id] || 0) + 1; });
+    const topProduct = Object.entries(productCount).sort((a, b) => b[1] - a[1])[0];
+    const ratedOrders = paidOrders.filter(o => o.rating);
+    const avgRating = ratedOrders.length > 0 ? (ratedOrders.reduce((s, o) => s + o.rating, 0) / ratedOrders.length).toFixed(1) : '-';
+    await ctx.replyWithHTML(
+        `📊 <b>DASHBOARD ADMIN</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `📅 <b>Hari ini (${todayStr}):</b>\n   ✅ ${todayOrders.length} order | 💰 ${formatPrice(todayOrders.reduce((s, o) => s + (o.price || 0), 0))}\n\n` +
+        `📅 <b>Bulan (${thisMonthStr}):</b>\n   ✅ ${monthOrders.length} order | 💰 ${formatPrice(monthOrders.reduce((s, o) => s + (o.price || 0), 0))}\n\n` +
+        `📈 <b>All Time:</b>\n   ✅ ${paidOrders.length} order | 💰 ${formatPrice(db.stats?.total_revenue || 0)}\n   👥 ${Object.keys(db.users || {}).length} user\n\n` +
+        `⏳ <b>Pending:</b> ${pendingOrders.length} | 🎫 <b>Tiket open:</b> ${(db.tickets || []).filter(t => t.status === 'open').length}\n` +
+        `🏆 <b>Terlaris:</b> ${topProduct ? `${topProduct[0]} (${topProduct[1]}x)` : '-'} | ⭐ <b>Rating:</b> ${avgRating}`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('📥 Export CSV', 'export_csv_action')],
+            [Markup.button.callback('⬅️ Admin Panel', 'back_admin')]
+        ])
+    );
+});
+
+// Admin: lihat pending orders
+bot.action('admin_view_pending', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    const pending = (db.orders || []).filter(o => ['waiting_payment', 'pending', 'pending_confirm'].includes(o.status));
+    if (pending.length === 0) return ctx.reply('✅ Tidak ada order pending.');
+    let text = `📋 <b>Order Pending (${pending.length})</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
+    for (const o of pending.slice(0, 10)) {
+        const icon = o.status === 'pending_confirm' ? '📸' : '⏳';
+        text += `${icon} <code>${o.id}</code>\n👤 ${o.user_name} | 📦 ${o.product_name}\n💰 ${formatPrice(o.price)} | ${o.status}\n`;
+        if (o.status === 'pending_confirm') text += `Konfirmasi: <code>/konfirmasi ${o.id}</code>\n`;
+        text += '\n';
+    }
+    await ctx.replyWithHTML(text, Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]]));
+});
+
+// Admin: guide sendkey
+bot.action('admin_sendkey_guide', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    await ctx.replyWithHTML(
+        `🔑 <b>Kirim License Key Manual</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>Format:</b>\n<code>/sendkey USER_ID PRODUCT_ID [HARGA]</code>\n\n` +
+        `<b>Contoh:</b>\n<code>/sendkey 123456789 pro_30</code>\n<code>/sendkey 123456789 pro_30 69000</code>\n\n` +
+        `<b>Product ID tersedia:</b>\n` +
+        Object.entries(PRODUCTS).map(([id, p]) => `• <code>${id}</code> — ${p.name} ${p.desc} (${formatPrice(p.price)})`).join('\n') + '\n\n' +
+        `<i>💡 Pakai /myid untuk tahu User ID seseorang.</i>`,
+        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+    );
+});
+
+// Admin: guide konfirmasi
+bot.action('admin_konfirmasi_guide', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    const pendingConfirm = (db.orders || []).filter(o => o.status === 'pending_confirm' || o.status === 'waiting_payment');
+    let text = `✅ <b>Konfirmasi Order Manual</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>Format:</b> <code>/konfirmasi ORDER_ID</code>\n\n`;
+    if (pendingConfirm.length > 0) {
+        text += `<b>Order yang perlu dikonfirmasi (${pendingConfirm.length}):</b>\n`;
+        for (const o of pendingConfirm.slice(0, 8)) {
+            text += `• <code>${o.id}</code> — ${o.user_name} | ${o.product_name}\n`;
+        }
+    } else {
+        text += `<i>Tidak ada order yang perlu dikonfirmasi saat ini.</i>`;
+    }
+    await ctx.replyWithHTML(text, Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]]));
+});
+
+// Admin: guide broadcast
+bot.action('admin_broadcast_guide', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    const totalUsers = Object.keys(db.users || {}).length;
+    await ctx.replyWithHTML(
+        `📡 <b>Broadcast ke Semua User</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>Format:</b> <code>/broadcast PESAN_KAMU</code>\n\n` +
+        `<b>Contoh:</b>\n<code>/broadcast 🎉 Halo! Ada update baru ClipperSkuy v2.0!</code>\n\n` +
+        `📤 Akan dikirim ke <b>${totalUsers} user</b> terdaftar.\n\n` +
+        `<i>⚠️ Pastikan pesan sudah benar sebelum send — tidak bisa ditarik.</i>`,
+        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+    );
+});
+
+// Admin: guide flashsale
+bot.action('admin_flashsale_guide', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    await ctx.replyWithHTML(
+        `⚡ <b>Flash Sale</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>Format:</b>\n<code>/flashsale PRODUCT_ID DISKON% DURASI_MENIT PESAN</code>\n\n` +
+        `<b>Contoh:</b>\n<code>/flashsale pro_30 30 60 Flash Sale 1 Jam!</code>\n` +
+        `<code>/flashsale pro_365 50 120 Promo Hari Kemerdekaan!</code>\n\n` +
+        `<b>Product ID:</b>\n` +
+        Object.entries(PRODUCTS).map(([id, p]) => `• <code>${id}</code> — ${p.name} ${p.desc}`).join('\n') + '\n\n' +
+        `<i>Bot otomatis broadcast ke semua user + generate kode diskon.</i>`,
+        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+    );
+});
+
+// Admin: guide blacklist
+bot.action('admin_blacklist_guide', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    const blacklistCount = Object.keys(db.blacklisted_keys || {}).length;
+    await ctx.replyWithHTML(
+        `🚫 <b>Blacklist License Key</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>Blacklist:</b> <code>/blacklist LICENSE_KEY ALASAN</code>\n` +
+        `<b>Hapus blacklist:</b> <code>/unblacklist LICENSE_KEY</code>\n\n` +
+        `<b>Contoh:</b>\n<code>/blacklist CS-KEY123 Dishare ilegal</code>\n\n` +
+        `🚫 Total blacklisted: <b>${blacklistCount}</b> key`,
+        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+    );
+});
+
+// Admin: guide blockuser
+bot.action('admin_blockuser_guide', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    const blockedCount = Object.keys(db.blocked_users || {}).length;
+    await ctx.replyWithHTML(
+        `🚫 <b>Blokir/Unblokir User</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>Blokir:</b> <code>/blockuser USER_ID ALASAN</code>\n` +
+        `<b>Unblokir:</b> <code>/unblockuser USER_ID</code>\n\n` +
+        `<b>Contoh:</b>\n<code>/blockuser 123456789 Spam bot</code>\n\n` +
+        `🚫 Total diblokir: <b>${blockedCount}</b> user`,
+        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+    );
+});
+
+// Admin: semua command
+bot.action('admin_all_commands', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    await ctx.replyWithHTML(
+        `📖 <b>SEMUA COMMAND ADMIN</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>📊 Analitik:</b>\n` +
+        `• /admin — Panel utama\n• /stats — Dashboard lengkap\n• /exportcsv — Export data CSV\n\n` +
+        `<b>✅ Order & Key:</b>\n` +
+        `• /konfirmasi ORDER_ID — Konfirmasi manual\n• /sendkey USER_ID PRODUCT_ID — Kirim key\n\n` +
+        `<b>📡 Komunikasi:</b>\n` +
+        `• /broadcast PESAN — Kirim ke semua user\n• /reply TICKET_ID JAWABAN — Balas tiket\n• /flashsale PRODUCT DISKON% MENIT PESAN\n\n` +
+        `<b>🛡 Keamanan:</b>\n` +
+        `• /blacklist KEY ALASAN — Blacklist license\n• /unblacklist KEY\n• /blockuser USER_ID ALASAN — Blokir user\n• /unblockuser USER_ID\n\n` +
+        `<b>🔑 Diskon:</b>\n` +
+        `• /newdiskon — Buat kode diskon\n• /hapusdiskon — Hapus kode diskon\n`,
+        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+    );
+});
+
+// Back to admin panel
+bot.action('back_admin', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    await ctx.reply('Ketik /admin untuk buka panel admin.');
+});
+
 // ============ ADMIN MANUAL KONFIRMASI ============
 bot.command('konfirmasi', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
