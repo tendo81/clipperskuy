@@ -554,13 +554,16 @@ bot.action('referral_info', async (ctx) => {
     const referralCount = (db.orders || []).filter(o => o.referral_by === userId && o.status === 'paid').length;
     await ctx.replyWithHTML(
         `🎁 <b>Referral & Diskon</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `<b>🎟️ Kode Diskon untuk Kamu:</b>\n` +
-        `Punya kode promo? Masukkan saat checkout untuk dapatkan diskon!\n\n` +
-        `<b>🎁 Program Referral:</b>\n` +
-        `Kode referral kamu: <code>${code}</code>\n` +
-        `→ Share ke teman → mereka diskon 10%\n` +
-        `→ Kamu dapat kredit setiap ada yang beli pakai kodemu\n\n` +
-        `👥 Total referral berhasil: <b>${referralCount}</b>`,
+        `<b>🎁 Kode Referral Kamu:</b>\n` +
+        `<code>${code}</code>\n\n` +
+        `<b>📲 Cara Share ke Teman:</b>\n` +
+        `Kirim pesan ini ke teman kamu:\n` +
+        `<i>"Beli ClipperSkuy pakai kode <code>${code}</code>\ndapet diskon 10%! Beli di @ClipperSkuyBot"</i>\n\n` +
+        `<b>✅ Cara Teman Pakai Kode:</b>\n` +
+        `1️⃣ Buka bot → ketik /start\n` +
+        `2️⃣ Ketik: <code>/promo ${code}</code>\n` +
+        `3️⃣ Pilih produk & bayar → diskon 10% otomatis!\n\n` +
+        `📊 Total referral berhasil: <b>${referralCount}</b>`,
         Markup.inlineKeyboard([
             [Markup.button.callback('🛒 Beli Sekarang', 'catalog')],
             [Markup.button.callback('⬅️ Kembali', 'back_start')]
@@ -2434,7 +2437,6 @@ function getUserReferralCode(userId) {
 bot.command('referral', async (ctx) => {
     const userId = String(ctx.from.id);
     const code = getUserReferralCode(userId);
-    const user = db.users[userId];
     const referralCount = (db.orders || []).filter(o => o.referral_by === userId && o.status === 'paid').length;
 
     // Register discount code di db jika belum ada
@@ -2450,14 +2452,22 @@ bot.command('referral', async (ctx) => {
 
     await ctx.replyWithHTML(
         `🎁 <b>Program Referral ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `Kode referral kamu:\n<code>${code}</code>\n\n` +
-        `📋 <b>Cara kerja:</b>\n` +
-        `→ Share kode ini ke temanmu\n` +
-        `→ Mereka dapat <b>diskon 10%</b> saat bayar\n` +
-        `→ Kamu dapat notifikasi setiap ada yang beli pakai kodemu\n\n` +
-        `📊 <b>Stats kamu:</b>\n` +
+        `<b>🎁 Kode Referral Kamu:</b>\n` +
+        `<code>${code}</code>\n\n` +
+        `<b>📲 Cara Share ke Teman:</b>\n` +
+        `Kirim kode ini ke temanmu — mereka tinggal:\n\n` +
+        `<b>✅ Langkah untuk Teman yang Mau Pakai Kode:</b>\n` +
+        `1️⃣ Buka @ClipperSkuyBot di Telegram\n` +
+        `2️⃣ Ketik perintah: <code>/promo ${code}</code>\n` +
+        `3️⃣ Lanjut pilih produk dan bayar\n` +
+        `🎉 Diskon 10% otomatis diterapkan!\n\n` +
+        `<b>📊 Stats Referral Kamu:</b>\n` +
         `👥 Total referral berhasil: <b>${referralCount}</b>\n\n` +
-        `<i>Salin kode dan bagikan ke teman-temanmu!</i>`
+        `<i>Semakin banyak teman pakai kodemu, semakin banyak kredit kamu!</i>`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🛒 Beli Sekarang', 'catalog')],
+            [Markup.button.callback('🏠 Menu Utama', 'back_start')]
+        ])
     );
 });
 
