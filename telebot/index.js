@@ -240,11 +240,19 @@ async function checkBayarGGStatus(invoiceId) {
             headers: { 'X-API-Key': BAYARGG_API_KEY }
         });
         const data = await res.json();
-        console.log('bayar.gg status:', JSON.stringify(data));
-        // status: pending | paid | expired | cancelled
-        return data.status || 'pending';
+        console.log('[BayarGG] check-payment raw response:', JSON.stringify(data));
+
+        // bayar.gg bisa return { status: 'paid' } ATAU { data: { status: 'paid' } } ATAU { success, data: { ... } }
+        const status =
+            data.status ||
+            data.data?.status ||
+            (data.success && data.data ? data.data.status : null) ||
+            'pending';
+
+        console.log(`[BayarGG] invoice=${invoiceId} → status=${status}`);
+        return status;
     } catch (err) {
-        console.error('bayar.gg status error:', err.message);
+        console.error('[BayarGG] status error:', err.message);
         return 'unknown';
     }
 }
@@ -696,7 +704,15 @@ Scan QRIS di bawah pakai e-wallet / m-banking:
 });
 
 // ============ PAYMENT POLLING (Auto-Check) ============
+const activePolls = new Set(); // track active order IDs to prevent double-polling
+
 async function startPaymentPolling(ctx, orderId) {
+    if (activePolls.has(orderId)) {
+        console.log(`[Poll] already polling ${orderId}, skip`);
+        return;
+    }
+    activePolls.add(orderId);
+
     let attempts = 0;
     const maxAttempts = 40; // 40 x 15s = 10 menit
 
@@ -705,11 +721,13 @@ async function startPaymentPolling(ctx, orderId) {
         const order = db.orders.find(o => o.id === orderId);
         if (!order || order.status === 'paid' || order.status === 'cancelled') {
             clearInterval(interval);
+            activePolls.delete(orderId);
             return;
         }
 
         if (attempts > maxAttempts) {
             clearInterval(interval);
+            activePolls.delete(orderId);
             if (order.status !== 'paid') {
                 order.status = 'expired';
                 saveDB(db);
@@ -727,7 +745,8 @@ async function startPaymentPolling(ctx, orderId) {
         let isPaid = false;
         if (order.payment_method === 'bayargg' && order.bayargg_invoice) {
             const status = await checkBayarGGStatus(order.bayargg_invoice);
-            isPaid = (status === 'paid');
+            // bayar.gg: paid | settlement | success semua dianggap lunas
+            isPaid = ['paid', 'settlement', 'success', 'completed'].includes(status?.toLowerCase());
         } else {
             const status = await checkPakasirStatus(orderId, order.price);
             isPaid = (status === 'completed');
@@ -735,9 +754,51 @@ async function startPaymentPolling(ctx, orderId) {
 
         if (isPaid) {
             clearInterval(interval);
+            activePolls.delete(orderId);
             await processSuccessfulPayment(ctx, orderId);
         }
     }, 15000);
+}
+
+// ============ POLLING RECOVERY — restart polling untuk order yang masih waiting saat bot restart ============
+async function recoverPendingPolls(bot) {
+    const pendingOrders = db.orders.filter(o =>
+        (o.status === 'waiting_payment') &&
+        o.payment_method === 'bayargg' &&
+        o.bayargg_invoice
+    );
+
+    if (pendingOrders.length === 0) return;
+    console.log(`[Recovery] ${pendingOrders.length} pending bayargg order(s) ditemukan, restart polling...`);
+
+    for (const order of pendingOrders) {
+        // Cek dulu statusnya — mungkin sudah bayar saat bot mati
+        const status = await checkBayarGGStatus(order.bayargg_invoice);
+        const isPaid = ['paid', 'settlement', 'success', 'completed'].includes(status?.toLowerCase());
+
+        if (isPaid) {
+            console.log(`[Recovery] Order ${order.id} ternyata sudah PAID! Processing...`);
+            // Buat fake ctx untuk processSuccessfulPayment
+            const fakeCtx = { telegram: bot.telegram };
+            await processSuccessfulPayment(fakeCtx, order.id);
+            // Notify user
+            try {
+                await bot.telegram.sendMessage(order.user_id,
+                    `✅ <b>Pembayaran kamu sudah terverifikasi!</b>\n\nMaaf ada keterlambatan notifikasi — license key sudah dikirim.`,
+                    { parse_mode: 'HTML' }
+                );
+            } catch (e) { }
+        } else if (status === 'expired' || status === 'cancelled') {
+            console.log(`[Recovery] Order ${order.id} expired/cancelled, update status.`);
+            order.status = status;
+            saveDB(db);
+        } else {
+            // Masih pending — restart polling
+            console.log(`[Recovery] Order ${order.id} masih pending, restart polling.`);
+            const fakeCtx = { telegram: bot.telegram };
+            startPaymentPolling(fakeCtx, order.id);
+        }
+    }
 }
 
 // ============ CHECK STATUS (Manual) ============
@@ -1629,19 +1690,22 @@ bot.catch((err, ctx) => {
 });
 
 bot.launch()
-    .then(() => {
+    .then(async () => {
         console.log('');
         console.log('╔═══════════════════════════════════════════╗');
         console.log('║   🤖 ClipperSkuy Telebot is RUNNING!     ║');
         console.log('║═══════════════════════════════════════════║');
         console.log('║   License Auto-Order Bot for Telegram     ║');
         console.log('║   Products: Pro & Enterprise              ║');
-        console.log('║   Payment: QRIS (Pakasir)                 ║');
+        console.log('║   Payment: QRIS (bayar.gg / Pakasir)     ║');
         console.log('║   Delivery: Auto License Key               ║');
         console.log('╚═══════════════════════════════════════════╝');
         console.log('');
         console.log(`📊 Loaded: ${Object.keys(db.users).length} users, ${db.orders.length} orders`);
         console.log(`💰 Revenue: ${formatPrice(db.stats.total_revenue || 0)}`);
+
+        // Recover polling untuk order yang masih waiting saat bot mati/restart
+        await recoverPendingPolls(bot);
     })
     .catch(err => {
         console.error('❌ Bot failed to start:', err.message);
