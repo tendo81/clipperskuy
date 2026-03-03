@@ -3012,6 +3012,55 @@ bot.launch()
 
         // Jalankan scheduler: notif expired, laporan harian, rating request
         startDailyTaskScheduler(bot);
+
+        // ── Daftarkan command list ke Telegram ──
+        // Command untuk semua user
+        const userCommands = [
+            { command: 'start', description: '🏠 Menu utama — semua fitur dari sini' },
+            { command: 'ceklicense', description: '🔑 Cek status & expiry license kamu' },
+            { command: 'riwayat', description: '📋 Histori semua pembelian kamu' },
+            { command: 'download', description: '⬇️ Link download app terbaru' },
+            { command: 'referral', description: '🎁 Kode referral & program diskon 10%' },
+            { command: 'tiket', description: '🎫 Buat tiket support ke admin' },
+            { command: 'cektiket', description: '🔍 Cek status tiket support kamu' },
+            { command: 'myid', description: '👤 Lihat Telegram User ID kamu' },
+            { command: 'help', description: '❓ Bantuan & daftar semua fitur' },
+        ];
+
+        // Command tambahan khusus admin
+        const adminCommands = [
+            ...userCommands,
+            { command: 'admin', description: '🔧 Panel admin utama' },
+            { command: 'stats', description: '📊 Dashboard revenue & statistik' },
+            { command: 'exportcsv', description: '📥 Export semua order ke CSV' },
+            { command: 'broadcast', description: '📡 Kirim pesan ke semua user' },
+            { command: 'sendkey', description: '🔑 Kirim license key manual ke user' },
+            { command: 'konfirmasi', description: '✅ Konfirmasi order manual' },
+            { command: 'reply', description: '💬 Balas tiket support user' },
+            { command: 'flashsale', description: '⚡ Buat flash sale + broadcast' },
+            { command: 'blacklist', description: '🚫 Blacklist license key' },
+            { command: 'unblacklist', description: '♻️ Hapus blacklist license key' },
+            { command: 'blockuser', description: '🚫 Blokir user dari bot' },
+            { command: 'unblockuser', description: '✅ Unblokir user' },
+            { command: 'newdiskon', description: '🏷 Buat kode diskon baru' },
+            { command: 'hapusdiskon', description: '🗑 Hapus kode diskon' },
+        ];
+
+        // Set command untuk semua user (scope: default)
+        await bot.telegram.setMyCommands(userCommands);
+
+        // Set command khusus untuk setiap admin (scope: chat)
+        for (const adminId of ADMIN_IDS) {
+            try {
+                await bot.telegram.setMyCommands(adminCommands, {
+                    scope: { type: 'chat', chat_id: parseInt(adminId) }
+                });
+                console.log(`[Commands] Admin commands set for ${adminId}`);
+            } catch (e) {
+                console.warn(`[Commands] Failed to set admin commands for ${adminId}:`, e.message);
+            }
+        }
+        console.log(`[Commands] ✅ User commands registered (${userCommands.length} commands)`);
     })
     .catch(err => {
         console.error('❌ Bot failed to start:', err.message);
