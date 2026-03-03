@@ -1241,6 +1241,34 @@
         let timerInterval = null;
         let currentInvoiceId = null;
 
+        const STORAGE_KEY = 'clipperskuy_pending_payment';
+
+        function savePaymentState(data, plan) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                data,
+                plan,
+                savedAt: Date.now()
+            }));
+        }
+
+        function clearPaymentState() {
+            localStorage.removeItem(STORAGE_KEY);
+        }
+
+        function loadPendingPayment() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return null;
+                const saved = JSON.parse(raw);
+                // Expired jika lebih dari 35 menit
+                if (Date.now() - saved.savedAt > 35 * 60 * 1000) {
+                    clearPaymentState();
+                    return null;
+                }
+                return saved;
+            } catch { return null; }
+        }
+
         function formatRp(n) {
             return 'Rp ' + n.toLocaleString('id-ID');
         }
@@ -1310,7 +1338,11 @@
                     return;
                 }
 
+                // Simpan ke localStorage agar survive refresh
+                savePaymentState(data, selectedPlan);
+
                 // Move to step 3
+                document.getElementById('tab-1').classList.add('done');
                 document.getElementById('tab-2').classList.add('done');
                 goStep(3);
                 showPayment(data);
@@ -1353,6 +1385,9 @@
             currentInvoiceId = data.invoice_id;
             startTimer(data.expires_at);
             startPolling(data.invoice_id);
+
+            // Cek apakah sudah dibayar sewaktu offline
+            checkStatusNow(data.invoice_id);
         }
 
         function startTimer(expiresAt) {
@@ -1373,25 +1408,31 @@
             }, 1000);
         }
 
-        function startPolling(invoiceId) {
-            pollingInterval = setInterval(async () => {
-                try {
-                    const res = await fetch(`${LICENSE_API}/api/web-status?invoice_id=${encodeURIComponent(invoiceId)}`);
-                    const data = await res.json();
+        async function checkStatusNow(invoiceId) {
+            try {
+                const res = await fetch(`${LICENSE_API}/api/web-status?invoice_id=${encodeURIComponent(invoiceId)}`);
+                const data = await res.json();
+                if (data.paid && data.key) {
+                    clearInterval(pollingInterval);
+                    clearInterval(timerInterval);
+                    showSuccess(data.key);
+                }
+            } catch (e) { /* ignore */ }
+        }
 
-                    if (data.paid && data.key) {
-                        clearInterval(pollingInterval);
-                        clearInterval(timerInterval);
-                        showSuccess(data.key);
-                    }
-                } catch (e) { /* ignore */ }
-            }, 5000);
+        function startPolling(invoiceId) {
+            pollingInterval = setInterval(() => checkStatusNow(invoiceId), 5000);
         }
 
         function showSuccess(key) {
+            clearPaymentState(); // Hapus pending state
+            // Simpan license key sementara di localStorage (30 menit) agar bisa dilihat setelah refresh
+            localStorage.setItem('clipperskuy_license_key', JSON.stringify({ key, savedAt: Date.now() }));
             document.getElementById('payment-ready').style.display = 'none';
             document.getElementById('payment-success').style.display = 'block';
             document.getElementById('license-key').textContent = key;
+            document.getElementById('tab-1').classList.add('done');
+            document.getElementById('tab-2').classList.add('done');
             document.getElementById('tab-3').classList.add('done');
         }
 
@@ -1418,6 +1459,53 @@
 
         // Default select first plan
         selectPlan('pro_30');
+
+        // === RECOVERY: Cek localStorage saat halaman dibuka ===
+        (function checkResumeState() {
+            // Cek license key yang baru dibeli
+            try {
+                const savedKey = JSON.parse(localStorage.getItem('clipperskuy_license_key') || 'null');
+                if (savedKey && Date.now() - savedKey.savedAt < 30 * 60 * 1000) {
+                    // Tampilkan success langsung
+                    document.getElementById('tab-1').classList.add('done');
+                    document.getElementById('tab-2').classList.add('done');
+                    document.getElementById('tab-3').classList.add('done');
+                    goStep(3);
+                    document.getElementById('payment-loading').style.display = 'none';
+                    showSuccess(savedKey.key);
+                    return;
+                }
+            } catch { }
+
+            // Cek pending payment
+            const pending = loadPendingPayment();
+            if (!pending) return;
+
+            // Ada pembayaran tertunda — tampilkan banner resume
+            const banner = document.createElement('div');
+            banner.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid rgba(124,58,237,0.4);border-radius:16px;padding:16px 24px;display:flex;align-items:center;gap:16px;z-index:999;box-shadow:0 8px 40px rgba(0,0,0,0.5);max-width:480px;width:90%;`;
+            banner.innerHTML = `
+                <div style="font-size:24px;">⏳</div>
+                <div style="flex:1;">
+                    <div style="font-weight:700;font-size:14px;color:#f0f0f5;">Ada pembayaran tertunda!</div>
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:2px;">Kamu belum menyelesaikan pembayaran sebelumnya.</div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="resumePayment()" style="background:linear-gradient(135deg,#7c3aed,#22d3ee);color:#fff;border:none;border-radius:50px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">Lanjut Bayar</button>
+                    <button onclick="this.closest('[style]').remove();clearPaymentState();" style="background:transparent;color:rgba(255,255,255,0.5);border:1px solid rgba(255,255,255,0.15);border-radius:50px;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit;">Abaikan</button>
+                </div>
+            `;
+            document.body.appendChild(banner);
+
+            window.resumePayment = function () {
+                banner.remove();
+                selectedPlan = pending.plan;
+                document.getElementById('tab-1').classList.add('done');
+                document.getElementById('tab-2').classList.add('done');
+                goStep(3);
+                showPayment(pending.data);
+            };
+        })();
     </script>
 </body>
 
