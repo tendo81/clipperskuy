@@ -552,6 +552,18 @@ bot.action('referral_info', async (ctx) => {
     const userId = String(ctx.from.id);
     const code = getUserReferralCode ? getUserReferralCode(userId) : 'REF' + userId.slice(-6);
     const referralCount = (db.orders || []).filter(o => o.referral_by === userId && o.status === 'paid').length;
+
+    // PENTING: Daftarkan kode ke db.discounts agar bisa dipakai /promo
+    if (!db.discounts) db.discounts = {};
+    if (!db.discounts[code]) {
+        db.discounts[code] = {
+            active: true, percent: 10, type: 'percent',
+            quota: null, used: 0, expires_at: null,
+            owner_id: userId, products: []
+        };
+        saveDB(db);
+    }
+
     await ctx.replyWithHTML(
         `🎁 <b>Referral & Diskon</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
         `<b>🎁 Kode Referral Kamu:</b>\n` +
