@@ -430,6 +430,7 @@ bot.start(async (ctx) => {
     const name = ctx.from.first_name || 'User';
 
     // Auto register
+    if (!db.users) db.users = {};
     if (!db.users[userId]) {
         db.users[userId] = {
             id: userId,
@@ -442,8 +443,12 @@ bot.start(async (ctx) => {
         saveDB(db);
     }
 
-    const text = `
-🤖 <b>ClipperSkuy — License Store</b>
+    // Cek apakah punya license aktif
+    const myPaidOrders = (db.orders || []).filter(o => o.user_id === userId && o.status === 'paid');
+    const hasLicense = myPaidOrders.length > 0;
+
+    const text =
+        `🤖 <b>ClipperSkuy — License Store</b>
 
 Halo <b>${name}</b>! 👋
 Selamat datang di toko lisensi resmi ClipperSkuy.
@@ -459,15 +464,115 @@ Selamat datang di toko lisensi resmi ClipperSkuy.
 👑 <b>Enterprise</b> — Hubungi Admin
     Semua fitur Pro + API + Branding + Lifetime
 ━━━━━━━━━━━━━━━━━━
-
-Ketuk tombol di bawah untuk melihat produk:`;
+${hasLicense ? '✅ Kamu sudah punya license aktif!' : '👆 Pilih menu di bawah untuk mulai:'}`;
 
     await ctx.replyWithHTML(text, Markup.inlineKeyboard([
-        [Markup.button.callback('🛒 Lihat Produk', 'catalog')],
-        [Markup.button.callback('📋 Pesanan Saya', 'my_orders'), Markup.button.callback('ℹ️ Tentang App', 'about')],
-        [Markup.button.callback('📞 Hubungi Admin', 'contact'), Markup.button.callback('❓ Bantuan', 'help')]
+        // Row 1 — Utama
+        [Markup.button.callback('🛒 Beli License', 'catalog'),
+        Markup.button.callback('⬇️ Download App', 'download_action')],
+        // Row 2 — License saya
+        [Markup.button.callback('🔑 Cek License Saya', 'my_license'),
+        Markup.button.callback('📋 Riwayat Beli', 'my_orders')],
+        // Row 3 — Referral & Promo
+        [Markup.button.callback('🎁 Referral & Diskon', 'referral_info'),
+        Markup.button.callback('❓ Bantuan / FAQ', 'help')],
+        // Row 4 — Support
+        [Markup.button.callback('🎫 Buat Tiket Support', 'open_ticket'),
+        Markup.button.callback('📞 Hubungi Admin', 'contact')],
     ]));
 });
+
+// Quick action: cek license dari start menu
+bot.action('my_license', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from.id);
+    const paidOrders = (db.orders || []).filter(o => o.user_id === userId && o.status === 'paid' && o.license_key);
+    if (paidOrders.length === 0) {
+        return ctx.replyWithHTML(
+            '❌ <b>Kamu belum punya license aktif.</b>\n\nBeli sekarang untuk akses semua fitur ClipperSkuy!',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🛒 Beli License', 'catalog')],
+                [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            ])
+        );
+    }
+    let text = `🔑 <b>License Aktif Kamu</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
+    for (const o of paidOrders) {
+        const paidAt = new Date(o.paid_at);
+        const expireAt = o.duration > 0 ? new Date(paidAt.getTime() + o.duration * 86400000) : null;
+        const now = new Date();
+        const isExpired = expireAt && expireAt < now;
+        const daysLeft = expireAt ? Math.ceil((expireAt - now) / 86400000) : -1;
+        const statusIcon = o.duration === 0 ? '♾️ Lifetime' : isExpired ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+        text += `📦 <b>${o.product_name}</b>\n` +
+            `🔑 <code>${o.license_key}</code>\n` +
+            `📅 Beli: ${paidAt.toLocaleDateString('id-ID')}\n` +
+            `${expireAt ? `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n` : ''}` +
+            `📊 Status: ${statusIcon}\n\n`;
+    }
+    await ctx.replyWithHTML(text, Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Perpanjang License', 'renewal_menu')],
+        [Markup.button.callback('⬅️ Kembali', 'back_start')]
+    ]));
+});
+
+// Quick action: download dari start menu
+bot.action('download_action', async (ctx) => {
+    await ctx.answerCbQuery();
+    const DOWNLOAD_LINK = process.env.DOWNLOAD_URL || 'https://github.com/tendo81/clipperskuy/releases';
+    await ctx.replyWithHTML(
+        `📥 <b>Download ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `🖥 <b>Windows (64-bit)</b> — versi terbaru ada di GitHub Releases.\n\n` +
+        `📖 Butuh bantuan instalasi? Bergabunglah ke grup support.\n\n` +
+        `<i>Setelah download, aktifkan license di Settings → License</i>`,
+        Markup.inlineKeyboard([
+            [Markup.button.url('⬇️ Download App', DOWNLOAD_LINK)],
+            [Markup.button.url('📖 Grup Support & Tutorial', SUPPORT_GROUP)],
+            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+        ])
+    );
+});
+
+// Quick action: referral dari start menu
+bot.action('referral_info', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from.id);
+    const code = getUserReferralCode ? getUserReferralCode(userId) : 'REF' + userId.slice(-6);
+    const referralCount = (db.orders || []).filter(o => o.referral_by === userId && o.status === 'paid').length;
+    await ctx.replyWithHTML(
+        `🎁 <b>Referral & Diskon</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>🎟️ Kode Diskon untuk Kamu:</b>\n` +
+        `Punya kode promo? Masukkan saat checkout untuk dapatkan diskon!\n\n` +
+        `<b>🎁 Program Referral:</b>\n` +
+        `Kode referral kamu: <code>${code}</code>\n` +
+        `→ Share ke teman → mereka diskon 10%\n` +
+        `→ Kamu dapat kredit setiap ada yang beli pakai kodemu\n\n` +
+        `👥 Total referral berhasil: <b>${referralCount}</b>`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🛒 Beli Sekarang', 'catalog')],
+            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+        ])
+    );
+});
+
+// Quick action: buat tiket dari start menu
+bot.action('open_ticket', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.replyWithHTML(
+        `🎫 <b>Buat Tiket Support</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `Ketik pesan tiket kamu dengan format:\n\n` +
+        `<code>/tiket PERTANYAAN_KAMU</code>\n\n` +
+        `Contoh:\n` +
+        `<code>/tiket License saya tidak bisa diaktivasi</code>\n` +
+        `<code>/tiket Saya sudah bayar tapi key belum datang</code>\n\n` +
+        `⏱ Admin akan membalas dalam 1×24 jam.`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('📞 Hubungi Admin Langsung', 'contact')],
+            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+        ])
+    );
+});
+
 
 // ============ CATALOG ============
 bot.action('catalog', async (ctx) => {
@@ -1988,31 +2093,61 @@ bot.command('broadcast', async (ctx) => {
 bot.action('help', async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.replyWithHTML(
-        `❓ <b>FAQ & BANTUAN</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `<b>📥 Cara Download App?</b>\n→ Gunakan /download\n\n` +
-        `<b>🔑 Cara Aktivasi License?</b>\n→ Buka ClipperSkuy → Settings → License → Masukkan key → Activate\n\n` +
-        `<b>💳 Cara Bayar?</b>\n→ Pilih produk → klik Bayar → scan QRIS atau klik bayar GoPay → key otomatis dikirim\n\n` +
-        `<b>⏱ Berapa lama key dikirim?</b>\n→ Otomatis dalam 1-30 detik setelah bayar\n\n` +
-        `<b>🔍 Cek license saya?</b>\n→ Gunakan /ceklicense\n\n` +
-        `<b>🆔 Butuh User ID?</b>\n→ Gunakan /myid\n\n` +
-        `<b>🔄 Perpanjang license?</b>\n→ Gunakan /ceklicense → klik Perpanjang\n\n` +
-        `<b>📞 Masih bingung?</b>\n→ Hubungi admin langsung`,
+        `❓ <b>BANTUAN & SEMUA FITUR</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>📦 Produk & Pembelian</b>\n` +
+        `🛒 Beli license → klik tombol di bawah\n` +
+        `📋 Riwayat semua transaksi → klik tombol\n\n` +
+        `<b>🔑 License Saya</b>\n` +
+        `🔑 Cek status & expiry → klik tombol\n` +
+        `🔄 Perpanjang license → dari menu Cek License\n\n` +
+        `<b>⬇️ Download & Aktivasi</b>\n` +
+        `⬇️ Download app → klik tombol di bawah\n` +
+        `🔑 Aktivasi: ClipperSkuy → Settings → License → Activate\n\n` +
+        `<b>🎁 Referral & Promo</b>\n` +
+        `🎁 Program referral & kode diskon → klik tombol\n` +
+        `🎫 Punya kode promo? Masukkan saat checkout\n\n` +
+        `<b>📞 Support & Bantuan</b>\n` +
+        `🎫 Buat tiket support → klik tombol / ketik /tiket\n` +
+        `👤 Cek ID Telegram kamu → ketik /myid\n` +
+        `📞 Hubungi admin langsung → klik tombol\n\n` +
+        `<i>⏱ Pembayaran otomatis terdeteksi. Key dikirim dalam 30 detik.</i>`,
         Markup.inlineKeyboard([
-            [Markup.button.callback('📞 Hubungi Admin', 'contact')],
-            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            [Markup.button.callback('🛒 Beli License', 'catalog'),
+            Markup.button.callback('🔑 Cek License', 'my_license')],
+            [Markup.button.callback('⬇️ Download App', 'download_action'),
+            Markup.button.callback('📋 Riwayat Beli', 'my_orders')],
+            [Markup.button.callback('🎁 Referral & Diskon', 'referral_info'),
+            Markup.button.callback('🎫 Buat Tiket', 'open_ticket')],
+            [Markup.button.callback('📞 Hubungi Admin', 'contact'),
+            Markup.button.callback('⬅️ Menu Utama', 'back_start')],
         ])
     );
 });
 
 bot.command('help', async (ctx) => {
     await ctx.replyWithHTML(
-        `❓ <b>FAQ & BANTUAN ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `📥 /download — Link download app\n` +
-        `🔑 /ceklicense — Cek status license kamu\n` +
-        `🆔 /myid — Lihat Telegram ID kamu\n` +
-        `🛒 /start — Menu utama\n\n` +
-        `<b>😕 Masalah lain?</b> Hubungi admin.`,
-        Markup.inlineKeyboard([[Markup.button.callback('📞 Hubungi Admin', 'contact')]])
+        `❓ <b>BANTUAN & SEMUA FITUR ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `<b>👤 Command untuk Semua User:</b>\n` +
+        `🛍 /start — Menu utama (semua fitur dari sini)\n` +
+        `🔑 /ceklicense — Cek status & expiry license\n` +
+        `📋 /riwayat — Histori semua pembelian kamu\n` +
+        `⬇️ /download — Link download app terbaru\n` +
+        `🎁 /referral — Kode referral & program diskon\n` +
+        `🎫 /tiket PERTANYAAN — Buat tiket support\n` +
+        `🔍 /cektiket ID — Cek status tiket kamu\n` +
+        `👤 /myid — Lihat Telegram ID kamu\n\n` +
+        `<b>⏱ Cara Bayar:</b>\n` +
+        `/start → Beli License → Pilih produk → Bayar → Key otomatis dikirim\n\n` +
+        `<b>⏱ Cara Aktivasi Key:</b>\n` +
+        `Buka ClipperSkuy → Settings → License → Paste key → Activate\n\n` +
+        `<i>Butuh bantuan lain? Hubungi admin atau buat tiket.</i>`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🛒 Beli License', 'catalog'),
+            Markup.button.callback('🔑 Cek License', 'my_license')],
+            [Markup.button.callback('🎫 Buat Tiket', 'open_ticket'),
+            Markup.button.callback('📞 Hubungi Admin', 'contact')],
+            [Markup.button.callback('⬅️ Menu Utama', 'back_start')]
+        ])
     );
 });
 
