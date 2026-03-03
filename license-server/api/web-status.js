@@ -5,7 +5,7 @@
 const { getSupabase } = require('./_lib/supabase');
 const { handleCors } = require('./_lib/helpers');
 
-const BAYARGG_BASE_URL = 'https://api.bayar.gg/v1';
+const BAYARGG_CHECK_URL = 'https://www.bayar.gg/api/check-payment';
 const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 const LICENSE_SERVER_SELF = process.env.VERCEL_URL
@@ -53,19 +53,18 @@ module.exports = async (req, res) => {
             return res.status(500).json({ error: 'Payment gateway not configured' });
         }
 
-        const statusRes = await fetch(`${BAYARGG_BASE_URL}/payment/status`, {
-            method: 'POST',
+        const statusRes = await fetch(`${BAYARGG_CHECK_URL}?invoice=${invoice_id}`, {
+            method: 'GET',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${BAYARGG_API_KEY}`
-            },
-            body: JSON.stringify({ invoice_id })
+                'X-API-Key': BAYARGG_API_KEY
+            }
         });
 
         const statusData = await statusRes.json();
-        console.log(`[web-status] ${invoice_id} → ${statusData.status}`);
+        const status = statusData.status || statusData.data?.status || (statusData.success && statusData.data ? statusData.data.status : null) || 'pending';
+        console.log(`[web-status] ${invoice_id} → ${status}`);
 
-        if (statusData.status !== 'paid') {
+        if (status !== 'paid') {
             return res.json({
                 paid: false,
                 status: statusData.status || 'pending',
@@ -107,6 +106,26 @@ module.exports = async (req, res) => {
                 }
             })
             .eq('id', log.id);
+
+        // Kirim email notifikasi jika ada email tersimpan
+        if (order.customer_email && order.customer_email !== 'buyer@clipperskuy.com') {
+            try {
+                await fetch(`${LICENSE_SERVER_SELF}/api/web-notify`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: order.customer_email,
+                        name: order.customer_name || 'Pengguna',
+                        license_key: licenseKey,
+                        invoice_id: invoice_id,
+                        product_name: order.product_id?.replace('_', ' ').replace('pro', 'Pro —') + ' Hari'
+                    })
+                });
+                console.log(`[web-status] Email sent to ${order.customer_email}`);
+            } catch (emailErr) {
+                console.error('[web-status] Email send failed (non-fatal):', emailErr.message);
+            }
+        }
 
         return res.json({
             paid: true,

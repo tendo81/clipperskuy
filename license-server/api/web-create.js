@@ -7,7 +7,8 @@
 const { getSupabase } = require('./_lib/supabase');
 const { handleCors, parseBody } = require('./_lib/helpers');
 
-const BAYARGG_BASE_URL = 'https://api.bayar.gg/v1';
+const BAYARGG_CREATE_URL = 'https://www.bayar.gg/api/create-payment.php';
+const BAYARGG_CHECK_URL = 'https://www.bayar.gg/api/check-payment';
 const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 const LICENSE_SERVER = process.env.VERCEL_URL
@@ -36,7 +37,7 @@ module.exports = async (req, res) => {
     }
 
     const body = await parseBody(req);
-    const { product_id, name } = body;
+    const { product_id, name, email } = body;
 
     const product = PRODUCTS[product_id];
     if (!product) {
@@ -44,42 +45,60 @@ module.exports = async (req, res) => {
     }
 
     const customerName = (name || 'Customer').substring(0, 50).trim() || 'Customer';
+    const customerEmail = (email || '').substring(0, 100).trim().toLowerCase() || null;
     const orderId = generateOrderId();
     const db = getSupabase();
 
     try {
         // Create payment via bayar.gg
-        const payRes = await fetch(`${BAYARGG_BASE_URL}/payment/create`, {
+        const QRIS_STRING = process.env.BAYARGG_QRIS_STRING || null;
+
+        const payBody = {
+            amount: product.price,
+            description: `ClipperSkuy License - Order ${orderId}`,
+            customer_name: customerName,
+            payment_method: 'QRIS'
+        };
+
+        // Aktifkan QRIS converter hanya jika qris_string tersedia
+        if (QRIS_STRING) {
+            payBody.use_qris_converter = true;
+            payBody.qris_string = QRIS_STRING;
+        }
+
+        const payRes = await fetch(BAYARGG_CREATE_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${BAYARGG_API_KEY}`
+                'X-API-Key': BAYARGG_API_KEY
             },
-            body: JSON.stringify({
-                external_id: orderId,
-                amount: product.price,
-                payment_method: 'QRIS',
-                customer_name: customerName,
-                customer_email: 'buyer@clipperskuy.com',
-                description: `${product.name} - ClipperSkuy`,
-                expired_time: 30 // 30 minutes
-            })
+            body: JSON.stringify(payBody)
         });
 
         const payData = await payRes.json();
+        console.log('[web-create] bayar.gg response:', JSON.stringify(payData));
 
-        if (!payData.success && !payData.invoice_id) {
+        if (!payData.success || !payData.data) {
             console.error('[web-create] bayar.gg error:', payData);
             return res.status(502).json({ error: 'Gagal membuat pembayaran. Coba lagi.' });
         }
 
-        const invoiceId = payData.invoice_id;
-        const finalAmount = payData.final_amount || product.price;
-        const uniqueCode = payData.unique_code || 0;
-        const paymentUrl = payData.payment_url || null;
-        const qrString = payData.qr_string || null;
-        const qrImage = payData.qr_image || null;
-        const expiresAt = payData.expires_at || null;
+        const d = payData.data;
+        const invoiceId = d.invoice_id;
+        const finalAmount = d.final_amount || product.price;
+        const uniqueCode = d.unique_code || 0;
+        const paymentUrl = d.payment_url || null;
+        const expiresAt = d.expires_at || null;
+
+        // Ambil QRIS asli dari converter (GoPay QRIS yang sudah disetup di dashboard)
+        const qrisConverter = d.qris_converter || null;
+        const qrImageUrl = qrisConverter?.qr_image_url || null;
+        const convertedQris = qrisConverter?.converted_qris || null;
+
+        // Fallback: generate QR dari payment_url jika converter tidak aktif
+        const qrData = encodeURIComponent(paymentUrl || invoiceId);
+        const qrFallback = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=png&qzone=2&data=${qrData}`;
+        const qrImage = qrImageUrl || qrFallback;
 
         // Store order in audit log with action 'web_order'
         await db.from('license_audit_log').insert({
@@ -96,6 +115,7 @@ module.exports = async (req, res) => {
                 price: product.price,
                 final_amount: finalAmount,
                 customer_name: customerName,
+                customer_email: customerEmail,
                 status: 'pending',
                 license_key: null,
                 created_at: new Date().toISOString()
@@ -107,7 +127,6 @@ module.exports = async (req, res) => {
             order_id: orderId,
             invoice_id: invoiceId,
             payment_url: paymentUrl,
-            qr_string: qrString,
             qr_image: qrImage,
             amount: finalAmount,
             unique_code: uniqueCode,
