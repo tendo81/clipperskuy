@@ -519,18 +519,31 @@ bot.action('my_license', async (ctx) => {
 // Quick action: download dari start menu
 bot.action('download_action', async (ctx) => {
     await ctx.answerCbQuery();
-    const DOWNLOAD_LINK = process.env.DOWNLOAD_URL || 'https://github.com/tendo81/clipperskuy/releases';
-    await ctx.replyWithHTML(
-        `📥 <b>Download ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `🖥 <b>Windows (64-bit)</b> — versi terbaru ada di GitHub Releases.\n\n` +
-        `📖 Butuh bantuan instalasi? Bergabunglah ke grup support.\n\n` +
-        `<i>Setelah download, aktifkan license di Settings → License</i>`,
-        Markup.inlineKeyboard([
-            [Markup.button.url('⬇️ Download App', DOWNLOAD_LINK)],
-            [Markup.button.url('📖 Grup Support & Tutorial', SUPPORT_GROUP)],
-            [Markup.button.callback('⬅️ Kembali', 'back_start')]
-        ])
-    );
+    const hasDownloadUrl = !!process.env.DOWNLOAD_URL;
+    if (hasDownloadUrl) {
+        await ctx.replyWithHTML(
+            `📥 <b>Download ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+            `🖥 <b>Windows (64-bit)</b> — versi terbaru tersedia!\n\n` +
+            `<i>Setelah download, aktifkan license di Settings → License</i>`,
+            Markup.inlineKeyboard([
+                [Markup.button.url('⬇️ Download App', process.env.DOWNLOAD_URL)],
+                [Markup.button.url('📖 Grup Support & Tutorial', SUPPORT_GROUP)],
+                [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            ])
+        );
+    } else {
+        await ctx.replyWithHTML(
+            `🕒 <b>Download Coming Soon!</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+            `🛠 ClipperSkuy sedang dalam tahap pengembangan akhir.\n` +
+            `Kami sedang memperbaiki beberapa bug sebelum rilis resmi.\n\n` +
+            `📣 <b>Ingin tahu duluan saat rilis?</b>\n` +
+            `Gabung grup kami dan aktifkan notifikasi ↓`,
+            Markup.inlineKeyboard([
+                [Markup.button.url('📢 Gabung Grup & Dapat Notif Rilis', SUPPORT_GROUP)],
+                [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            ])
+        );
+    }
 });
 
 // Quick action: referral dari start menu
@@ -2380,18 +2393,29 @@ const DOWNLOAD_URL = process.env.DOWNLOAD_URL || 'https://github.com/tendo81/cli
 const DOCS_URL = process.env.DOCS_URL || 'https://t.me/+GANTI_DENGAN_LINK_GRUP';
 
 bot.command('download', async (ctx) => {
-    await ctx.replyWithHTML(
-        `📥 <b>Download ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `🖥 <b>Windows (64-bit)</b>\nUnduh versi terbaru di link bawah:\n\n` +
-        `⚡ Versi terbaru selalu di GitHub Releases.\n` +
-        `📖 Butuh panduan? Gabung grup support.\n\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `<i>Setelah download, aktifkan license di Settings → License</i>`,
-        Markup.inlineKeyboard([
-            [Markup.button.url('⬇️ Download App', DOWNLOAD_URL)],
-            [Markup.button.url('📖 Grup Support', SUPPORT_GROUP)],
-        ])
-    );
+    const hasDownloadUrl = !!process.env.DOWNLOAD_URL;
+    if (hasDownloadUrl) {
+        await ctx.replyWithHTML(
+            `📥 <b>Download ClipperSkuy</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+            `🖥 <b>Windows (64-bit)</b> — versi terbaru tersedia!\n\n` +
+            `<i>Setelah download, aktifkan license di Settings → License</i>`,
+            Markup.inlineKeyboard([
+                [Markup.button.url('⬇️ Download App', process.env.DOWNLOAD_URL)],
+                [Markup.button.url('📖 Grup Support', SUPPORT_GROUP)],
+            ])
+        );
+    } else {
+        await ctx.replyWithHTML(
+            `🕒 <b>Download Coming Soon!</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+            `🛠 ClipperSkuy sedang dalam tahap pengembangan akhir.\n` +
+            `Kami sedang memperbaiki beberapa bug sebelum rilis resmi.\n\n` +
+            `📣 <b>Ingin tahu duluan saat rilis?</b>\n` +
+            `Gabung grup kami dan aktifkan notifikasi!`,
+            Markup.inlineKeyboard([
+                [Markup.button.url('📢 Gabung Grup & Dapat Notif Rilis', SUPPORT_GROUP)],
+            ])
+        );
+    }
 });
 
 // ============================================================
