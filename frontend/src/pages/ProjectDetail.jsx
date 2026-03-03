@@ -120,6 +120,8 @@ export default function ProjectDetail() {
     const [socialModal, setSocialModal] = useState(null); // { clipId, loading, data, error, activeTab, hookStyle }
     const [generatingHooks, setGeneratingHooks] = useState(false);
     const [hookGenProgress, setHookGenProgress] = useState({ current: 0, total: 0, style: '' });
+    // Thumbnail Picker state
+    const [thumbnailModal, setThumbnailModal] = useState(null); // { clipId, loading, thumbnails, error }
 
     const hookStyles = [
         { id: 'drama', label: '🎭 Drama', desc: 'Emosional & bikin nangis' },
@@ -152,6 +154,22 @@ export default function ProjectDetail() {
             }
         } catch (err) {
             setSocialModal(prev => ({ ...prev, loading: false, error: err.message }));
+        }
+    };
+
+    // Generate thumbnails from clip video frames
+    const generateThumbnails = async (clipId) => {
+        setThumbnailModal({ clipId, loading: true, thumbnails: [], error: null });
+        try {
+            const res = await fetch(`${API}/projects/clips/${clipId}/thumbnails`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                setThumbnailModal(prev => ({ ...prev, loading: false, thumbnails: data.thumbnails }));
+            } else {
+                setThumbnailModal(prev => ({ ...prev, loading: false, error: data.error }));
+            }
+        } catch (err) {
+            setThumbnailModal(prev => ({ ...prev, loading: false, error: err.message }));
         }
     };
 
@@ -1623,6 +1641,20 @@ export default function ProjectDetail() {
                                                             <Sparkles size={14} /> Generate Social Media Copy
                                                         </button>
                                                     </div>
+
+                                                    {/* Thumbnail Picker */}
+                                                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+                                                        <button
+                                                            className="btn btn-ghost btn-sm"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                generateThumbnails(clip.id);
+                                                            }}
+                                                            style={{ gap: 6, fontSize: 12, color: '#06b6d4', width: '100%', justifyContent: 'center' }}
+                                                        >
+                                                            🖼️ Auto Thumbnail — Pilih Frame Terbaik
+                                                        </button>
+                                                    </div>
                                                 </motion.div>
                                             )}
                                         </motion.div>
@@ -1974,6 +2006,124 @@ export default function ProjectDetail() {
                                     {savingTranscript ? <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CheckCircle size={14} />}
                                     Import Transcript
                                 </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Thumbnail Picker Modal */}
+            <AnimatePresence>
+                {thumbnailModal && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        style={{
+                            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+                            zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
+                        }}
+                        onClick={() => setThumbnailModal(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.92, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                background: 'var(--bg-secondary)', borderRadius: 16, width: '100%', maxWidth: 680,
+                                maxHeight: '85vh', overflow: 'auto', border: '1px solid var(--border-subtle)'
+                            }}
+                        >
+                            {/* Header */}
+                            <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <span style={{ fontSize: 20 }}>🖼️</span>
+                                    <div>
+                                        <div style={{ fontWeight: 700, fontSize: 16 }}>Auto Thumbnail</div>
+                                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Pilih frame terbaik sebagai thumbnail</div>
+                                    </div>
+                                </div>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setThumbnailModal(null)}><X size={18} /></button>
+                            </div>
+
+                            {/* Body */}
+                            <div style={{ padding: 24 }}>
+                                {thumbnailModal.loading ? (
+                                    <div style={{ textAlign: 'center', padding: '48px 0' }}>
+                                        <Loader size={32} style={{ color: '#06b6d4', animation: 'spin 1s linear infinite', marginBottom: 12 }} />
+                                        <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>Mengekstrak frame dari video...</div>
+                                    </div>
+                                ) : thumbnailModal.error ? (
+                                    <div style={{ textAlign: 'center', padding: '32px 0', color: '#ef4444' }}>
+                                        <AlertCircle size={32} style={{ marginBottom: 10 }} />
+                                        <div style={{ fontSize: 14 }}>{thumbnailModal.error}</div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+                                            Klik frame untuk <b>download</b> atau <b>copy URL</b>-nya. Gunakan sebagai thumbnail di TikTok, YouTube, Instagram, dll.
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                                            {thumbnailModal.thumbnails.map((thumb) => (
+                                                <div key={thumb.index} style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: '2px solid var(--border-subtle)', cursor: 'pointer', transition: 'all 0.2s' }}
+                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#06b6d4'; e.currentTarget.style.transform = 'scale(1.02)'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.transform = 'scale(1)'; }}>
+                                                    <img
+                                                        src={thumb.url}
+                                                        alt={thumb.label}
+                                                        style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+                                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                                    />
+                                                    {/* Label */}
+                                                    <div style={{
+                                                        position: 'absolute', bottom: 0, left: 0, right: 0,
+                                                        background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                                                        padding: '16px 8px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                                                    }}>
+                                                        <span style={{ fontSize: 11, fontWeight: 700, color: '#fff' }}>{thumb.label}</span>
+                                                        <div style={{ display: 'flex', gap: 4 }}>
+                                                            <button
+                                                                title="Download"
+                                                                onClick={(e) => { e.stopPropagation(); window.open(thumb.url, '_blank'); }}
+                                                                style={{ background: 'rgba(6,182,212,0.85)', border: 'none', borderRadius: 5, padding: '3px 6px', cursor: 'pointer', color: '#fff', fontSize: 10, fontWeight: 600 }}>
+                                                                ⬇ DL
+                                                            </button>
+                                                            <button
+                                                                title="Copy URL"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    navigator.clipboard.writeText(thumb.url);
+                                                                    const btn = e.currentTarget;
+                                                                    btn.textContent = '✅';
+                                                                    setTimeout(() => { btn.textContent = '📋'; }, 1500);
+                                                                }}
+                                                                style={{ background: 'rgba(139,92,246,0.85)', border: 'none', borderRadius: 5, padding: '3px 6px', cursor: 'pointer', color: '#fff', fontSize: 10, fontWeight: 600 }}>
+                                                                📋
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {thumbnailModal.thumbnails.length === 0 && (
+                                            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)' }}>
+                                                Tidak ada frame yang berhasil diekstrak.
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Footer */}
+                            <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                    {!thumbnailModal.loading && !thumbnailModal.error && `${thumbnailModal.thumbnails.length} frames`}
+                                </span>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    {!thumbnailModal.loading && thumbnailModal.thumbnails.length > 0 && (
+                                        <button className="btn btn-secondary btn-sm" onClick={() => generateThumbnails(thumbnailModal.clipId)} style={{ gap: 6, fontSize: 12 }}>
+                                            <RefreshCw size={13} /> Refresh
+                                        </button>
+                                    )}
+                                    <button className="btn btn-ghost btn-sm" onClick={() => setThumbnailModal(null)}>Tutup</button>
+                                </div>
                             </div>
                         </motion.div>
                     </motion.div>
