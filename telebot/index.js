@@ -168,9 +168,9 @@ const PRODUCTS = {
     pro_90: {
         id: 'pro_90', name: '⚡ ClipperSkuy Pro',
         desc: '90 Hari (3 Bulan)', tier: 'pro', duration: 90,
-        price: parseInt(process.env.PRICE_PRO_90) || 150000,
+        price: parseInt(process.env.PRICE_PRO_90) || 129000,
         originalPrice: 179000,
-        emoji: '⚡', badge: '💰 HEMAT 16%'
+        emoji: '⚡', badge: '💰 HEMAT 28%'
     },
     pro_365: {
         id: 'pro_365', name: '⚡ ClipperSkuy Pro',
