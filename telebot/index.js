@@ -705,6 +705,8 @@ bot.action(/^pay_(.+)$/, async (ctx) => {
             order.final_amount = finalAmount;
             saveDB(db);
             startPaymentPolling(ctx, orderId);
+            notifyAdminNewOrder(bot, order);
+            schedulePaymentReminder(bot, order);
             return;
         }
     }
@@ -2202,6 +2204,414 @@ function startDailyTaskScheduler(botInstance) {
     }, 5 * 60 * 1000); // setiap 5 menit
     // Langsung run sekali saat startup
     setTimeout(() => runDailyTasks(botInstance).catch(() => { }), 10000);
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #1 — TIKET SUPPORT
+// User: /tiket PERTANYAAN — Admin: reply via /reply TICKET_ID JAWABAN
+// ═══════════════════════════════════════════════════════════════
+bot.command('tiket', async (ctx) => {
+    const userId = String(ctx.from.id);
+    const text = ctx.message.text.replace('/tiket', '').trim();
+    if (!text) return ctx.replyWithHTML('❌ Format: <code>/tiket PERTANYAAN KAMU</code>\nContoh: <code>/tiket Kenapa license saya tidak aktif?</code>');
+
+    if (!db.tickets) db.tickets = [];
+    const ticketId = 'TKT-' + Date.now().toString(36).toUpperCase();
+    const ticket = {
+        id: ticketId, user_id: userId,
+        user_name: ctx.from.first_name, username: ctx.from.username || '',
+        message: text, status: 'open',
+        created_at: new Date().toISOString(), replied_at: null, reply: null
+    };
+    db.tickets.push(ticket);
+    saveDB(db);
+
+    await ctx.replyWithHTML(
+        `✅ <b>Tiket Support Dibuat!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `🎫 ID Tiket: <code>${ticketId}</code>\n` +
+        `📝 Pertanyaan: ${text}\n\n` +
+        `⏳ Admin akan membalas dalam 1×24 jam.\nSimpan ID tiket untuk cek status: <code>/cektiket ${ticketId}</code>`
+    );
+    for (const adminId of ADMIN_IDS) {
+        try {
+            await ctx.telegram.sendMessage(adminId,
+                `🎫 <b>TIKET BARU!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+                `🆔 ID: <code>${ticketId}</code>\n` +
+                `👤 ${ticket.user_name} (@${ticket.username || '-'}) | ID: <code>${userId}</code>\n` +
+                `📝 ${text}\n\n` +
+                `Balas dengan: <code>/reply ${ticketId} JAWABAN_KAMU</code>`,
+                { parse_mode: 'HTML' }
+            );
+        } catch (e) { }
+    }
+});
+
+bot.command('cektiket', async (ctx) => {
+    const ticketId = ctx.message.text.split(' ')[1]?.trim();
+    if (!ticketId) return ctx.reply('❌ Format: /cektiket TICKET_ID');
+    const ticket = (db.tickets || []).find(t => t.id === ticketId);
+    if (!ticket) return ctx.reply('❌ Tiket tidak ditemukan.');
+    const statusIcon = ticket.status === 'closed' ? '✅ Selesai' : ticket.status === 'replied' ? '💬 Sudah dibalas' : '⏳ Menunggu';
+    await ctx.replyWithHTML(
+        `🎫 <b>Status Tiket ${ticketId}</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `📝 Pertanyaan: ${ticket.message}\n` +
+        `📊 Status: ${statusIcon}\n` +
+        (ticket.reply ? `\n💬 <b>Balasan Admin:</b>\n${ticket.reply}` : '')
+    );
+});
+
+bot.command('reply', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 3) return ctx.reply('❌ Format: /reply TICKET_ID JAWABAN\nContoh: /reply TKT-ABC123 License sudah diaktifkan ya!');
+    const ticketId = parts[1].trim();
+    const replyText = parts.slice(2).join(' ');
+    const ticket = (db.tickets || []).find(t => t.id === ticketId);
+    if (!ticket) return ctx.reply('❌ Tiket tidak ditemukan.');
+    ticket.status = 'replied'; ticket.reply = replyText; ticket.replied_at = new Date().toISOString();
+    saveDB(db);
+    try {
+        await ctx.telegram.sendMessage(ticket.user_id,
+            `✅ <b>Tiket kamu sudah dibalas!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+            `🎫 ID: <code>${ticketId}</code>\n📝 Pertanyaanmu: ${ticket.message}\n\n💬 <b>Balasan:</b>\n${replyText}`,
+            { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('📞 Tanya Lagi', 'contact')]]) }
+        );
+        await ctx.reply(`✅ Balasan terkirim ke user ${ticket.user_name}!`);
+    } catch (e) { await ctx.reply(`⚠️ Gagal kirim ke user: ${e.message}`); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #2 — FLASH SALE / PROMO TIMER
+// Admin: /flashsale PRODUCT_ID DISKON% DURASI_MENIT PESAN
+// Contoh: /flashsale pro_30 30 60 Flash Sale 1 Jam!
+// ═══════════════════════════════════════════════════════════════
+let activeFlashSale = null;
+
+bot.command('flashsale', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 4) {
+        return ctx.replyWithHTML(
+            '❌ Format: <code>/flashsale PRODUCT_ID DISKON% DURASI_MENIT PESAN</code>\n' +
+            'Contoh: <code>/flashsale pro_30 30 60 Flash Sale Hari Ini!</code>\n\n' +
+            'Product ID: ' + Object.keys(PRODUCTS).map(id => `<code>${id}</code>`).join(', ')
+        );
+    }
+    const [, productId, discountStr, durationStr, ...msgParts] = parts;
+    const product = PRODUCTS[productId];
+    if (!product) return ctx.reply('❌ Product tidak ditemukan.');
+    const discountPercent = parseInt(discountStr);
+    const durationMin = parseInt(durationStr);
+    const customMsg = msgParts.join(' ') || 'Flash Sale!';
+    const endTime = new Date(Date.now() + durationMin * 60000);
+    const flashCode = 'FLASH' + Date.now().toString(36).toUpperCase().slice(-4);
+
+    // Register diskon code
+    if (!db.discounts) db.discounts = {};
+    db.discounts[flashCode] = {
+        active: true, percent: discountPercent, type: 'percent',
+        quota: 50, used: 0, expires_at: endTime.toISOString(), products: [productId]
+    };
+    saveDB(db);
+    activeFlashSale = { productId, discountPercent, endTime, flashCode };
+
+    // Broadcast ke semua user
+    const saleMsg =
+        `⚡ <b>FLASH SALE — ${customMsg}</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `📦 ${product.name} (${product.desc})\n` +
+        `💰 Harga Normal: <s>${formatPrice(product.price)}</s>\n` +
+        `🔥 Harga Flash: <b>${formatPrice(Math.floor(product.price * (100 - discountPercent) / 100))}</b> (-${discountPercent}%)\n\n` +
+        `⏱ Berakhir: ${endTime.toLocaleString('id-ID')}\n` +
+        `🎟 Kode: <code>${flashCode}</code>\n\n` +
+        `👉 Gunakan kode ini saat checkout!`;
+
+    const allUserIds = Object.keys(db.users);
+    let sent = 0;
+    await ctx.reply(`📡 Broadcasting flash sale ke ${allUserIds.length} user...`);
+    for (const uid of allUserIds) {
+        try {
+            await ctx.telegram.sendMessage(uid, saleMsg, {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([[Markup.button.callback('🛒 Beli Sekarang', `buy_${productId}`)]])
+            });
+            sent++;
+            await new Promise(r => setTimeout(r, 50));
+        } catch (e) { }
+    }
+    await ctx.reply(`✅ Flash sale aktif!\n📤 Broadcast ke ${sent} user\n🎟 Kode: ${flashCode}\n⏱ Berakhir: ${endTime.toLocaleString('id-ID')}`);
+
+    // Auto-nonaktifkan setelah waktu habis
+    setTimeout(() => {
+        if (db.discounts[flashCode]) { db.discounts[flashCode].active = false; saveDB(db); }
+        activeFlashSale = null;
+        console.log(`[FlashSale] ${flashCode} expired`);
+    }, durationMin * 60000);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #3 — BLACKLIST LICENSE
+// Admin: /blacklist LICENSE_KEY ALASAN
+// ═══════════════════════════════════════════════════════════════
+bot.command('blacklist', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 2) return ctx.reply('❌ Format: /blacklist LICENSE_KEY [ALASAN]');
+    const licenseKey = parts[1].trim();
+    const reason = parts.slice(2).join(' ') || 'Pelanggaran TOS';
+
+    if (!db.blacklisted_keys) db.blacklisted_keys = {};
+    db.blacklisted_keys[licenseKey] = { reason, blacklisted_at: new Date().toISOString() };
+    saveDB(db);
+
+    // Cari order dengan key ini dan notify user
+    const order = db.orders.find(o => o.license_key === licenseKey);
+    if (order) {
+        try {
+            await ctx.telegram.sendMessage(order.user_id,
+                `⚠️ <b>License Kamu Dinonaktifkan</b>\n\nLicense key kamu telah dinonaktifkan karena: <i>${reason}</i>\n\nHubungi admin untuk info lebih lanjut.`,
+                { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('📞 Hubungi Admin', 'contact')]]) }
+            );
+        } catch (e) { }
+    }
+    await ctx.replyWithHTML(`🚫 License <code>${licenseKey}</code> diblacklist.\nAlasan: ${reason}${order ? `\n👤 User: ${order.user_name} (${order.user_id}) sudah dinotifikasi.` : ''}`);
+});
+
+bot.command('unblacklist', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const licenseKey = ctx.message.text.split(' ')[1]?.trim();
+    if (!licenseKey) return ctx.reply('❌ Format: /unblacklist LICENSE_KEY');
+    if (db.blacklisted_keys?.[licenseKey]) {
+        delete db.blacklisted_keys[licenseKey]; saveDB(db);
+        await ctx.replyWithHTML(`✅ License <code>${licenseKey}</code> dihapus dari blacklist.`);
+    } else { await ctx.reply('⚠️ Key tidak ada di blacklist.'); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #4 — BLOCK / UNBLOCK USER (Anti-abuse)
+// Admin: /blockuser USER_ID  |  /unblockuser USER_ID
+// ═══════════════════════════════════════════════════════════════
+if (!db.blocked_users) db.blocked_users = {};
+
+// Middleware: cek block di setiap request
+bot.use(async (ctx, next) => {
+    const userId = String(ctx.from?.id || '');
+    if (userId && db.blocked_users?.[userId]) {
+        return ctx.reply('🚫 Akun kamu telah diblokir. Hubungi admin jika ada kesalahan.');
+    }
+    return next();
+});
+
+bot.command('blockuser', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    const targetId = parts[1]?.trim();
+    const reason = parts.slice(2).join(' ') || 'Abuse/spam';
+    if (!targetId) return ctx.reply('❌ Format: /blockuser USER_ID [ALASAN]');
+    if (!db.blocked_users) db.blocked_users = {};
+    db.blocked_users[targetId] = { reason, blocked_at: new Date().toISOString() };
+    saveDB(db);
+    await ctx.replyWithHTML(`🚫 User <code>${targetId}</code> diblokir.\nAlasan: ${reason}`);
+});
+
+bot.command('unblockuser', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const targetId = ctx.message.text.split(' ')[1]?.trim();
+    if (!targetId) return ctx.reply('❌ Format: /unblockuser USER_ID');
+    if (db.blocked_users?.[targetId]) {
+        delete db.blocked_users[targetId]; saveDB(db);
+        await ctx.replyWithHTML(`✅ User <code>${targetId}</code> diunblokir.`);
+    } else { await ctx.reply('⚠️ User tidak diblokir.'); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #5 — RIWAYAT PEMBELIAN USER
+// ═══════════════════════════════════════════════════════════════
+bot.command('riwayat', async (ctx) => {
+    const userId = String(ctx.from.id);
+    const myOrders = db.orders.filter(o => o.user_id === userId).slice(-10).reverse();
+    if (myOrders.length === 0) return ctx.reply('📋 Kamu belum punya histori pembelian.\n\nGunakan /start untuk beli.');
+    let text = `📋 <b>Riwayat Pembelian</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
+    for (const o of myOrders) {
+        const icon = o.status === 'paid' ? '✅' : o.status === 'cancelled' ? '❌' : o.status === 'expired' ? '⏱' : '⏳';
+        text += `${icon} <b>${o.product_name}</b>\n` +
+            `💰 ${formatPrice(o.price)} | 📅 ${new Date(o.created_at).toLocaleDateString('id-ID')}\n` +
+            `🆔 <code>${o.id}</code>\n\n`;
+    }
+    await ctx.replyWithHTML(text);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #6 — AUTO REPLY KEYWORD
+// ═══════════════════════════════════════════════════════════════
+const AUTO_REPLIES = {
+    'harga': `💰 <b>Harga ClipperSkuy:</b>\n⚡ Pro 30 Hari — <b>Rp69.000</b>\n⚡ Pro 90 Hari — <b>Rp150.000</b>\n⚡ Pro 365 Hari — <b>Rp250.000</b>\n\nGunakan /start untuk beli!`,
+    'cara bayar': `💳 <b>Cara Bayar:</b>\n1. Ketuk /start\n2. Pilih produk\n3. Klik "Bayar"\n4. Scan QRIS atau bayar via GoPay\n5. Key otomatis dikirim!`,
+    'cara aktivasi': `🔑 <b>Cara Aktivasi:</b>\n1. Buka ClipperSkuy\n2. Klik Settings\n3. Pilih menu License\n4. Paste license key\n5. Klik Activate`,
+    'download': `📥 Gunakan /download untuk link download terbaru.`,
+    'expired': `⏱ Cek status license kamu dengan /ceklicense\nUntuk perpanjang, klik tombol Perpanjang di sana.`,
+    'gagal': `❌ Ada masalah? Buat tiket: /tiket MASALAH_KAMU\nAtau hubungi admin langsung.`,
+    'tidak bisa': `❌ Ada masalah? Gunakan /tiket DESKRIPSI_MASALAH untuk buat laporan ke admin.`,
+    'refund': `🔁 Kebijakan refund: Lisensi yang sudah diaktivasi tidak dapat di-refund.\nHubungi admin jika ada masalah teknis.`,
+    'free': `✅ Ada trial gratis 3 hari! Gunakan /start dan pilih coba gratis.`,
+    'trial': `✅ Ada trial gratis 3 hari! Gunakan /start dan pilih coba gratis.`,
+    'diskon': `🏷 Punya kode promo? Masukkan saat checkout.\nAtau gunakan /referral untuk dapat kode diskon!`,
+    'promo': `🔥 Cek promo terbaru dengan /start — atau minta kode dari teman yang sudah beli via /referral!`
+};
+
+bot.on('text', async (ctx, next) => {
+    // Skip kalau command
+    if (ctx.message.text.startsWith('/')) return next();
+    const textLower = ctx.message.text.toLowerCase();
+    for (const [keyword, reply] of Object.entries(AUTO_REPLIES)) {
+        if (textLower.includes(keyword)) {
+            await ctx.replyWithHTML(reply);
+            return; // hanya reply 1 keyword
+        }
+    }
+    return next();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #8 — REMINDER BELUM BAYAR (10 menit setelah order)
+// ═══════════════════════════════════════════════════════════════
+function schedulePaymentReminder(botInstance, order) {
+    setTimeout(async () => {
+        const freshOrder = db.orders.find(o => o.id === order.id);
+        if (!freshOrder || freshOrder.status === 'paid' || freshOrder.status === 'cancelled') return;
+        try {
+            await botInstance.telegram.sendMessage(freshOrder.user_id,
+                `⏰ <b>Jangan lupa bayar!</b>\n\n` +
+                `🆔 Order <code>${freshOrder.id}</code> kamu belum selesai.\n` +
+                `📦 ${freshOrder.product_name} — ${formatPrice(freshOrder.price)}\n\n` +
+                `Selesaikan pembayaran sekarang sebelum expired! ⚡`,
+                {
+                    parse_mode: 'HTML',
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback('💳 Lanjut Bayar', `pay_${freshOrder.id}`)],
+                        [Markup.button.callback('❌ Batalkan', `cancel_${freshOrder.id}`)]
+                    ])
+                }
+            );
+        } catch (e) { }
+    }, 10 * 60 * 1000); // 10 menit
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #9 — DASHBOARD ADMIN /stats
+// ═══════════════════════════════════════════════════════════════
+bot.command('stats', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const now = new Date();
+    const WIB = new Date(now.getTime() + 7 * 3600000);
+    const todayStr = WIB.toISOString().substring(0, 10);
+    const thisMonthStr = WIB.toISOString().substring(0, 7);
+
+    const allOrders = db.orders || [];
+    const paidOrders = allOrders.filter(o => o.status === 'paid');
+    const todayOrders = paidOrders.filter(o => o.paid_at?.startsWith(todayStr) || new Date(new Date(o.paid_at).getTime() + 7 * 3600000).toISOString().startsWith(todayStr));
+    const monthOrders = paidOrders.filter(o => { const wib = new Date(new Date(o.paid_at).getTime() + 7 * 3600000); return wib.toISOString().startsWith(thisMonthStr); });
+    const pendingOrders = allOrders.filter(o => ['waiting_payment', 'pending'].includes(o.status));
+
+    const todayRev = todayOrders.reduce((s, o) => s + (o.price || 0), 0);
+    const monthRev = monthOrders.reduce((s, o) => s + (o.price || 0), 0);
+    const totalRev = db.stats?.total_revenue || paidOrders.reduce((s, o) => s + (o.price || 0), 0);
+
+    // Produk terlaris
+    const productCount = {};
+    paidOrders.forEach(o => { productCount[o.product_id] = (productCount[o.product_id] || 0) + 1; });
+    const topProduct = Object.entries(productCount).sort((a, b) => b[1] - a[1])[0];
+
+    // Rating stats
+    const ratedOrders = paidOrders.filter(o => o.rating);
+    const avgRating = ratedOrders.length > 0 ? (ratedOrders.reduce((s, o) => s + o.rating, 0) / ratedOrders.length).toFixed(1) : '-';
+
+    const report =
+        `📊 <b>DASHBOARD ADMIN</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `📅 <b>Hari ini (${todayStr}):</b>\n` +
+        `   ✅ Order: ${todayOrders.length} | 💰 ${formatPrice(todayRev)}\n\n` +
+        `📅 <b>Bulan ini (${thisMonthStr}):</b>\n` +
+        `   ✅ Order: ${monthOrders.length} | 💰 ${formatPrice(monthRev)}\n\n` +
+        `📈 <b>All Time:</b>\n` +
+        `   ✅ Total order: ${paidOrders.length}\n` +
+        `   💰 Total revenue: ${formatPrice(totalRev)}\n` +
+        `   👥 Total user: ${Object.keys(db.users || {}).length}\n\n` +
+        `⏳ <b>Pending bayar:</b> ${pendingOrders.length} order\n` +
+        `🎫 <b>Tiket open:</b> ${(db.tickets || []).filter(t => t.status === 'open').length}\n` +
+        `🚫 <b>User diblokir:</b> ${Object.keys(db.blocked_users || {}).length}\n\n` +
+        `🏆 <b>Produk terlaris:</b> ${topProduct ? `${topProduct[0]} (${topProduct[1]}x)` : '-'}\n` +
+        `⭐ <b>Rating rata-rata:</b> ${avgRating}${ratedOrders.length > 0 ? ` (${ratedOrders.length} review)` : ''}\n\n` +
+        `<i>Update: ${now.toLocaleString('id-ID')}</i>`;
+
+    await ctx.replyWithHTML(report, Markup.inlineKeyboard([
+        [Markup.button.callback('📥 Export CSV', 'export_csv_action')],
+        [Markup.button.callback('🎫 Lihat Tiket Open', 'view_open_tickets')]
+    ]));
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #10 — EXPORT CSV
+// ═══════════════════════════════════════════════════════════════
+bot.command('exportcsv', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    await generateAndSendCSV(ctx);
+});
+
+bot.action('export_csv_action', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery('Generating CSV...');
+    await generateAndSendCSV(ctx);
+});
+
+async function generateAndSendCSV(ctx) {
+    const orders = db.orders || [];
+    if (orders.length === 0) return ctx.reply('❌ Tidak ada data order.');
+    const header = 'Order ID,Status,Produk,Harga,User ID,Nama,Username,License Key,Tanggal Beli,Tanggal Bayar\n';
+    const rows = orders.map(o =>
+        `"${o.id}","${o.status}","${o.product_name}","${o.price}","${o.user_id}","${o.user_name}","${o.username || ''}","${o.license_key || ''}","${o.created_at?.substring(0, 10) || ''}","${o.paid_at?.substring(0, 10) || ''}"`
+    ).join('\n');
+    const csvContent = header + rows;
+    const filename = `orders_${new Date().toISOString().substring(0, 10)}.csv`;
+    const tmpPath = path.join(__dirname, 'data', filename);
+    fs.writeFileSync(tmpPath, csvContent, 'utf-8');
+    try {
+        await ctx.replyWithDocument({ source: tmpPath, filename }, { caption: `📊 Export ${orders.length} orders — ${filename}` });
+    } finally { try { fs.unlinkSync(tmpPath); } catch (e) { } }
+}
+
+// Admin: lihat tiket open
+bot.action('view_open_tickets', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
+    await ctx.answerCbQuery();
+    const openTickets = (db.tickets || []).filter(t => t.status === 'open');
+    if (openTickets.length === 0) return ctx.reply('✅ Tidak ada tiket open.');
+    let text = `🎫 <b>Tiket Open (${openTickets.length})</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
+    for (const t of openTickets.slice(0, 10)) {
+        text += `🆔 <code>${t.id}</code> — ${t.user_name}: ${t.message.substring(0, 60)}...\n` +
+            `Balas: <code>/reply ${t.id} JAWABAN</code>\n\n`;
+    }
+    await ctx.replyWithHTML(text);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR #7 — NOTIF ORDER BARU KE ADMIN (REALTIME)
+// Sudah ada sendLog tapi tambah notif langsung ke semua admin
+// ═══════════════════════════════════════════════════════════════
+async function notifyAdminNewOrder(botInstance, order) {
+    for (const adminId of ADMIN_IDS) {
+        try {
+            await botInstance.telegram.sendMessage(adminId,
+                `🛒 <b>ORDER BARU!</b>\n━━━━━━━━━━━━━━━━━━\n` +
+                `🆔 <code>${order.id}</code>\n` +
+                `👤 ${order.user_name} (@${order.username || '-'})\n` +
+                `📦 ${order.product_name}\n` +
+                `💰 ${formatPrice(order.price)}\n` +
+                `⏰ ${new Date().toLocaleString('id-ID')}\n\n` +
+                `⏳ Menunggu pembayaran...`,
+                { parse_mode: 'HTML' }
+            );
+        } catch (e) { }
+    }
 }
 
 // ============ LAUNCH ============
