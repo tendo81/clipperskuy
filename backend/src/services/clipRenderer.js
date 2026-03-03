@@ -106,6 +106,39 @@ function validateOutput(outputPath) {
 }
 
 /**
+ * Build output filename from template.
+ * Supported tokens: {number}, {title}, {score}, {date}, {date_time}, {duration}, {project}, {id}
+ * Default template: '{number}_{title}'
+ */
+function buildOutputFilename(template, clip, project) {
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const durSec = Math.round((clip.end_time || 0) - (clip.start_time || 0));
+    const durStr = durSec >= 60 ? `${Math.floor(durSec / 60)}m${durSec % 60}s` : `${durSec}s`;
+
+    const sanitize = (str, maxLen = 40) => (str || '')
+        .replace(/[^a-zA-Z0-9\u00C0-\u024F\u0100-\u017E\u4e00-\u9fff\uac00-\ud7af\u3040-\u30ff_\-]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .substring(0, maxLen) || 'clip';
+
+    const tpl = (template || '{number}_{title}');
+    const filename = tpl
+        .replace(/\{number\}/g, String(clip.clip_number || 1).padStart(2, '0'))
+        .replace(/\{title\}/g, sanitize(clip.title))
+        .replace(/\{score\}/g, String(clip.virality_score || 0))
+        .replace(/\{date\}/g, dateStr)
+        .replace(/\{date_time\}/g, `${dateStr}_${timeStr}`)
+        .replace(/\{duration\}/g, durStr)
+        .replace(/\{project\}/g, sanitize(project.name, 20))
+        .replace(/\{id\}/g, (clip.id || '').slice(-6));
+
+    // Final sanitize entire filename and ensure no leading/trailing underscores
+    return sanitize(filename, 80) + '.mp4';
+}
+
+/**
  * Render a single clip from the source video
  * Tries preferred filter first, falls back to simple scale+crop on failure
  */
@@ -260,12 +293,9 @@ async function renderClip(clipId, io) {
     } catch (e) { /* ignore */ }
 
 
-    // Output path
-    const safeTitle = (clip.title || `clip${clip.clip_number}`)
-        .replace(/[^a-zA-Z0-9_\-]/g, '_')
-        .replace(/_+/g, '_')
-        .substring(0, 40);
-    const outputFilename = `clip${clip.clip_number}_${safeTitle}.mp4`;
+    // Output path — use filename template from settings
+    const filenameTemplate = settings.export_filename_template || '{number}_{title}';
+    const outputFilename = buildOutputFilename(filenameTemplate, clip, project);
     const projectClipsDir = path.join(CLIPS_DIR, project.id);
     fs.ensureDirSync(projectClipsDir);
     const outputPath = path.join(projectClipsDir, outputFilename);

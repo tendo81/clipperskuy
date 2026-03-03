@@ -32,6 +32,7 @@ export default function SettingsPage() {
     const [watermarkSpeed, setWatermarkSpeed] = useState(4); // seconds per cycle
     const [saved, setSaved] = useState(false);
     const [loaded, setLoaded] = useState(false);
+    const [exportFilenameTemplate, setExportFilenameTemplate] = useState('{number}_{title}');
 
     // App Customization state
     const [brandingAssets, setBrandingAssets] = useState({});
@@ -152,6 +153,9 @@ export default function SettingsPage() {
                 setSocialYoutube(settings.social_youtube || '');
                 setSocialTwitter(settings.social_twitter || '');
 
+                // Export filename template
+                setExportFilenameTemplate(settings.export_filename_template || '{number}_{title}');
+
                 // Brand Colors
                 setBrandPrimary(settings.brand_color_primary || '#8b5cf6');
                 setBrandSecondary(settings.brand_color_secondary || '#1a1a2e');
@@ -264,7 +268,9 @@ export default function SettingsPage() {
                     // Brand Colors
                     brand_color_primary: brandPrimary,
                     brand_color_secondary: brandSecondary,
-                    brand_color_accent: brandAccent
+                    brand_color_accent: brandAccent,
+                    // Export filename template
+                    export_filename_template: exportFilenameTemplate
                 })
             });
             setSaved(true);
@@ -730,6 +736,87 @@ export default function SettingsPage() {
                                 ? '🔒 1080p hanya tersedia untuk Pro. 720p cocok untuk TikTok/Reels.'
                                 : 'Resolusi output clip yang di-render. 720p lebih cepat dan cocok untuk TikTok/Reels.'
                             }
+                        </div>
+                    </div>
+
+                    {/* Export Filename Template */}
+                    <div className="form-group">
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            📁 Export Filename Template
+                        </label>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.5 }}>
+                            Atur format nama file saat di-export. Gunakan token di bawah.
+                        </div>
+                        <input
+                            className="input-field"
+                            style={{ fontFamily: 'monospace', fontSize: 13, maxWidth: 420 }}
+                            value={exportFilenameTemplate}
+                            onChange={e => setExportFilenameTemplate(e.target.value)}
+                            placeholder="{number}_{title}"
+                        />
+                        {/* Live preview */}
+                        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                            Preview: <span style={{ fontFamily: 'monospace', color: '#10b981' }}>
+                                {(exportFilenameTemplate || '{number}_{title}')
+                                    .replace('{number}', '01')
+                                    .replace('{title}', 'Rahasia_Kampung_Halaman')
+                                    .replace('{score}', '87')
+                                    .replace('{date}', '20260303')
+                                    .replace('{date_time}', '20260303_0741')
+                                    .replace('{duration}', '45s')
+                                    .replace('{project}', 'Sule_Podcast')
+                                    .replace('{id}', 'a1b2c3')
+                                    .replace(/[^a-zA-Z0-9_\-]/g, '_')
+                                    .replace(/_+/g, '_')
+                                    .slice(0, 60)}.mp4
+                            </span>
+                        </div>
+                        {/* Quick-pick tokens */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                            {[
+                                ['{number}', '#01'],
+                                ['{title}', 'Judul'],
+                                ['{score}', 'Viral Score'],
+                                ['{date}', 'Tanggal'],
+                                ['{date_time}', 'Tgl+Jam'],
+                                ['{duration}', 'Durasi'],
+                                ['{project}', 'Nama Project'],
+                                ['{id}', 'ID Clip']
+                            ].map(([token, label]) => (
+                                <button key={token}
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => setExportFilenameTemplate(prev => prev + token)}
+                                    title={`Tambah ${token}`}
+                                    style={{ fontSize: 11, padding: '2px 8px', border: '1px solid var(--border-subtle)', borderRadius: 6, fontFamily: 'monospace', gap: 4 }}
+                                >
+                                    <span style={{ color: '#06b6d4' }}>{token}</span>
+                                    <span style={{ opacity: 0.6, fontFamily: 'inherit' }}>{label}</span>
+                                </button>
+                            ))}
+                        </div>
+                        {/* Preset templates */}
+                        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', alignSelf: 'center' }}>Preset:</span>
+                            {[
+                                ['{number}_{title}', 'Default'],
+                                ['{number}_{title}_{score}', 'Dengan Score'],
+                                ['{project}_{number}_{title}', 'Dengan Project'],
+                                ['{date}_{number}_{title}', 'Dengan Tanggal'],
+                            ].map(([tpl, label]) => (
+                                <button key={tpl}
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => setExportFilenameTemplate(tpl)}
+                                    style={{
+                                        fontSize: 11, padding: '3px 10px',
+                                        background: exportFilenameTemplate === tpl ? 'rgba(16,185,129,0.15)' : 'none',
+                                        border: `1px solid ${exportFilenameTemplate === tpl ? '#10b981' : 'var(--border-subtle)'}`,
+                                        color: exportFilenameTemplate === tpl ? '#10b981' : 'var(--text-secondary)',
+                                        borderRadius: 6
+                                    }}
+                                >
+                                    {label}
+                                </button>
+                            ))}
                         </div>
                     </div>
 

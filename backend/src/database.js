@@ -269,7 +269,8 @@ async function initDatabase() {
     'default_platform': 'tiktok',
     'default_language': 'auto',
     'theme': 'dark',
-    'yt_cookie_browser': 'auto'
+    'yt_cookie_browser': 'auto',
+    'export_filename_template': '{number}_{title}'
   };
 
   const insertDefault = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
