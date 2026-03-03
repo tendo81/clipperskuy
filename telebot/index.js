@@ -978,6 +978,120 @@ bot.command('konfirmasi', async (ctx) => {
     );
 });
 
+// ============ ADMIN SEND KEY (kirim key langsung tanpa order) ============
+// Format: /sendkey USER_ID PRODUCT_ID [HARGA]
+// Contoh: /sendkey 123456789 pro_30 69000
+// Digunakan untuk: transfer manual, order hilang, kompensasi, testing
+bot.command('sendkey', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 3) {
+        return ctx.replyWithHTML(
+            `❌ <b>Format:</b> <code>/sendkey USER_ID PRODUCT_ID [HARGA]</code>\n\n` +
+            `📌 Contoh:\n<code>/sendkey 123456789 pro_30</code>\n<code>/sendkey 123456789 pro_30 69000</code>\n\n` +
+            `📦 <b>Product ID yang tersedia:</b>\n` +
+            Object.entries(PRODUCTS).map(([id, p]) => `• <code>${id}</code> — ${p.name} ${p.desc}`).join('\n')
+        );
+    }
+
+    const targetUserId = parts[1].trim();
+    const productId = parts[2].trim();
+    const customPrice = parts[3] ? parseInt(parts[3]) : null;
+
+    const product = PRODUCTS[productId];
+    if (!product) {
+        return ctx.replyWithHTML(
+            `❌ Product ID <code>${productId}</code> tidak ditemukan.\n\n📦 Yang tersedia:\n` +
+            Object.keys(PRODUCTS).map(id => `• <code>${id}</code>`).join('\n')
+        );
+    }
+
+    await ctx.reply(`⏳ Generating license key untuk ${productId}...`);
+
+    // Generate key
+    const licenseKey = await generateLicenseKey(product.tier, product.duration);
+    if (!licenseKey) {
+        return ctx.reply('❌ Gagal generate license key! Cek License Server.');
+    }
+
+    // Buat order record
+    const orderId = generateOrderId();
+    const finalPrice = customPrice || product.price;
+    const order = {
+        id: orderId,
+        user_id: targetUserId,
+        user_name: `User ${targetUserId}`,
+        username: '',
+        product_id: productId,
+        product_name: `${product.name} — ${product.desc}`,
+        tier: product.tier,
+        duration: product.duration,
+        original_price: finalPrice,
+        price: finalPrice,
+        discount_code: null,
+        discount_percent: 0,
+        status: 'paid',
+        license_key: licenseKey,
+        payment_method: 'admin_manual',
+        created_at: new Date().toISOString(),
+        paid_at: new Date().toISOString()
+    };
+
+    db.orders.push(order);
+    if (!db.stats) db.stats = { total_orders: 0, total_revenue: 0 };
+    db.stats.total_orders = (db.stats.total_orders || 0) + 1;
+    db.stats.total_revenue = (db.stats.total_revenue || 0) + finalPrice;
+    saveDB(db);
+
+    // Kirim key ke user
+    const userMsg = `
+🎉 <b>License Key ClipperSkuy</b>
+━━━━━━━━━━━━━━━━━━
+
+📦 <b>Produk:</b> ${product.name}
+⏱ <b>Durasi:</b> ${product.desc}
+💳 <b>Pembayaran:</b> Dikonfirmasi Admin
+
+━━━━━━━━━━━━━━━━━━
+🔑 <b>License Key kamu:</b>
+
+<code>${licenseKey}</code>
+
+━━━━━━━━━━━━━━━━━━
+📖 <b>Cara Aktivasi:</b>
+1. Buka ClipperSkuy
+2. Klik menu License/Settings
+3. Masukkan key di atas
+4. Klik Activate
+
+Selamat menikmati ClipperSkuy! 🚀
+Butuh bantuan? /help`;
+
+    let sent = true;
+    try {
+        await ctx.telegram.sendMessage(targetUserId, userMsg, { parse_mode: 'HTML' });
+    } catch (e) {
+        sent = false;
+        console.error('sendkey error:', e.message);
+    }
+
+    // Report ke admin
+    await ctx.replyWithHTML(
+        `✅ <b>KEY TERKIRIM${sent ? '' : ' (GAGAL KIRIM)'}</b>\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `👤 User ID: <code>${targetUserId}</code>\n` +
+        `📦 Produk: ${product.name} — ${product.desc}\n` +
+        `💰 Harga: ${formatPrice(finalPrice)}\n` +
+        `🆔 Order: <code>${orderId}</code>\n` +
+        `🔑 Key: <code>${licenseKey}</code>\n` +
+        `${sent ? '✅ Pesan berhasil dikirim ke user' : '⚠️ Gagal kirim ke user — cek User ID'}`
+    );
+
+    // Log ke channel
+    await sendLog(ctx, `💳 <b>SENDKEY MANUAL</b>\n👤 User: <code>${targetUserId}</code>\n📦 ${product.name} ${product.desc}\n💰 ${formatPrice(finalPrice)}\n🔑 <code>${licenseKey}</code>`);
+});
+
+
 // ============ ADMIN REJECT ============
 bot.action(/^reject_(.+)$/, async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
