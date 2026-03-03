@@ -558,7 +558,7 @@ bot.action('referral_info', async (ctx) => {
         `<code>${code}</code>\n\n` +
         `<b>📲 Cara Share ke Teman:</b>\n` +
         `Kirim pesan ini ke teman kamu:\n` +
-        `<i>"Beli ClipperSkuy pakai kode <code>${code}</code>\ndapet diskon 10%! Beli di @ClipperSkuyBot"</i>\n\n` +
+        `<i>"Beli ClipperSkuy pakai kode <code>${code}</code>\ndapet diskon 10%! Beli di @Skuy_bot"</i>\n\n` +
         `<b>✅ Cara Teman Pakai Kode:</b>\n` +
         `1️⃣ Buka bot → ketik /start\n` +
         `2️⃣ Ketik: <code>/promo ${code}</code>\n` +
@@ -2461,7 +2461,7 @@ bot.command('referral', async (ctx) => {
         `<b>📲 Cara Share ke Teman:</b>\n` +
         `Kirim kode ini ke temanmu — mereka tinggal:\n\n` +
         `<b>✅ Langkah untuk Teman yang Mau Pakai Kode:</b>\n` +
-        `1️⃣ Buka @ClipperSkuyBot di Telegram\n` +
+        `1️⃣ Buka @Skuy_bot di Telegram\n` +
         `2️⃣ Ketik perintah: <code>/promo ${code}</code>\n` +
         `3️⃣ Lanjut pilih produk dan bayar\n` +
         `🎉 Diskon 10% otomatis diterapkan!\n\n` +
