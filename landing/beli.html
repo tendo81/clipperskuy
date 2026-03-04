@@ -144,7 +144,12 @@
             gap: 32px;
         }
 
+        /* Sembunyikan QR desktop di mobile — user cukup gunakan tombol GoPay */
         @media (max-width: 768px) {
+            #qr-desktop-box {
+                display: none !important;
+            }
+
             .checkout-wrap {
                 grid-template-columns: 1fr;
                 padding: 0 16px 60px;
@@ -1162,64 +1167,75 @@
 
                 <div id="payment-ready" style="display:none;">
 
-                    <!-- PRIMARY: Tombol bayar (untuk HP) -->
+                    <!-- PRIMARY: Tombol bayar (untuk HP dan Desktop) -->
                     <div id="gopay-section" style="display:none; margin-bottom: 16px;">
                         <a id="gopay-link" href="#" target="_blank" class="gopay-btn"
                             style="font-size:15px;padding:16px;">
                             💚 Bayar via GoPay / QRIS
                         </a>
-                        <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:6px;">
-                            Klik tombol di atas untuk membuka halaman bayar
+                        <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:4px;">
+                            Klik untuk buka halaman bayar → pilih metode → bayar
                         </p>
                     </div>
 
-                    <div class="payment-box">
+                    <!-- Mobile: instruksi singkat di HP -->
+                    <div id="mobile-pay-hint"
+                        style="display:none;margin-bottom:16px;padding:14px;border-radius:12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);text-align:center;">
+                        <div style="font-size:13px;color:var(--text2);">📱 Tap tombol di atas → pilih <b>GoPay /
+                                QRIS</b> → bayar nominal yang tertera</div>
+                    </div>
+
+                    <!-- QR Section: hanya tampil di desktop -->
+                    <div class="payment-box" id="qr-desktop-box">
                         <div class="payment-header">
                             <span style="font-size: 24px;">💻</span>
                             <div>
                                 <h3>Bayar dari PC / Laptop</h3>
-                                <p style="font-size: 13px; color: var(--text2);">Scan QR di bawah dengan HP kamu untuk
-                                    membuka halaman bayar</p>
+                                <p style="font-size: 13px; color: var(--text2);">Scan QR dengan <b>kamera HP</b> (bukan
+                                    app e-wallet) untuk buka halaman bayar</p>
                             </div>
                         </div>
                         <div class="payment-body">
                             <div
-                                style="display:flex;gap:20px;align-items:center;justify-content:center;margin-bottom:20px;">
-                                <div>
+                                style="display:flex;gap:20px;align-items:center;justify-content:center;margin-bottom:20px;flex-wrap:wrap;">
+                                <div style="text-align:center;">
                                     <img id="qr-image"
-                                        style="width:200px;height:200px;border-radius:12px;border:1px solid var(--border);"
+                                        style="width:180px;height:180px;border-radius:12px;border:1px solid var(--border);display:block;margin:0 auto;"
                                         src="" alt="QR Code Bayar" onerror="this.style.display='none'">
+                                    <div style="margin-top:8px;font-size:11px;color:var(--text3);">📷 Scan dengan kamera
+                                        HP</div>
                                 </div>
-                                <div style="flex:1;max-width:180px;">
+                                <div style="flex:1;min-width:140px;max-width:180px;">
                                     <div
                                         style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px;">
                                         Cara bayar:</div>
                                     <ol
                                         style="padding-left:16px;color:var(--text2);font-size:13px;line-height:1.8;margin:0;">
-                                        <li>Scan QR ini dengan HP</li>
-                                        <li>Halaman bayar terbuka</li>
-                                        <li>Scan QRIS di sana</li>
-                                        <li>Key muncul otomatis ✅</li>
+                                        <li>Scan QR dengan <b>kamera</b></li>
+                                        <li>Halaman bayar bayar.gg terbuka</li>
+                                        <li>Scan QRIS di halaman itu</li>
+                                        <li>License key muncul otomatis ✅</li>
                                     </ol>
                                 </div>
                             </div>
-
-                            <div class="qr-amount">
-                                <div class="label">Total Pembayaran</div>
-                                <div class="value" id="pay-amount">Rp 0</div>
-                                <div class="note" id="pay-note"></div>
-                            </div>
-
-                            <div class="timer-bar">
-                                <div class="timer-fill" id="timer-fill"></div>
-                            </div>
-                            <div class="timer-label" id="timer-label">Expires in 30:00</div>
-
-                            <div class="polling-status">
-                                <div class="pulse-dot"></div>
-                                <span>Menunggu pembayaran... otomatis terdeteksi</span>
-                            </div>
                         </div>
+                    </div>
+
+                    <!-- Nominal + Timer: tampil di semua device -->
+                    <div class="qr-amount" style="margin-top:16px;">
+                        <div class="label">Total Pembayaran</div>
+                        <div class="value" id="pay-amount">Rp 0</div>
+                        <div class="note" id="pay-note"></div>
+                    </div>
+
+                    <div class="timer-bar" style="margin-top:12px;">
+                        <div class="timer-fill" id="timer-fill"></div>
+                    </div>
+                    <div class="timer-label" id="timer-label">Expires in 30:00</div>
+
+                    <div class="polling-status">
+                        <div class="pulse-dot"></div>
+                        <span>Menunggu pembayaran... otomatis terdeteksi</span>
                     </div>
 
                     <div class="alert alert-info" style="margin-top: 16px;">
@@ -1490,14 +1506,11 @@
             document.getElementById('payment-loading').style.display = 'none';
             document.getElementById('payment-ready').style.display = 'block';
 
-            // QR Image
+            // QR Image (desktop only, mobile disembunyikan via CSS)
             const qrImg = document.getElementById('qr-image');
-            if (data.qr_image) {
+            if (data.qr_image && qrImg) {
                 qrImg.src = data.qr_image;
                 qrImg.style.display = 'block';
-            } else {
-                qrImg.style.display = 'none';
-                document.getElementById('qr-fallback').style.display = 'flex';
             }
 
             // GoPay link
@@ -1505,6 +1518,11 @@
                 document.getElementById('gopay-link').href = data.payment_url;
                 document.getElementById('gopay-section').style.display = 'block';
             }
+
+            // Di mobile: tampilkan hint, sembunyikan QR box sudah via CSS #qr-desktop-box
+            const isMobile = window.innerWidth <= 768;
+            const mobileHint = document.getElementById('mobile-pay-hint');
+            if (mobileHint) mobileHint.style.display = isMobile ? 'block' : 'none';
 
             // Amount — tampilkan nominal unik (final_amount) sebagai teks
             // Sama seperti bot Telegram: nominal unik ditampilkan eksplisit ke user
