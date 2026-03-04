@@ -50,14 +50,14 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Gunakan 'gopay_qris' — sama seperti bot Telegram
-        // bayar.gg return payment_url → kita generate QR dari URL itu
-        // Nominal unik (final_amount) ditampilkan di teks halaman, bukan di QR
+        // Gunakan 'QRIS' method — generate kode unik dari bayar.gg
+        // QR ditampilkan dari BAYARGG_QRIS_STRING (static QRIS tanpa nominal)
+        // User scan QRIS → masukkan nominal unik manual → bayar.gg detect otomatis
         const payBody = {
             amount: product.price,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName,
-            payment_method: 'gopay_qris'
+            payment_method: 'QRIS'
         };
 
         const payRes = await fetch(BAYARGG_CREATE_URL, {
@@ -84,14 +84,23 @@ module.exports = async (req, res) => {
         const uniqueCode = d.unique_code || 0;
         const finalAmount = d.final_amount || product.price;
 
-        // Ambil QR dari QRIS Converter (dynamic QRIS, nominal unik ter-embed)
-        // Fallback: QR dari payment_url bayar.gg jika converter tidak aktif
-        const qrisConverterQr = d.qris_converter?.qr_image_url || null;
-        const qrFallback = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(paymentUrl || invoiceId)}`;
-        const qrImage = qrisConverterQr || qrFallback;
+        // QR dari QRIS string statis (scan langsung dengan e-wallet)
+        // User masukkan nominal unik secara manual
+        // Fallback: QR dari payment_url jika QRIS string tidak ada
+        let qrImage;
+        let isStaticQris = false;
+        if (BAYARGG_QRIS_STRING) {
+            // Generate QR dari QRIS string — bisa langsung di-scan e-wallet
+            const qrisEncoded = encodeURIComponent(BAYARGG_QRIS_STRING);
+            qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${qrisEncoded}`;
+            isStaticQris = true;
+        } else {
+            // Fallback: QR dari payment_url (redirect ke halaman bayar.gg)
+            qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(paymentUrl || invoiceId)}`;
+        }
 
-        const useQrisConverter = !!qrisConverterQr;
-        console.log(`[web-create] QRIS Converter: ${useQrisConverter ? 'aktif ✅' : 'fallback'}, finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}`);
+        console.log(`[web-create] mode: ${isStaticQris ? 'static QRIS ✅' : 'payment URL fallback'}, finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}`);
+
 
         // Simpan order ke audit log
         await db.from('license_audit_log').insert({
@@ -122,9 +131,10 @@ module.exports = async (req, res) => {
             invoice_id: invoiceId,
             payment_url: paymentUrl,
             qr_image: qrImage,
-            amount: finalAmount,          // sudah termasuk kode unik
+            is_static_qris: isStaticQris,   // true = scan langsung, false = redirect
+            amount: finalAmount,              // termasuk kode unik
+            base_price: product.price,
             unique_code: uniqueCode,
-            use_qris_converter: useQrisConverter,
             expires_at: expiresAt,
             product: product.name
         });

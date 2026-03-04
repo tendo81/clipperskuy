@@ -1188,11 +1188,11 @@
                     <!-- QR Section: hanya tampil di desktop -->
                     <div class="payment-box" id="qr-desktop-box">
                         <div class="payment-header">
-                            <span style="font-size: 24px;">💻</span>
+                            <span style="font-size: 24px;" id="qr-icon">📱</span>
                             <div>
-                                <h3>Bayar dari PC / Laptop</h3>
-                                <p style="font-size: 13px; color: var(--text2);">Scan QR dengan <b>kamera HP</b> (bukan
-                                    app e-wallet) untuk buka halaman bayar</p>
+                                <h3 id="qr-title">Bayar via QRIS</h3>
+                                <p style="font-size: 13px; color: var(--text2);" id="qr-subtitle">Scan QR dengan app
+                                    e-wallet, masukkan nominal yang tertera</p>
                             </div>
                         </div>
                         <div class="payment-body">
@@ -1202,19 +1202,18 @@
                                     <img id="qr-image"
                                         style="width:180px;height:180px;border-radius:12px;border:1px solid var(--border);display:block;margin:0 auto;"
                                         src="" alt="QR Code Bayar" onerror="this.style.display='none'">
-                                    <div style="margin-top:8px;font-size:11px;color:var(--text3);">📷 Scan dengan kamera
-                                        HP</div>
+                                    <div style="margin-top:8px;font-size:11px;color:var(--text3);" id="qr-scan-hint">
+                                        Scan dengan GoPay / DANA / OVO</div>
                                 </div>
-                                <div style="flex:1;min-width:140px;max-width:180px;">
+                                <div style="flex:1;min-width:140px;max-width:200px;">
                                     <div
                                         style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px;">
                                         Cara bayar:</div>
-                                    <ol
-                                        style="padding-left:16px;color:var(--text2);font-size:13px;line-height:1.8;margin:0;">
-                                        <li>Scan QR dengan <b>kamera</b></li>
-                                        <li>Halaman bayar bayar.gg terbuka</li>
-                                        <li>Scan QRIS di halaman itu</li>
-                                        <li>License key muncul otomatis ✅</li>
+                                    <ol id="qr-steps-list"
+                                        style="padding-left:16px;color:var(--text2);font-size:13px;line-height:1.9;margin:0;">
+                                        <li>Scan QR dengan <b>GoPay / DANA / OVO</b></li>
+                                        <li>Masukkan nominal: <b id="qr-step-amount">Rp 0</b></li>
+                                        <li>Bayar → license key muncul otomatis ✅</li>
                                     </ol>
                                 </div>
                             </div>
@@ -1524,18 +1523,41 @@
             const mobileHint = document.getElementById('mobile-pay-hint');
             if (mobileHint) mobileHint.style.display = isMobile ? 'block' : 'none';
 
-            // Amount — tampilkan nominal unik (final_amount) sebagai teks
-            // Sama seperti bot Telegram: nominal unik ditampilkan eksplisit ke user
-            const basePrice = PLANS[selectedPlan]?.price || 0;
+            // Amount
+            const basePrice = data.base_price || PLANS[selectedPlan]?.price || 0;
             const finalAmount = data.amount || basePrice;
             const uniqueCode = data.unique_code || 0;
             document.getElementById('pay-amount').textContent = formatRp(finalAmount);
-            if (uniqueCode > 0) {
+
+            // Update nominal di langkah cara bayar
+            const qrStepAmount = document.getElementById('qr-step-amount');
+            if (qrStepAmount) qrStepAmount.textContent = formatRp(finalAmount);
+
+            if (data.is_static_qris && uniqueCode > 0) {
+                // Mode: QRIS static → user scan langsung + masukkan nominal manual
+                document.getElementById('pay-note').textContent =
+                    `💡 Saat scan QRIS, masukkan nominal tepat: ${formatRp(finalAmount)} (termasuk kode unik +${uniqueCode})`;
+                if (document.getElementById('qr-subtitle'))
+                    document.getElementById('qr-subtitle').textContent = 'Scan QR dengan app e-wallet, masukkan nominal persis di bawah';
+            } else if (uniqueCode > 0) {
+                // Mode: payment URL
                 document.getElementById('pay-note').textContent =
                     `Harga ${formatRp(basePrice)} + kode unik +${uniqueCode} = ${formatRp(finalAmount)}`;
+                if (document.getElementById('qr-title'))
+                    document.getElementById('qr-title').textContent = 'Buka via Link / Scan QR';
+                if (document.getElementById('qr-subtitle'))
+                    document.getElementById('qr-subtitle').textContent = 'Scan QR dengan kamera HP untuk buka halaman bayar';
+                if (document.getElementById('qr-scan-hint'))
+                    document.getElementById('qr-scan-hint').textContent = '📷 Scan dengan kamera HP';
+                // Update steps untuk redirect mode
+                const stepsList = document.getElementById('qr-steps-list');
+                if (stepsList) stepsList.innerHTML = `
+                    <li>Scan QR dengan <b>kamera HP</b></li>
+                    <li>Halaman bayar terbuka</li>
+                    <li>Scan QRIS di halaman itu</li>
+                    <li>License key muncul otomatis ✅</li>`;
             } else {
-                document.getElementById('pay-note').textContent =
-                    'Buka halaman bayar dan scan QRIS di sana';
+                document.getElementById('pay-note').textContent = 'Buka halaman bayar dan selesaikan pembayaran';
             }
 
 
