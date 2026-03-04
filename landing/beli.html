@@ -1365,7 +1365,7 @@
     </div>
 
     <script>
-        const LICENSE_API = 'https://clipperskuy-license.vercel.app';
+        const LICENSE_API = 'https://license-server-nine-dun.vercel.app';
 
         const PLANS = {
             pro_30: { name: 'Pro — 30 Hari', desc: '1 bulan akses penuh', icon: '⚡', price: 69000, original: 80000, discount: 11000 },
@@ -1500,17 +1500,25 @@
             document.getElementById('payment-loading').style.display = 'none';
             document.getElementById('payment-ready').style.display = 'block';
 
-            // QR Image (desktop only, mobile disembunyikan via CSS)
+            // QR Image (untuk semua device - Pakasir tidak punya deep link, harus scan QRIS)
             const qrImg = document.getElementById('qr-image');
             if (data.qr_image && qrImg) {
                 qrImg.src = data.qr_image;
                 qrImg.style.display = 'block';
+                // Tampilkan QR box di semua device untuk Pakasir
+                const qrBox = document.getElementById('qr-desktop-box');
+                if (qrBox) qrBox.style.display = 'block';
             }
 
-            // GoPay link
+            // GoPay link — hanya tampil jika ada payment_url (bayar.gg)
+            // Pakasir tidak punya payment_url, jadi sembunyikan
             if (data.payment_url && data.payment_url.startsWith('http')) {
                 document.getElementById('gopay-link').href = data.payment_url;
                 document.getElementById('gopay-section').style.display = 'block';
+            } else {
+                // Pakasir: sembunyikan tombol GoPay, tunjukkan instruksi scan QRIS
+                const gopaySection = document.getElementById('gopay-section');
+                if (gopaySection) gopaySection.style.display = 'none';
             }
 
             // Di mobile: QR sudah disembunyikan via CSS (#qr-desktop-box display:none)
