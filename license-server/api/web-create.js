@@ -98,7 +98,7 @@ module.exports = async (req, res) => {
                 tier: product.tier,
                 duration_days: product.duration,
                 price: product.price,
-                final_amount: finalAmount,
+                final_amount: product.price,
                 customer_name: customerName,
                 customer_email: customerEmail,
                 status: 'pending',
