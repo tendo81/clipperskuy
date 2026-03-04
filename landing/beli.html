@@ -1436,12 +1436,15 @@
                 document.getElementById('gopay-section').style.display = 'block';
             }
 
-            // Amount — tampilkan harga dasar agar sesuai dengan nominal di QRIS
-            // (kode unik ada di bayar.gg backend, tapi QRIS static tidak bisa embed nominal dinamis)
-            const basePrice = PLANS[selectedPlan]?.price || data.amount || 0;
-            document.getElementById('pay-amount').textContent = formatRp(basePrice);
-            // Ganti note menjadi instruksi scan yang jelas
-            document.getElementById('pay-note').textContent = 'Scan QR di atas dan bayar nominal yang tertera di app kamu';
+            // Amount — jika QRIS Converter aktif, nominal sudah include kode unik
+            const basePrice = PLANS[selectedPlan]?.price || 0;
+            const displayAmount = data.amount || basePrice;
+            document.getElementById('pay-amount').textContent = formatRp(displayAmount);
+            if (data.use_qris_converter && data.unique_code) {
+                document.getElementById('pay-note').textContent = `Termasuk kode unik +${data.unique_code} • Scan QR langsung dengan app kamu`;
+            } else {
+                document.getElementById('pay-note').textContent = 'Scan QR di atas dan bayar nominal yang tertera di app kamu';
+            }
 
 
             // Timer

@@ -1,15 +1,15 @@
 /**
  * POST /api/web-create
  * Create a payment for web checkout
- * Body: { product_id, name }
- * Returns: { order_id, invoice_id, payment_url, amount, unique_code, qr_string, expires_at }
+ * Body: { product_id, name, email }
+ * Returns: { order_id, invoice_id, payment_url, qr_image, amount, unique_code, use_qris_converter, expires_at }
  */
 const { getSupabase } = require('./_lib/supabase');
 const { handleCors, parseBody } = require('./_lib/helpers');
 
 const BAYARGG_CREATE_URL = 'https://www.bayar.gg/api/create-payment.php';
-const BAYARGG_CHECK_URL = 'https://www.bayar.gg/api/check-payment';
 const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY;
+const BAYARGG_QRIS_STRING = process.env.BAYARGG_QRIS_STRING || null;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 const LICENSE_SERVER = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
@@ -50,13 +50,18 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Create payment via bayar.gg
+        // Build request — aktifkan QRIS Converter jika QRIS string tersedia
         const payBody = {
             amount: product.price,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName,
             payment_method: 'QRIS'
         };
+
+        if (BAYARGG_QRIS_STRING) {
+            payBody.use_qris_converter = true;
+            payBody.qris_string = BAYARGG_QRIS_STRING;
+        }
 
         const payRes = await fetch(BAYARGG_CREATE_URL, {
             method: 'POST',
@@ -79,13 +84,19 @@ module.exports = async (req, res) => {
         const invoiceId = d.invoice_id;
         const paymentUrl = d.payment_url || null;
         const expiresAt = d.expires_at || null;
+        const uniqueCode = d.unique_code || 0;
+        const finalAmount = d.final_amount || product.price;
 
-        // Generate QR dari payment_url — scan QR buka halaman bayar.gg
-        // dengan QRIS yang benar + nominal tepat per transaksi
-        const qrData = encodeURIComponent(paymentUrl || invoiceId);
-        const qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${qrData}`;
+        // Ambil QR dari QRIS Converter (dynamic QRIS, nominal unik ter-embed)
+        // Fallback: QR dari payment_url bayar.gg jika converter tidak aktif
+        const qrisConverterQr = d.qris_converter?.qr_image_url || null;
+        const qrFallback = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(paymentUrl || invoiceId)}`;
+        const qrImage = qrisConverterQr || qrFallback;
 
-        // Store order in audit log with action 'web_order'
+        const useQrisConverter = !!qrisConverterQr;
+        console.log(`[web-create] QRIS Converter: ${useQrisConverter ? 'aktif ✅' : 'fallback'}, finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}`);
+
+        // Simpan order ke audit log
         await db.from('license_audit_log').insert({
             license_key_id: null,
             action: 'web_order',
@@ -98,7 +109,8 @@ module.exports = async (req, res) => {
                 tier: product.tier,
                 duration_days: product.duration,
                 price: product.price,
-                final_amount: product.price,
+                final_amount: finalAmount,
+                unique_code: uniqueCode,
                 customer_name: customerName,
                 customer_email: customerEmail,
                 status: 'pending',
@@ -113,7 +125,9 @@ module.exports = async (req, res) => {
             invoice_id: invoiceId,
             payment_url: paymentUrl,
             qr_image: qrImage,
-            amount: product.price,   // harga dasar tanpa kode unik
+            amount: finalAmount,          // sudah termasuk kode unik
+            unique_code: uniqueCode,
+            use_qris_converter: useQrisConverter,
             expires_at: expiresAt,
             product: product.name
         });
