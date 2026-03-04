@@ -50,14 +50,14 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Gunakan 'QRIS' method — generate kode unik dari bayar.gg
-        // QR ditampilkan dari BAYARGG_QRIS_STRING (static QRIS tanpa nominal)
-        // User scan QRIS → masukkan nominal unik manual → bayar.gg detect otomatis
+        // Gunakan 'gopay_qris' — sama persis kayak bot Telegram
+        // bayar.gg monitor pembayaran & kirim webhook → terdeteksi otomatis ✅
+        // Nominal unik (final_amount + unique_code) ditampilkan sebagai teks di frontend
         const payBody = {
             amount: product.price,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName,
-            payment_method: 'QRIS'
+            payment_method: 'gopay_qris'
         };
 
         const payRes = await fetch(BAYARGG_CREATE_URL, {
@@ -84,22 +84,13 @@ module.exports = async (req, res) => {
         const uniqueCode = d.unique_code || 0;
         const finalAmount = d.final_amount || product.price;
 
-        // QR dari QRIS string statis (scan langsung dengan e-wallet)
-        // User masukkan nominal unik secara manual
-        // Fallback: QR dari payment_url jika QRIS string tidak ada
-        let qrImage;
-        let isStaticQris = false;
-        if (BAYARGG_QRIS_STRING) {
-            // Generate QR dari QRIS string — bisa langsung di-scan e-wallet
-            const qrisEncoded = encodeURIComponent(BAYARGG_QRIS_STRING);
-            qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${qrisEncoded}`;
-            isStaticQris = true;
-        } else {
-            // Fallback: QR dari payment_url (redirect ke halaman bayar.gg)
-            qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(paymentUrl || invoiceId)}`;
-        }
+        // QR dari payment_url bayar.gg → scan dengan kamera HP → buka halaman bayar
+        // Nominal unik final_amount ditampilkan sebagai teks (kayak bot Telegram)
+        const qrImage = paymentUrl
+            ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(paymentUrl)}`
+            : null;
 
-        console.log(`[web-create] mode: ${isStaticQris ? 'static QRIS ✅' : 'payment URL fallback'}, finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}`);
+        console.log(`[web-create] gopay_qris — finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}, paymentUrl: ${paymentUrl}`);
 
 
         // Simpan order ke audit log
@@ -131,10 +122,11 @@ module.exports = async (req, res) => {
             invoice_id: invoiceId,
             payment_url: paymentUrl,
             qr_image: qrImage,
-            is_static_qris: isStaticQris,   // true = scan langsung, false = redirect
-            amount: finalAmount,              // termasuk kode unik
-            base_price: product.price,
-            unique_code: uniqueCode,
+            amount: finalAmount,       // final_amount termasuk kode unik
+            base_price: product.price, // harga dasar sebelum kode unik
+            unique_code: uniqueCode,   // kode unik yang ditambahkan
+            payment_url: paymentUrl,   // link bayar.gg — untuk tombol GoPay
+            qr_image: qrImage,         // QR dari payment_url — untuk scan via kamera
             expires_at: expiresAt,
             product: product.name
         });

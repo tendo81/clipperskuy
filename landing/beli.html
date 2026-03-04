@@ -1167,81 +1167,76 @@
 
                 <div id="payment-ready" style="display:none;">
 
-                    <!-- PRIMARY: Tombol bayar (untuk HP dan Desktop) -->
-                    <div id="gopay-section" style="display:none; margin-bottom: 16px;">
+                    <!-- NOMINAL UNIK — tampil besar di atas (kayak bot Telegram) -->
+                    <div class="payment-box" style="text-align:center;padding:24px 20px;">
+                        <div
+                            style="font-size:13px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">
+                            Total Yang Harus Dibayar</div>
+                        <div id="pay-amount"
+                            style="font-size:42px;font-weight:900;background:linear-gradient(135deg,#22d3ee,#7c3aed);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.1;margin:8px 0;">
+                            Rp 0</div>
+                        <div id="pay-note" style="font-size:13px;color:var(--text3);margin-top:4px;"></div>
+                        <!-- Breakdown kode unik -->
+                        <div id="pay-breakdown"
+                            style="display:none;margin-top:12px;padding:10px 14px;border-radius:10px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.15);font-size:12px;color:var(--text2);text-align:left;">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>Harga
+                                    paket</span><span id="bd-base">Rp 0</span></div>
+                            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>Kode
+                                    unik</span><span id="bd-code" style="color:#22d3ee;">+0</span></div>
+                            <div
+                                style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid rgba(255,255,255,0.08);padding-top:6px;margin-top:2px;">
+                                <span>Total bayar</span><span id="bd-total" style="color:#a78bfa;">Rp 0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TOMBOL BAYAR GOPAY — prominent untuk HP dan Desktop -->
+                    <div id="gopay-section" style="display:none;margin:16px 0;">
                         <a id="gopay-link" href="#" target="_blank" class="gopay-btn"
-                            style="font-size:15px;padding:16px;">
-                            💚 Bayar via GoPay / QRIS
+                            style="font-size:16px;padding:18px;letter-spacing:0.3px;">
+                            💚 Bayar Sekarang via GoPay / QRIS
                         </a>
-                        <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:4px;">
-                            Klik untuk buka halaman bayar → pilih metode → bayar
+                        <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:6px;">
+                            Klik → buka halaman bayar → pilih GoPay atau scan QRIS
                         </p>
                     </div>
 
-                    <!-- Mobile: instruksi singkat di HP -->
-                    <div id="mobile-pay-hint"
-                        style="display:none;margin-bottom:16px;padding:14px;border-radius:12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);text-align:center;">
-                        <div style="font-size:13px;color:var(--text2);">📱 Tap tombol di atas → pilih <b>GoPay /
-                                QRIS</b> → bayar nominal yang tertera</div>
-                    </div>
-
-                    <!-- QR Section: hanya tampil di desktop -->
-                    <div class="payment-box" id="qr-desktop-box">
+                    <!-- QR untuk Desktop: scan dengan kamera → buka link bayar -->
+                    <div class="payment-box" id="qr-desktop-box" style="margin-top:4px;">
                         <div class="payment-header">
-                            <span style="font-size: 24px;" id="qr-icon">📱</span>
+                            <span style="font-size:20px;">💻</span>
                             <div>
-                                <h3 id="qr-title">Bayar via QRIS</h3>
-                                <p style="font-size: 13px; color: var(--text2);" id="qr-subtitle">Scan QR dengan app
-                                    e-wallet, masukkan nominal yang tertera</p>
+                                <h3 style="font-size:15px;">Bayar dari PC / Laptop</h3>
+                                <p style="font-size:12px;color:var(--text2);">Scan QR pakai <b>kamera HP</b> → halaman
+                                    bayar terbuka → pilih GoPay/QRIS</p>
                             </div>
                         </div>
-                        <div class="payment-body">
-                            <div
-                                style="display:flex;gap:20px;align-items:center;justify-content:center;margin-bottom:20px;flex-wrap:wrap;">
-                                <div style="text-align:center;">
-                                    <img id="qr-image"
-                                        style="width:180px;height:180px;border-radius:12px;border:1px solid var(--border);display:block;margin:0 auto;"
-                                        src="" alt="QR Code Bayar" onerror="this.style.display='none'">
-                                    <div style="margin-top:8px;font-size:11px;color:var(--text3);" id="qr-scan-hint">
-                                        Scan dengan GoPay / DANA / OVO</div>
-                                </div>
-                                <div style="flex:1;min-width:140px;max-width:200px;">
-                                    <div
-                                        style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px;">
-                                        Cara bayar:</div>
-                                    <ol id="qr-steps-list"
-                                        style="padding-left:16px;color:var(--text2);font-size:13px;line-height:1.9;margin:0;">
-                                        <li>Scan QR dengan <b>GoPay / DANA / OVO</b></li>
-                                        <li>Masukkan nominal: <b id="qr-step-amount">Rp 0</b></li>
-                                        <li>Bayar → license key muncul otomatis ✅</li>
-                                    </ol>
-                                </div>
-                            </div>
+                        <div style="text-align:center;padding:12px 0 4px;">
+                            <img id="qr-image"
+                                style="width:160px;height:160px;border-radius:12px;border:2px solid var(--border);"
+                                src="" alt="QR" onerror="this.parentElement.style.display='none'">
+                            <div style="font-size:11px;color:var(--text3);margin-top:6px;">📷 Scan dengan kamera HP
+                                (bukan app e-wallet)</div>
                         </div>
                     </div>
 
-                    <!-- Nominal + Timer: tampil di semua device -->
-                    <div class="qr-amount" style="margin-top:16px;">
-                        <div class="label">Total Pembayaran</div>
-                        <div class="value" id="pay-amount">Rp 0</div>
-                        <div class="note" id="pay-note"></div>
-                    </div>
-
-                    <div class="timer-bar" style="margin-top:12px;">
+                    <!-- Timer -->
+                    <div class="timer-bar" style="margin-top:16px;">
                         <div class="timer-fill" id="timer-fill"></div>
                     </div>
-                    <div class="timer-label" id="timer-label">Expires in 30:00</div>
+                    <div class="timer-label" id="timer-label">Kadaluarsa dalam 30:00</div>
 
                     <div class="polling-status">
                         <div class="pulse-dot"></div>
                         <span>Menunggu pembayaran... otomatis terdeteksi</span>
                     </div>
 
-                    <div class="alert alert-info" style="margin-top: 16px;">
-                        💡 Setelah bayar, license key akan muncul otomatis dalam <b>15–30 detik</b>. Jangan tutup
-                        halaman ini.
+                    <div class="alert alert-info" style="margin-top:16px;">
+                        💡 Setelah bayar, license key muncul otomatis dalam <b>15–30 detik</b>. Jangan tutup halaman
+                        ini.
                     </div>
                 </div>
+
 
 
                 <!-- SUCCESS -->
@@ -1518,46 +1513,27 @@
                 document.getElementById('gopay-section').style.display = 'block';
             }
 
-            // Di mobile: tampilkan hint, sembunyikan QR box sudah via CSS #qr-desktop-box
-            const isMobile = window.innerWidth <= 768;
-            const mobileHint = document.getElementById('mobile-pay-hint');
-            if (mobileHint) mobileHint.style.display = isMobile ? 'block' : 'none';
+            // Di mobile: QR sudah disembunyikan via CSS (#qr-desktop-box display:none)
+            // Tombol GoPay tetap tampil di semua device
 
-            // Amount
+            // Amount — tampilkan nominal unik besar (kayak bot Telegram)
             const basePrice = data.base_price || PLANS[selectedPlan]?.price || 0;
             const finalAmount = data.amount || basePrice;
             const uniqueCode = data.unique_code || 0;
+
             document.getElementById('pay-amount').textContent = formatRp(finalAmount);
 
-            // Update nominal di langkah cara bayar
-            const qrStepAmount = document.getElementById('qr-step-amount');
-            if (qrStepAmount) qrStepAmount.textContent = formatRp(finalAmount);
-
-            if (data.is_static_qris && uniqueCode > 0) {
-                // Mode: QRIS static → user scan langsung + masukkan nominal manual
-                document.getElementById('pay-note').textContent =
-                    `💡 Saat scan QRIS, masukkan nominal tepat: ${formatRp(finalAmount)} (termasuk kode unik +${uniqueCode})`;
-                if (document.getElementById('qr-subtitle'))
-                    document.getElementById('qr-subtitle').textContent = 'Scan QR dengan app e-wallet, masukkan nominal persis di bawah';
-            } else if (uniqueCode > 0) {
-                // Mode: payment URL
-                document.getElementById('pay-note').textContent =
-                    `Harga ${formatRp(basePrice)} + kode unik +${uniqueCode} = ${formatRp(finalAmount)}`;
-                if (document.getElementById('qr-title'))
-                    document.getElementById('qr-title').textContent = 'Buka via Link / Scan QR';
-                if (document.getElementById('qr-subtitle'))
-                    document.getElementById('qr-subtitle').textContent = 'Scan QR dengan kamera HP untuk buka halaman bayar';
-                if (document.getElementById('qr-scan-hint'))
-                    document.getElementById('qr-scan-hint').textContent = '📷 Scan dengan kamera HP';
-                // Update steps untuk redirect mode
-                const stepsList = document.getElementById('qr-steps-list');
-                if (stepsList) stepsList.innerHTML = `
-                    <li>Scan QR dengan <b>kamera HP</b></li>
-                    <li>Halaman bayar terbuka</li>
-                    <li>Scan QRIS di halaman itu</li>
-                    <li>License key muncul otomatis ✅</li>`;
-            } else {
-                document.getElementById('pay-note').textContent = 'Buka halaman bayar dan selesaikan pembayaran';
+            // Breakdown kode unik
+            if (uniqueCode > 0) {
+                document.getElementById('pay-note').innerHTML =
+                    `<span style="color:#22d3ee;font-weight:600;">Rp ${basePrice.toLocaleString('id')}</span> + kode unik <span style="color:#22d3ee;">+${uniqueCode}</span>`;
+                const bd = document.getElementById('pay-breakdown');
+                if (bd) {
+                    document.getElementById('bd-base').textContent = formatRp(basePrice);
+                    document.getElementById('bd-code').textContent = `+${uniqueCode}`;
+                    document.getElementById('bd-total').textContent = formatRp(finalAmount);
+                    bd.style.display = 'block';
+                }
             }
 
 
