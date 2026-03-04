@@ -69,13 +69,16 @@ module.exports = async (req, res) => {
         }
 
         const payment = pakasirData.payment;
-        // Pakasir: unique amount dari field 'total_amount' atau fallback ke price
-        const finalAmount = payment.total_amount || payment.amount || product.price;
-        const uniqueCode = finalAmount - product.price;
-        // QR image dari Pakasir
-        const qrImage = payment.qr_image_url || payment.qr_url || payment.qrcode || null;
-        // Expired time (Pakasir biasanya 30 menit)
-        const expiresAt = payment.expired_time || payment.expires_at || null;
+        // Pakasir: total_payment = amount + fee (unique code)
+        const finalAmount = payment.total_payment || product.price;
+        const uniqueCode = payment.fee || (finalAmount - product.price);
+        // QR image — Pakasir memberi QRIS string (payment_number), generate QR dari sana
+        const qrisString = payment.payment_number || null;
+        const qrImage = qrisString
+            ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(qrisString)}`
+            : null;
+        // Expired time
+        const expiresAt = payment.expired_at || payment.expired_time || null;
 
         console.log(`[web-create] Pakasir QRIS — orderId: ${orderId}, amount: ${product.price}, finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}`);
 

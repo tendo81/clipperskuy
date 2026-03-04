@@ -54,6 +54,7 @@ module.exports = async (req, res) => {
         }
 
         const orderId = order.order_id || invoice_id;
+        // Pakasir pakai total_payment (amount + fee) untuk query transaction detail
         const amount = order.final_amount || order.price;
 
         const pakasirUrl = `https://app.pakasir.com/api/transactiondetail?project=${PAKASIR_SLUG}&amount=${amount}&order_id=${orderId}&api_key=${PAKASIR_API_KEY}`;
