@@ -1,11 +1,32 @@
 {
     "version": 2,
-    "framework": null,
-    "installCommand": "npm install",
-    "builds": [
-        {
-            "src": "api/**/*.js",
-            "use": "@vercel/node"
+    "functions": {
+        "api/activate.js": {
+            "maxDuration": 10
+        },
+        "api/deactivate.js": {
+            "maxDuration": 10
+        },
+        "api/validate.js": {
+            "maxDuration": 10
+        },
+        "api/health.js": {
+            "maxDuration": 10
+        },
+        "api/trial.js": {
+            "maxDuration": 10
+        },
+        "api/admin.js": {
+            "maxDuration": 30
+        },
+        "api/web-create.js": {
+            "maxDuration": 30
+        },
+        "api/web-status.js": {
+            "maxDuration": 30
+        },
+        "api/web-notify.js": {
+            "maxDuration": 30
         }
-    ]
+    }
 }
