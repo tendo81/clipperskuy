@@ -1,17 +1,13 @@
 /**
  * POST /api/web-create
- * Create a Pakasir QRIS payment for web checkout (sama persis seperti bot Telegram)
- * Body: { product_id, name, email }
+ * Create a bayar.gg gopay_qris payment for web checkout
+ * Money goes directly to merchant's account via bayar.gg detection
  */
 const { getSupabase } = require('../lib/supabase');
 const { handleCors, parseBody } = require('../lib/helpers');
 
-const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY;
-const PAKASIR_SLUG = process.env.PAKASIR_SLUG || 'clipp';
+const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
-const LICENSE_SERVER = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'https://clipperskuy-license.vercel.app';
 
 const PRODUCTS = {
     pro_30: { name: '⚡ ClipperSkuy Pro — 30 Hari', tier: 'pro', duration: 30, price: 69000 },
@@ -30,7 +26,7 @@ module.exports = async (req, res) => {
     if (handleCors(req, res)) return;
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    if (!PAKASIR_API_KEY) {
+    if (!BAYARGG_API_KEY) {
         return res.status(500).json({ error: 'Payment gateway not configured. Contact admin.' });
     }
 
@@ -48,49 +44,56 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Buat QRIS via Pakasir — sama persis seperti bot Telegram yang sudah berhasil ✅
-        const pakasirRes = await fetch('https://app.pakasir.com/api/transactioncreate/qris', {
+        // Buat invoice via bayar.gg — gopay_qris
+        // User bayar lewat halaman bayar.gg → uang masuk langsung ke rekening merchant
+        const payRes = await fetch('https://www.bayar.gg/api/create-payment.php', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': BAYARGG_API_KEY
+            },
             body: JSON.stringify({
-                api_key: PAKASIR_API_KEY,
-                project: PAKASIR_SLUG,
                 amount: product.price,
-                order_id: orderId
+                description: `ClipperSkuy License - Order ${orderId}`,
+                customer_name: customerName,
+                payment_method: 'gopay_qris'
             })
         });
 
-        const pakasirData = await pakasirRes.json();
-        console.log('[web-create] Pakasir response:', JSON.stringify(pakasirData));
+        const payData = await payRes.json();
+        console.log('[web-create] bayar.gg response:', JSON.stringify(payData));
 
-        if (!pakasirData.payment) {
-            console.error('[web-create] Pakasir error:', pakasirData);
+        if (!payData.success || !payData.data) {
+            console.error('[web-create] bayar.gg error:', payData);
             return res.status(502).json({ error: 'Gagal membuat pembayaran. Coba lagi.' });
         }
 
-        const payment = pakasirData.payment;
-        // Pakasir: total_payment = amount + fee (unique code)
-        const finalAmount = payment.total_payment || product.price;
-        const uniqueCode = payment.fee || (finalAmount - product.price);
-        // QR image — Pakasir memberi QRIS string (payment_number), generate QR dari sana
-        const qrisString = payment.payment_number || null;
-        const qrImage = qrisString
-            ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${encodeURIComponent(qrisString)}`
+        const d = payData.data;
+        const invoiceId = d.invoice_id;
+        const paymentUrl = d.payment_url;
+        const expiresAt = d.expires_at;
+        const uniqueCode = d.unique_code || 0;
+        const finalAmount = d.final_amount || product.price;
+
+        // QR code dari payment_url bayar.gg
+        // User scan dengan kamera HP → buka halaman bayar.gg → bayar disana → terdeteksi otomatis
+        const qrImage = paymentUrl
+            ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&qzone=2&data=${encodeURIComponent(paymentUrl)}`
             : null;
-        // Expired time
-        const expiresAt = payment.expired_at || payment.expired_time || null;
 
-        console.log(`[web-create] Pakasir QRIS — orderId: ${orderId}, amount: ${product.price}, finalAmount: ${finalAmount}, uniqueCode: ${uniqueCode}`);
+        console.log(`[web-create] bayar.gg — orderId:${orderId}, invoice:${invoiceId}, amount:${finalAmount}, unique:${uniqueCode}`);
 
-        // Simpan order ke audit log (pakai orderId sebagai machine_id karena Pakasir pakai order_id)
+        // Simpan order ke audit log (machine_id = invoice_id untuk polling web-status)
         await db.from('license_audit_log').insert({
             license_key_id: null,
             action: 'web_order',
-            machine_id: orderId,   // Pakasir pakai order_id untuk cek status
+            machine_id: invoiceId,
             ip_address: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown',
             details: {
                 order_id: orderId,
-                payment_method: 'pakasir',
+                invoice_id: invoiceId,
+                payment_method: 'bayargg',
+                payment_url: paymentUrl,
                 product_id,
                 tier: product.tier,
                 duration_days: product.duration,
@@ -108,14 +111,15 @@ module.exports = async (req, res) => {
         return res.json({
             success: true,
             order_id: orderId,
-            invoice_id: orderId,   // untuk polling web-status — pakai orderId
+            invoice_id: invoiceId,
+            payment_url: paymentUrl,
             qr_image: qrImage,
             amount: finalAmount,
             base_price: product.price,
             unique_code: uniqueCode,
             expires_at: expiresAt,
             product: product.name,
-            payment_method: 'pakasir'
+            payment_method: 'bayargg'
         });
 
     } catch (err) {

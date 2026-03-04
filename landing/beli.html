@@ -1500,29 +1500,23 @@
             document.getElementById('payment-loading').style.display = 'none';
             document.getElementById('payment-ready').style.display = 'block';
 
-            // QR Image (untuk semua device - Pakasir tidak punya deep link, harus scan QRIS)
+            // QR Image — tampil di semua device (mobile & desktop)
             const qrImg = document.getElementById('qr-image');
             if (data.qr_image && qrImg) {
                 qrImg.src = data.qr_image;
                 qrImg.style.display = 'block';
-                // Tampilkan QR box di semua device untuk Pakasir
-                const qrBox = document.getElementById('qr-desktop-box');
-                if (qrBox) qrBox.style.display = 'block';
             }
+            // Pastikan QR box selalu terlihat (override CSS mobile-hide)
+            const qrBox = document.getElementById('qr-desktop-box');
+            if (qrBox) qrBox.style.cssText = 'display:block !important; margin: 0 auto;';
 
-            // GoPay link — hanya tampil jika ada payment_url (bayar.gg)
-            // Pakasir tidak punya payment_url, jadi sembunyikan
+            // Tombol bayar.gg payment link
             if (data.payment_url && data.payment_url.startsWith('http')) {
-                document.getElementById('gopay-link').href = data.payment_url;
-                document.getElementById('gopay-section').style.display = 'block';
-            } else {
-                // Pakasir: sembunyikan tombol GoPay, tunjukkan instruksi scan QRIS
+                const gopayLink = document.getElementById('gopay-link');
+                if (gopayLink) gopayLink.href = data.payment_url;
                 const gopaySection = document.getElementById('gopay-section');
-                if (gopaySection) gopaySection.style.display = 'none';
+                if (gopaySection) gopaySection.style.display = 'block';
             }
-
-            // Di mobile: QR sudah disembunyikan via CSS (#qr-desktop-box display:none)
-            // Tombol GoPay tetap tampil di semua device
 
             // Amount — tampilkan nominal unik besar (kayak bot Telegram)
             const basePrice = data.base_price || PLANS[selectedPlan]?.price || 0;
