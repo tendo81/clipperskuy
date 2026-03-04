@@ -1091,30 +1091,46 @@
                 </div>
 
                 <div id="payment-ready" style="display:none;">
-                    <div id="gopay-section" style="display:none;">
-                        <a id="gopay-link" href="#" target="_blank" class="gopay-btn">
-                            💚 Bayar via GoPay / Payment Link
+
+                    <!-- PRIMARY: Tombol bayar (untuk HP) -->
+                    <div id="gopay-section" style="display:none; margin-bottom: 16px;">
+                        <a id="gopay-link" href="#" target="_blank" class="gopay-btn"
+                            style="font-size:15px;padding:16px;">
+                            💚 Bayar via GoPay / QRIS
                         </a>
+                        <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:6px;">
+                            Klik tombol di atas untuk membuka halaman bayar
+                        </p>
                     </div>
 
                     <div class="payment-box">
                         <div class="payment-header">
-                            <span style="font-size: 24px;">📱</span>
+                            <span style="font-size: 24px;">💻</span>
                             <div>
-                                <h3>Scan QRIS untuk Bayar</h3>
-                                <p style="font-size: 13px; color: var(--text2);">Buka kamera atau app GoPay/OVO/DANA/BSI
-                                </p>
+                                <h3>Bayar dari PC / Laptop</h3>
+                                <p style="font-size: 13px; color: var(--text2);">Scan QR di bawah dengan HP kamu untuk
+                                    membuka halaman bayar</p>
                             </div>
                         </div>
                         <div class="payment-body">
-                            <div class="qr-wrap">
-                                <img id="qr-image" class="qr-img" src="" alt="QRIS Code"
-                                    onerror="this.style.display='none'; document.getElementById('qr-fallback').style.display='block'">
-                                <div id="qr-fallback"
-                                    style="display:none; width:220px; height:220px; border-radius:16px; border:1px solid var(--border); display:none; align-items:center; justify-content:center; text-align:center; padding:20px;">
-                                    <div style="font-size: 40px; margin-bottom: 12px;">📱</div>
-                                    <p style="font-size: 13px; color: var(--text2);">QRIS siap. Gunakan link GoPay di
-                                        atas atau scan via app bank kamu.</p>
+                            <div
+                                style="display:flex;gap:20px;align-items:center;justify-content:center;margin-bottom:20px;">
+                                <div>
+                                    <img id="qr-image"
+                                        style="width:200px;height:200px;border-radius:12px;border:1px solid var(--border);"
+                                        src="" alt="QR Code Bayar" onerror="this.style.display='none'">
+                                </div>
+                                <div style="flex:1;max-width:180px;">
+                                    <div
+                                        style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px;">
+                                        Cara bayar:</div>
+                                    <ol
+                                        style="padding-left:16px;color:var(--text2);font-size:13px;line-height:1.8;margin:0;">
+                                        <li>Scan QR ini dengan HP</li>
+                                        <li>Halaman bayar terbuka</li>
+                                        <li>Scan QRIS di sana</li>
+                                        <li>Key muncul otomatis ✅</li>
+                                    </ol>
                                 </div>
                             </div>
 
@@ -1141,6 +1157,7 @@
                         halaman ini.
                     </div>
                 </div>
+
 
                 <!-- SUCCESS -->
                 <div id="payment-success" style="display:none;">

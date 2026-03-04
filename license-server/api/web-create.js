@@ -51,20 +51,12 @@ module.exports = async (req, res) => {
 
     try {
         // Create payment via bayar.gg
-        const QRIS_STRING = process.env.BAYARGG_QRIS_STRING || null;
-
         const payBody = {
             amount: product.price,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName,
             payment_method: 'QRIS'
         };
-
-        // Aktifkan QRIS converter hanya jika qris_string tersedia
-        if (QRIS_STRING) {
-            payBody.use_qris_converter = true;
-            payBody.qris_string = QRIS_STRING;
-        }
 
         const payRes = await fetch(BAYARGG_CREATE_URL, {
             method: 'POST',
@@ -85,20 +77,13 @@ module.exports = async (req, res) => {
 
         const d = payData.data;
         const invoiceId = d.invoice_id;
-        const finalAmount = d.final_amount || product.price;
-        const uniqueCode = d.unique_code || 0;
         const paymentUrl = d.payment_url || null;
         const expiresAt = d.expires_at || null;
 
-        // Ambil QRIS asli dari converter (GoPay QRIS yang sudah disetup di dashboard)
-        const qrisConverter = d.qris_converter || null;
-        const qrImageUrl = qrisConverter?.qr_image_url || null;
-        const convertedQris = qrisConverter?.converted_qris || null;
-
-        // Fallback: generate QR dari payment_url jika converter tidak aktif
+        // Generate QR dari payment_url — scan QR buka halaman bayar.gg
+        // dengan QRIS yang benar + nominal tepat per transaksi
         const qrData = encodeURIComponent(paymentUrl || invoiceId);
-        const qrFallback = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=png&qzone=2&data=${qrData}`;
-        const qrImage = qrImageUrl || qrFallback;
+        const qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&format=png&qzone=2&data=${qrData}`;
 
         // Store order in audit log with action 'web_order'
         await db.from('license_audit_log').insert({
@@ -128,8 +113,7 @@ module.exports = async (req, res) => {
             invoice_id: invoiceId,
             payment_url: paymentUrl,
             qr_image: qrImage,
-            amount: finalAmount,
-            unique_code: uniqueCode,
+            amount: product.price,   // harga dasar tanpa kode unik
             expires_at: expiresAt,
             product: product.name
         });
