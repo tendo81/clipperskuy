@@ -50,18 +50,15 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Build request — aktifkan QRIS Converter jika QRIS string tersedia
+        // Gunakan 'gopay_qris' — sama seperti bot Telegram
+        // bayar.gg return payment_url → kita generate QR dari URL itu
+        // Nominal unik (final_amount) ditampilkan di teks halaman, bukan di QR
         const payBody = {
             amount: product.price,
             description: `ClipperSkuy License - Order ${orderId}`,
             customer_name: customerName,
-            payment_method: 'QRIS'
+            payment_method: 'gopay_qris'
         };
-
-        if (BAYARGG_QRIS_STRING) {
-            payBody.use_qris_converter = true;
-            payBody.qris_string = BAYARGG_QRIS_STRING;
-        }
 
         const payRes = await fetch(BAYARGG_CREATE_URL, {
             method: 'POST',

@@ -1506,14 +1506,18 @@
                 document.getElementById('gopay-section').style.display = 'block';
             }
 
-            // Amount — jika QRIS Converter aktif, nominal sudah include kode unik
+            // Amount — tampilkan nominal unik (final_amount) sebagai teks
+            // Sama seperti bot Telegram: nominal unik ditampilkan eksplisit ke user
             const basePrice = PLANS[selectedPlan]?.price || 0;
-            const displayAmount = data.amount || basePrice;
-            document.getElementById('pay-amount').textContent = formatRp(displayAmount);
-            if (data.use_qris_converter && data.unique_code) {
-                document.getElementById('pay-note').textContent = `Termasuk kode unik +${data.unique_code} • Scan QR langsung dengan app kamu`;
+            const finalAmount = data.amount || basePrice;
+            const uniqueCode = data.unique_code || 0;
+            document.getElementById('pay-amount').textContent = formatRp(finalAmount);
+            if (uniqueCode > 0) {
+                document.getElementById('pay-note').textContent =
+                    `Harga ${formatRp(basePrice)} + kode unik +${uniqueCode} = ${formatRp(finalAmount)}`;
             } else {
-                document.getElementById('pay-note').textContent = 'Scan QR di atas dan bayar nominal yang tertera di app kamu';
+                document.getElementById('pay-note').textContent =
+                    'Buka halaman bayar dan scan QRIS di sana';
             }
 
 
