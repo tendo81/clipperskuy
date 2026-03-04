@@ -1,12 +1,12 @@
 /**
- * GET /api/web-status?invoice_id=BAYAR-xxx
- * Check payment status and return license key when paid
+ * GET /api/web-status?invoice_id=WEB-xxx
+ * Check Pakasir payment status and return license key when paid
  */
 const { getSupabase } = require('./_lib/supabase');
 const { handleCors } = require('./_lib/helpers');
 
-const BAYARGG_CHECK_URL = 'https://www.bayar.gg/api/check-payment';
-const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY;
+const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY;
+const PAKASIR_SLUG = process.env.PAKASIR_SLUG || 'clipp';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
 const LICENSE_SERVER_SELF = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Find order in audit log
+        // Find order in audit log (machine_id = orderId = invoice_id dari frontend)
         const { data: logs } = await db
             .from('license_audit_log')
             .select('*')
@@ -32,13 +32,13 @@ module.exports = async (req, res) => {
             .limit(1);
 
         if (!logs || logs.length === 0) {
-            return res.status(404).json({ error: 'Order not found' });
+            return res.status(404).json({ error: 'Order not found', invoice_id });
         }
 
         const log = logs[0];
         const order = log.details;
 
-        // Already delivered?
+        // Kalau sudah delivered, langsung return
         if (order.license_key) {
             return res.json({
                 paid: true,
@@ -48,28 +48,25 @@ module.exports = async (req, res) => {
             });
         }
 
-        // Check bayar.gg payment status
-        if (!BAYARGG_API_KEY) {
+        // Cek via Pakasir — sama seperti bot Telegram
+        if (!PAKASIR_API_KEY) {
             return res.status(500).json({ error: 'Payment gateway not configured' });
         }
 
-        const statusRes = await fetch(`${BAYARGG_CHECK_URL}?invoice=${invoice_id}`, {
-            method: 'GET',
-            headers: {
-                'X-API-Key': BAYARGG_API_KEY
-            }
-        });
+        const orderId = order.order_id || invoice_id;
+        const amount = order.final_amount || order.price;
 
+        const pakasirUrl = `https://app.pakasir.com/api/transactiondetail?project=${PAKASIR_SLUG}&amount=${amount}&order_id=${orderId}&api_key=${PAKASIR_API_KEY}`;
+        const statusRes = await fetch(pakasirUrl);
         const statusData = await statusRes.json();
-        const status = statusData.status || statusData.data?.status || (statusData.success && statusData.data ? statusData.data.status : null) || 'pending';
-        console.log(`[web-status] ${invoice_id} → ${status}`);
 
-        if (status !== 'paid') {
-            return res.json({
-                paid: false,
-                status: statusData.status || 'pending',
-                expires_at: statusData.expires_at
-            });
+        const status = statusData.transaction?.status || statusData.status || 'pending';
+        console.log(`[web-status] Pakasir ${orderId} → ${status} | raw: ${JSON.stringify(statusData).substring(0, 200)}`);
+
+        const isPaid = (status === 'completed');
+
+        if (!isPaid) {
+            return res.json({ paid: false, status });
         }
 
         // PAID! Generate license key
@@ -83,7 +80,7 @@ module.exports = async (req, res) => {
                 tier: order.tier || 'pro',
                 count: 1,
                 duration_days: order.duration_days || 30,
-                notes: `Web checkout - ${order.order_id} - ${invoice_id}`
+                notes: `Web checkout - ${order.order_id} - Pakasir`
             })
         });
 
@@ -95,7 +92,7 @@ module.exports = async (req, res) => {
             return res.status(500).json({ error: 'Gagal generate key. Hubungi admin.' });
         }
 
-        // Mark order as delivered in audit log
+        // Simpan license key ke audit log
         await db.from('license_audit_log')
             .update({
                 details: {
@@ -107,7 +104,7 @@ module.exports = async (req, res) => {
             })
             .eq('id', log.id);
 
-        // Kirim email notifikasi jika ada email tersimpan
+        // Kirim email notifikasi
         if (order.customer_email && order.customer_email !== 'buyer@clipperskuy.com') {
             try {
                 await fetch(`${LICENSE_SERVER_SELF}/api/web-notify`, {
@@ -117,13 +114,13 @@ module.exports = async (req, res) => {
                         email: order.customer_email,
                         name: order.customer_name || 'Pengguna',
                         license_key: licenseKey,
-                        invoice_id: invoice_id,
-                        product_name: order.product_id?.replace('_', ' ').replace('pro', 'Pro —') + ' Hari'
+                        invoice_id: orderId,
+                        product_name: order.product_id?.replace('_', ' ')
                     })
                 });
                 console.log(`[web-status] Email sent to ${order.customer_email}`);
             } catch (emailErr) {
-                console.error('[web-status] Email send failed (non-fatal):', emailErr.message);
+                console.error('[web-status] Email failed (non-fatal):', emailErr.message);
             }
         }
 
