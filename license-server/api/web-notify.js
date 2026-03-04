@@ -5,7 +5,7 @@
  * Internal use: dipanggil setelah payment confirmed
  */
 const nodemailer = require('nodemailer');
-const { handleCors, parseBody } = require('./_lib/helpers');
+const { handleCors, parseBody } = require('../lib/helpers');
 
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;

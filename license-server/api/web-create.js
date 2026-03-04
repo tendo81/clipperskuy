@@ -3,8 +3,8 @@
  * Create a Pakasir QRIS payment for web checkout (sama persis seperti bot Telegram)
  * Body: { product_id, name, email }
  */
-const { getSupabase } = require('./_lib/supabase');
-const { handleCors, parseBody } = require('./_lib/helpers');
+const { getSupabase } = require('../lib/supabase');
+const { handleCors, parseBody } = require('../lib/helpers');
 
 const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY;
 const PAKASIR_SLUG = process.env.PAKASIR_SLUG || 'clipp';

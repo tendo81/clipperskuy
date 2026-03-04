@@ -3,8 +3,8 @@
  * Validate that a key is still active on a machine (heartbeat)
  * Body: { key, machine_id }
  */
-const { getSupabase } = require('./_lib/supabase');
-const { handleCors, getClientIP, parseBody } = require('./_lib/helpers');
+const { getSupabase } = require('../lib/supabase');
+const { handleCors, getClientIP, parseBody } = require('../lib/helpers');
 
 module.exports = async (req, res) => {
     if (handleCors(req, res)) return;

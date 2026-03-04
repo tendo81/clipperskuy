@@ -6,9 +6,9 @@
  * 
  * Body: { key, machine_id, machine_name, app_version }
  */
-const { getSupabase } = require('./_lib/supabase');
-const { verifyKeySignature, isValidKeyFormat } = require('./_lib/crypto');
-const { handleCors, getClientIP, parseBody } = require('./_lib/helpers');
+const { getSupabase } = require('../lib/supabase');
+const { verifyKeySignature, isValidKeyFormat } = require('../lib/crypto');
+const { handleCors, getClientIP, parseBody } = require('../lib/helpers');
 
 module.exports = async (req, res) => {
     if (handleCors(req, res)) return;

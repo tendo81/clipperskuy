@@ -2,8 +2,8 @@
  * GET /api/web-status?invoice_id=WEB-xxx
  * Check Pakasir payment status and return license key when paid
  */
-const { getSupabase } = require('./_lib/supabase');
-const { handleCors } = require('./_lib/helpers');
+const { getSupabase } = require('../lib/supabase');
+const { handleCors } = require('../lib/helpers');
 
 const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY;
 const PAKASIR_SLUG = process.env.PAKASIR_SLUG || 'clipp';

@@ -5,7 +5,7 @@
  * 
  * Body: { key, machine_id }
  */
-const { handleCors, parseBody } = require('./_lib/helpers');
+const { handleCors, parseBody } = require('../lib/helpers');
 
 module.exports = async (req, res) => {
     if (handleCors(req, res)) return;

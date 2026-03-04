@@ -4,9 +4,9 @@
  * POST /api/admin   — Generate new key(s)
  * PUT  /api/admin?id=xxx&action=revoke|activate|reset|delete|upgrade|downgrade|unbind
  */
-const { getSupabase } = require('./_lib/supabase');
-const { generateKey } = require('./_lib/crypto');
-const { handleCors, verifyAdmin, parseBody } = require('./_lib/helpers');
+const { getSupabase } = require('../lib/supabase');
+const { generateKey } = require('../lib/crypto');
+const { handleCors, verifyAdmin, parseBody } = require('../lib/helpers');
 
 module.exports = async (req, res) => {
     if (handleCors(req, res)) return;

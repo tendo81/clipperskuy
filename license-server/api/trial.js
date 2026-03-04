@@ -7,8 +7,8 @@
  * Trial is tied to machine_id. Even after reinstall, same machine = same trial.
  */
 
-const { getSupabase } = require('./_lib/supabase');
-const { handleCors, getClientIP, parseBody } = require('./_lib/helpers');
+const { getSupabase } = require('../lib/supabase');
+const { handleCors, getClientIP, parseBody } = require('../lib/helpers');
 
 module.exports = async (req, res) => {
     if (handleCors(req, res)) return;
