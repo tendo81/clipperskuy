@@ -1,0 +1,127 @@
+/**
+ * Admin: License Key Management (merged)
+ * GET  /api/admin   — List all keys
+ * POST /api/admin   — Generate new key(s)
+ * PUT  /api/admin?id=xxx&action=revoke|activate|reset|delete|upgrade|downgrade|unbind
+ */
+const { getSupabase } = require('./_lib/supabase');
+const { generateKey } = require('./_lib/crypto');
+const { handleCors, verifyAdmin, parseBody } = require('./_lib/helpers');
+
+module.exports = async (req, res) => {
+    if (handleCors(req, res)) return;
+    if (!verifyAdmin(req, res)) return;
+
+    const db = getSupabase();
+
+    // === GET: List all keys ===
+    if (req.method === 'GET') {
+        try {
+            const { data: keys, error } = await db
+                .from('license_keys')
+                .select('*')
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            const enriched = [];
+            for (const key of keys || []) {
+                const { count } = await db
+                    .from('license_activations')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('license_key_id', key.id)
+                    .is('deactivated_at', null);
+                const { data: lastActivation } = await db
+                    .from('license_activations')
+                    .select('machine_id, machine_name, ip_address, last_seen_at, activated_at')
+                    .eq('license_key_id', key.id)
+                    .is('deactivated_at', null)
+                    .order('last_seen_at', { ascending: false })
+                    .limit(1).single();
+                enriched.push({ ...key, activation_count: count || 0, last_machine: lastActivation || null });
+            }
+            return res.json({ keys: enriched });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
+
+    // === POST: Generate new key(s) ===
+    if (req.method === 'POST') {
+        try {
+            const body = await parseBody(req);
+            const { tier = 'pro', count = 1, duration_days = 0, max_activations = 1, notes = '' } = body;
+            if (!['pro', 'enterprise'].includes(tier))
+                return res.status(400).json({ error: 'Tier must be "pro" or "enterprise"' });
+            const numKeys = Math.min(parseInt(count) || 1, 50);
+            const durDays = parseInt(duration_days) || 0;
+            const maxAct = Math.max(1, parseInt(max_activations) || 1);
+            const generated = [];
+            for (let i = 0; i < numKeys; i++) {
+                const licenseKey = generateKey(tier, durDays);
+                const expiresAt = durDays > 0
+                    ? new Date(Date.now() + durDays * 24 * 60 * 60 * 1000).toISOString()
+                    : null;
+                const { data, error } = await db
+                    .from('license_keys')
+                    .insert({ license_key: licenseKey, tier, status: 'active', duration_days: durDays, expires_at: expiresAt, max_activations: maxAct, notes })
+                    .select().single();
+                if (error) return res.status(500).json({ error: 'DB insert failed', detail: error.message });
+                generated.push({ id: data.id, key: data.license_key, tier, status: 'active', duration_days: durDays, expires_at: expiresAt, max_activations: maxAct });
+            }
+            return res.json({ message: `Generated ${generated.length} key(s)`, keys: generated });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
+
+    // === PUT/DELETE: Manage individual key ===
+    if (req.method === 'PUT' || req.method === 'DELETE') {
+        const { id, action } = req.query || {};
+        if (!id || !action) return res.status(400).json({ error: 'Missing id or action' });
+        try {
+            const { data: key } = await db.from('license_keys').select('*').eq('id', id).single();
+            if (!key) return res.status(404).json({ error: 'Key not found' });
+            switch (action) {
+                case 'revoke':
+                    await db.from('license_keys').update({ status: 'revoked' }).eq('id', id);
+                    return res.json({ message: `Key ${key.license_key} revoked` });
+                case 'activate':
+                    await db.from('license_keys').update({ status: 'active' }).eq('id', id);
+                    return res.json({ message: `Key ${key.license_key} re-activated` });
+                case 'reset':
+                    await db.from('license_activations').update({ deactivated_at: new Date().toISOString() }).eq('license_key_id', id).is('deactivated_at', null);
+                    await db.from('license_keys').update({ status: 'active' }).eq('id', id);
+                    return res.json({ message: `Key ${key.license_key} reset` });
+                case 'delete':
+                    await db.from('license_activations').delete().eq('license_key_id', id);
+                    await db.from('license_audit_log').delete().eq('license_key_id', id);
+                    await db.from('license_keys').delete().eq('id', id);
+                    return res.json({ message: `Key ${key.license_key} deleted` });
+                case 'unbind': {
+                    const { data: act } = await db.from('license_activations').select('*').eq('license_key_id', id).is('deactivated_at', null).single();
+                    if (!act) return res.json({ message: `Key not bound to any machine` });
+                    await db.from('license_activations').update({ deactivated_at: new Date().toISOString() }).eq('id', act.id);
+                    await db.from('license_keys').update({ status: 'active' }).eq('id', id);
+                    return res.json({ message: `Key ${key.license_key} unbound`, unbound_machine: act.machine_id });
+                }
+                case 'upgrade':
+                case 'downgrade': {
+                    const body = await parseBody(req);
+                    const { tier: newTier, duration_days: nd, max_activations: nm } = body;
+                    if (!newTier || !['pro', 'enterprise'].includes(newTier))
+                        return res.status(400).json({ error: 'Provide valid tier' });
+                    const updates = { tier: newTier };
+                    if (nd !== undefined) { updates.duration_days = parseInt(nd); updates.expires_at = nd > 0 ? new Date(Date.now() + nd * 86400000).toISOString() : null; }
+                    if (nm !== undefined) updates.max_activations = parseInt(nm);
+                    await db.from('license_keys').update(updates).eq('id', id);
+                    return res.json({ message: `Key updated`, current: updates });
+                }
+                default:
+                    return res.status(400).json({ error: 'Invalid action' });
+            }
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
+
+    return res.status(405).json({ error: 'Method not allowed' });
+};
