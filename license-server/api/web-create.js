@@ -59,7 +59,8 @@ module.exports = async (req, res) => {
                 amount: product.price,
                 description: `ClipperSkuy License - Order ${orderId}`,
                 customer_name: customerName,
-                payment_method: 'gopay_qris',
+                // qris = QRIS Admin bayar.gg, tidak perlu login ulang / tidak ada token expired
+                payment_method: 'qris',
                 callback_url: callbackUrl,
                 expired_time: 30
             })
