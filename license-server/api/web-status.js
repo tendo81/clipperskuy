@@ -4,12 +4,11 @@
  */
 const { getSupabase } = require('../lib/supabase');
 const { handleCors } = require('../lib/helpers');
+const { generateKey } = require('../lib/crypto');
 
 const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY;
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
-const LICENSE_SERVER_SELF = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'https://license-server-nine-dun.vercel.app';
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASS = process.env.GMAIL_APP_PASSWORD;
 
 module.exports = async (req, res) => {
     if (handleCors(req, res)) return;
@@ -21,7 +20,7 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
-        // Find order — machine_id = bayar.gg invoice_id
+        // Find order
         const { data: logs } = await db
             .from('license_audit_log')
             .select('*')
@@ -37,8 +36,8 @@ module.exports = async (req, res) => {
         const log = logs[0];
         const order = log.details;
 
-        // Kalau sudah delivered, langsung return
-        if (order.license_key) {
+        // Sudah pernah diproses → langsung return
+        if (order.license_key && order.status === 'paid') {
             return res.json({
                 paid: true,
                 key: order.license_key,
@@ -57,9 +56,8 @@ module.exports = async (req, res) => {
         });
         const statusData = await statusRes.json();
 
-        // bayar.gg bisa return nested: { status } atau { data: { status } }
         const status = statusData.status || statusData.data?.status || 'pending';
-        console.log(`[web-status] bayar.gg ${invoice_id} → ${status}`);
+        console.log(`[web-status] bayar.gg ${invoice_id} → ${status} | data: ${JSON.stringify(statusData).substring(0, 150)}`);
 
         const isPaid = ['paid', 'settlement', 'success', 'completed'].includes(status?.toLowerCase());
 
@@ -67,32 +65,40 @@ module.exports = async (req, res) => {
             return res.json({ paid: false, status });
         }
 
-        // PAID! Generate license key
-        const keyRes = await fetch(`${LICENSE_SERVER_SELF}/api/admin`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-admin-key': ADMIN_API_KEY
-            },
-            body: JSON.stringify({
-                tier: order.tier || 'pro',
-                count: 1,
-                duration_days: order.duration_days || 30,
+        // === PAID! Generate license key LANGSUNG (tanpa self HTTP call) ===
+        const tier = order.tier || 'pro';
+        const durationDays = order.duration_days || 30;
+        const licenseKey = generateKey(tier, durationDays);
+        const expiresAt = durationDays > 0
+            ? new Date(Date.now() + durationDays * 86400000).toISOString()
+            : null;
+
+        // Simpan ke license_keys table
+        const { data: keyRow, error: keyErr } = await db
+            .from('license_keys')
+            .insert({
+                license_key: licenseKey,
+                tier,
+                status: 'active',
+                duration_days: durationDays,
+                expires_at: expiresAt,
+                max_activations: 1,
                 notes: `Web checkout - ${order.order_id} - bayar.gg`
             })
-        });
+            .select()
+            .single();
 
-        const keyData = await keyRes.json();
-        const licenseKey = keyData.keys?.[0]?.key;
-
-        if (!licenseKey) {
-            console.error('[web-status] Key generation failed:', keyData);
-            return res.status(500).json({ error: 'Gagal generate key. Hubungi admin.' });
+        if (keyErr) {
+            console.error('[web-status] DB insert key error:', keyErr);
+            return res.status(500).json({ error: 'Gagal simpan key. Hubungi admin.' });
         }
 
-        // Simpan license key ke audit log
+        console.log(`[web-status] Key generated: ${licenseKey} for ${invoice_id}`);
+
+        // Update audit log
         await db.from('license_audit_log')
             .update({
+                license_key_id: keyRow.id,
                 details: {
                     ...order,
                     status: 'paid',
@@ -102,22 +108,39 @@ module.exports = async (req, res) => {
             })
             .eq('id', log.id);
 
-        // Kirim email notifikasi
-        if (order.customer_email && !order.customer_email.includes('test')) {
+        // Kirim email via Nodemailer (Supabase-compatible inline)
+        const email = order.customer_email;
+        if (email && !email.includes('test') && GMAIL_USER && GMAIL_APP_PASS) {
             try {
-                await fetch(`${LICENSE_SERVER_SELF}/api/web-notify`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: order.customer_email,
-                        name: order.customer_name || 'Pengguna',
-                        license_key: licenseKey,
-                        invoice_id: invoice_id,
-                        product_name: order.product_id
-                    })
+                const nodemailer = require('nodemailer');
+                const transporter = nodemailer.createTransport({
+                    service: 'gmail',
+                    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASS }
                 });
+                await transporter.sendMail({
+                    from: `"ClipperSkuy" <${GMAIL_USER}>`,
+                    to: email,
+                    subject: '🎉 License Key ClipperSkuy kamu sudah siap!',
+                    html: `
+                        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;background:#0f0f13;color:#e2e8f0;border-radius:12px">
+                            <h2 style="color:#7c3aed">🎉 Pembayaran Berhasil!</h2>
+                            <p>Hai <strong>${order.customer_name || 'Pengguna'}</strong>,</p>
+                            <p>Terima kasih sudah membeli <strong>ClipperSkuy Pro (${durationDays} hari)</strong>.</p>
+                            <p>License key kamu:</p>
+                            <div style="background:#1a1a2e;padding:16px;border-radius:8px;text-align:center;font-size:22px;font-weight:bold;letter-spacing:4px;color:#22d3ee;font-family:monospace">
+                                ${licenseKey}
+                            </div>
+                            <p style="margin-top:16px;font-size:13px;color:#94a3b8">
+                                Masukkan key ini di aplikasi ClipperSkuy → Settings → License.<br>
+                                Order ID: ${order.order_id}
+                            </p>
+                            <p style="font-size:12px;color:#64748b">Butuh bantuan? Hubungi kami di Telegram.</p>
+                        </div>
+                    `
+                });
+                console.log(`[web-status] Email sent to ${email}`);
             } catch (emailErr) {
-                console.error('[web-status] Email failed (non-fatal):', emailErr.message);
+                console.error('[web-status] Email error (non-fatal):', emailErr.message);
             }
         }
 
@@ -130,6 +153,6 @@ module.exports = async (req, res) => {
 
     } catch (err) {
         console.error('[web-status] error:', err);
-        return res.status(500).json({ error: 'Server error' });
+        return res.status(500).json({ error: 'Server error: ' + err.message });
     }
 };
