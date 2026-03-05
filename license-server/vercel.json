@@ -25,7 +25,7 @@
         "api/web-status.js": {
             "maxDuration": 30
         },
-        "api/web-notify.js": {
+        "api/web-callback.js": {
             "maxDuration": 30
         }
     }

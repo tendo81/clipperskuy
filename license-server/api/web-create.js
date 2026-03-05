@@ -44,8 +44,11 @@ module.exports = async (req, res) => {
     const db = getSupabase();
 
     try {
+        // Callback URL — bayar.gg akan POST ke sini saat pembayaran terdeteksi
+        // Ini tidak tergantung koneksi GoPay aktif atau polling frontend
+        const callbackUrl = `https://license-server-nine-dun.vercel.app/api/web-callback`;
+
         // Buat invoice via bayar.gg — gopay_qris
-        // User bayar lewat halaman bayar.gg → uang masuk langsung ke rekening merchant
         const payRes = await fetch('https://www.bayar.gg/api/create-payment.php', {
             method: 'POST',
             headers: {
@@ -56,7 +59,9 @@ module.exports = async (req, res) => {
                 amount: product.price,
                 description: `ClipperSkuy License - Order ${orderId}`,
                 customer_name: customerName,
-                payment_method: 'gopay_qris'
+                payment_method: 'gopay_qris',
+                callback_url: callbackUrl,
+                expired_time: 30
             })
         });
 
