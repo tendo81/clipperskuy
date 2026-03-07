@@ -27,6 +27,9 @@
         },
         "api/web-callback.js": {
             "maxDuration": 30
+        },
+        "api/promo.js": {
+            "maxDuration": 10
         }
     }
 }

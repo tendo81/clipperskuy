@@ -30,7 +30,7 @@ module.exports = async (req, res) => {
     }
 
     const body = await parseBody(req);
-    const { product_id, name, email } = body;
+    const { product_id, name, email, promo_code } = body;
 
     const product = PRODUCTS[product_id];
     if (!product) {
@@ -39,8 +39,33 @@ module.exports = async (req, res) => {
 
     const customerName = (name || 'Customer').substring(0, 50).trim() || 'Customer';
     const customerEmail = (email || '').substring(0, 100).trim().toLowerCase() || null;
+    const promoCode = promo_code ? promo_code.toUpperCase().trim() : null;
     const orderId = generateOrderId();
     const db = getSupabase();
+
+    // Validasi & hitung diskon promo code
+    let finalPrice = product.price;
+    let discountAmount = 0;
+    let promoData = null;
+    if (promoCode) {
+        const { data: promo } = await db
+            .from('promo_codes')
+            .select('*')
+            .eq('code', promoCode)
+            .eq('active', true)
+            .single();
+        if (promo && !(promo.expires_at && new Date(promo.expires_at) < new Date())
+            && !(promo.max_uses !== null && promo.used_count >= promo.max_uses)
+            && !(promo.product_ids?.length && !promo.product_ids.includes(product_id))) {
+            if (promo.discount_type === 'percent') {
+                discountAmount = Math.round(product.price * promo.discount_value / 100);
+            } else {
+                discountAmount = promo.discount_value;
+            }
+            finalPrice = Math.max(1000, product.price - discountAmount);
+            promoData = promo;
+        }
+    }
 
     try {
         // Buat QRIS via Pakasir
@@ -50,7 +75,7 @@ module.exports = async (req, res) => {
             body: JSON.stringify({
                 api_key: PAKASIR_API_KEY,
                 project: PAKASIR_SLUG,
-                amount: product.price,
+                amount: finalPrice,   // harga setelah diskon
                 order_id: orderId
             })
         });
@@ -74,7 +99,12 @@ module.exports = async (req, res) => {
             : null;
         const expiresAt = payment.expired_at || null;
 
-        console.log(`[web-create] Pakasir QRIS — orderId:${orderId}, amount:${product.price}, finalAmount:${finalAmount}, uniqueCode:${uniqueCode}`);
+        console.log(`[web-create] Pakasir QRIS — orderId:${orderId}, basePrice:${product.price}, finalPrice:${finalPrice}, discount:${discountAmount}, promo:${promoCode || 'none'}`);
+
+        // Increment promo used_count
+        if (promoData) {
+            await db.from('promo_codes').update({ used_count: (promoData.used_count || 0) + 1 }).eq('id', promoData.id);
+        }
 
         // Simpan ke audit log
         await db.from('license_audit_log').insert({
@@ -90,6 +120,9 @@ module.exports = async (req, res) => {
                 tier: product.tier,
                 duration_days: product.duration,
                 price: product.price,
+                discount_amount: discountAmount,
+                promo_code: promoCode || null,
+                final_price: finalPrice,
                 final_amount: finalAmount,
                 unique_code: uniqueCode,
                 customer_name: customerName,
@@ -108,6 +141,9 @@ module.exports = async (req, res) => {
             qris_string: qrisString,
             amount: finalAmount,
             base_price: product.price,
+            final_price: finalPrice,
+            discount_amount: discountAmount,
+            promo_code: promoCode || null,
             unique_code: uniqueCode,
             expires_at: expiresAt,
             product: product.name,
