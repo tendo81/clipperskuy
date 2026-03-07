@@ -1228,10 +1228,19 @@
                         </div>
                         <div style="text-align:center;padding:12px 0 4px;">
                             <img id="qr-image"
-                                style="width:160px;height:160px;border-radius:12px;border:2px solid var(--border);"
-                                src="" alt="QR" onerror="this.parentElement.style.display='none'">
+                                style="width:200px;height:200px;border-radius:12px;border:2px solid var(--border);display:none;"
+                                src="" alt="QR Code" onload="this.style.display='block'"
+                                onerror="document.getElementById('qr-fallback').style.display='block';this.style.display='none'">
+                            <div id="qr-fallback" style="display:none;margin:8px 0;">
+                                <a id="pakasir-pay-link" href="#" target="_blank"
+                                    style="display:inline-block;padding:12px 20px;background:linear-gradient(135deg,#7c3aed,#2563eb);color:#fff;border-radius:10px;font-weight:700;font-size:14px;text-decoration:none;">
+                                    💳 Buka Halaman Pembayaran
+                                </a>
+                                <div style="font-size:11px;color:var(--text3);margin-top:6px;">Atau scan QR dengan
+                                    kamera HP</div>
+                            </div>
                             <div style="font-size:11px;color:var(--text3);margin-top:6px;">📷 Scan dengan kamera HP
-                                (bukan app e-wallet)</div>
+                            </div>
                         </div>
                     </div>
 
@@ -1570,11 +1579,19 @@
             const qrImg = document.getElementById('qr-image');
             if (data.qr_image && qrImg) {
                 qrImg.src = data.qr_image;
-                qrImg.style.display = 'block';
+                // onload/onerror sudah di HTML — auto show/hide
             }
-            // Pastikan QR box selalu terlihat (override CSS mobile-hide)
+            // Pastikan QR box selalu terlihat
             const qrBox = document.getElementById('qr-desktop-box');
             if (qrBox) qrBox.style.cssText = 'display:block !important; margin: 0 auto;';
+
+            // Fallback: link langsung ke halaman bayar Pakasir
+            const pakasirLink = document.getElementById('pakasir-pay-link');
+            if (pakasirLink) {
+                const payUrl = data.pay_url || data.payment_url || null;
+                if (payUrl) pakasirLink.href = payUrl;
+                else pakasirLink.closest('div[id="qr-fallback"]') && (document.getElementById('qr-fallback').style.display = 'none');
+            }
 
             // Tombol bayar.gg payment link
             if (data.payment_url && data.payment_url.startsWith('http')) {

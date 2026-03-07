@@ -94,9 +94,10 @@ module.exports = async (req, res) => {
         const uniqueCode = payment.fee || (finalAmount - product.price);
         // QRIS string → generate QR image via qrserver
         const qrisString = payment.payment_number || null;
-        const qrImage = qrisString
-            ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&qzone=2&data=${encodeURIComponent(qrisString)}`
-            : null;
+        const payUrl = payment.pay_url || payment.payment_url
+            || `https://app.pakasir.com/pay/${PAKASIR_SLUG}/${finalPrice}?order_id=${orderId}`;
+        const qrData = qrisString || payUrl; // fallback: QR dari pay_url
+        const qrImage = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&qzone=2&data=${encodeURIComponent(qrData)}`;
         const expiresAt = payment.expired_at || null;
 
         console.log(`[web-create] Pakasir QRIS — orderId:${orderId}, basePrice:${product.price}, finalPrice:${finalPrice}, discount:${discountAmount}, promo:${promoCode || 'none'}`);
@@ -139,6 +140,7 @@ module.exports = async (req, res) => {
             invoice_id: orderId,
             qr_image: qrImage,
             qris_string: qrisString,
+            pay_url: payUrl,
             amount: finalAmount,
             base_price: product.price,
             final_price: finalPrice,
