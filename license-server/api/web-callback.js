@@ -19,7 +19,9 @@ module.exports = async (req, res) => {
     const body = req.body || {};
     const all = { ...query, ...body };
 
-    const invoice_id = all.invoice || all.invoice_id || all.id;
+    // Pakasir kirim: { order_id, amount, project, status, ... }
+    // bayar.gg kirim: { invoice, status, ... }
+    const invoice_id = all.order_id || all.invoice || all.invoice_id || all.id;
     const status = (all.status || '').toLowerCase();
 
     console.log(`[web-callback] Received: ${JSON.stringify(all)}`);
