@@ -104,19 +104,19 @@ router.get('/licenses', async (req, res) => {
     if (cached) {
         res.json(cached);
         // Refresh cache in background silently
-        onlineRequest('/api/admin/keys')
+        onlineRequest('/api/admin')
             .then(data => setCache('licenses', { keys: data.keys || [] }))
-            .catch(() => {});
+            .catch(() => { });
         return;
     }
 
     // No cache — return local data INSTANTLY, then fetch online in background
     let localKeys = [];
-    try { localKeys = all('SELECT * FROM license_keys ORDER BY created_at DESC') || []; } catch (e) {}
+    try { localKeys = all('SELECT * FROM license_keys ORDER BY created_at DESC') || []; } catch (e) { }
     res.json({ keys: localKeys, _source: 'local_instant' });
 
     // Fetch online in background and update cache (client can refresh to get online data)
-    onlineRequest('/api/admin/keys')
+    onlineRequest('/api/admin')
         .then(data => {
             const result = { keys: data.keys || [] };
             setCache('licenses', result);
@@ -127,7 +127,7 @@ router.get('/licenses', async (req, res) => {
 // ===== POST /api/admin/licenses/generate — Generate new key(s) (online) =====
 router.post('/licenses/generate', async (req, res) => {
     try {
-        const data = await onlineRequest('/api/admin/keys', 'POST', req.body);
+        const data = await onlineRequest('/api/admin', 'POST', req.body);
         clearCache(); // Invalidate cache after write
         res.json(data);
     } catch (err) {
@@ -228,9 +228,9 @@ router.get('/stats', async (req, res) => {
     if (cached) {
         res.json(cached);
         // Refresh cache silently in background
-        onlineRequest('/api/admin/stats')
+        onlineRequest('/api/admin?action=stats')
             .then(data => setCache('stats', normalizeStats(data)))
-            .catch(() => {});
+            .catch(() => { });
         return;
     }
 
@@ -239,7 +239,7 @@ router.get('/stats', async (req, res) => {
     res.json(localStats);
 
     // Fetch online in background and cache for next request
-    onlineRequest('/api/admin/stats')
+    onlineRequest('/api/admin?action=stats')
         .then(data => setCache('stats', normalizeStats(data)))
         .catch(err => console.warn('[Admin] Online stats fetch failed:', err.message));
 });

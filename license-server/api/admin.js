@@ -16,6 +16,39 @@ module.exports = async (req, res) => {
 
     // === GET: List all keys ===
     if (req.method === 'GET') {
+        const { action } = req.query || {};
+
+        // GET ?action=stats — Dashboard stats
+        if (action === 'stats') {
+            try {
+                const { count: total } = await db.from('license_keys').select('*', { count: 'exact', head: true });
+                const { count: active } = await db.from('license_keys').select('*', { count: 'exact', head: true }).eq('status', 'active');
+                const { count: used } = await db.from('license_keys').select('*', { count: 'exact', head: true }).not('machine_id', 'is', null);
+                const { count: revoked } = await db.from('license_keys').select('*', { count: 'exact', head: true }).eq('status', 'revoked');
+                const { count: pro } = await db.from('license_keys').select('*', { count: 'exact', head: true }).eq('tier', 'pro');
+                const { count: enterprise } = await db.from('license_keys').select('*', { count: 'exact', head: true }).eq('tier', 'enterprise');
+                return res.json({ total, active, used, revoked, pro, enterprise, tiers: { pro, enterprise } });
+            } catch (err) {
+                return res.status(500).json({ error: err.message });
+            }
+        }
+
+        // GET ?action=logs — Audit log
+        if (action === 'logs') {
+            try {
+                const limit = parseInt(req.query.limit) || 50;
+                const actionFilter = req.query.filter_action;
+                let query = db.from('license_audit_log').select('*').order('created_at', { ascending: false }).limit(limit);
+                if (actionFilter) query = query.eq('action', actionFilter);
+                const { data: logs, error } = await query;
+                if (error) throw error;
+                return res.json({ count: logs?.length || 0, logs: logs || [] });
+            } catch (err) {
+                return res.status(500).json({ error: err.message });
+            }
+        }
+
+        // GET (no action) — List all keys
         try {
             const { data: keys, error } = await db
                 .from('license_keys')
