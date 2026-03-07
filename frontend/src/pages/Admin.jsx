@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Key, Plus, Trash2, RefreshCw, Copy, CheckCircle, XCircle, AlertTriangle, Crown, Zap, Hash, Users, BarChart3, Ban, Unlock, Download, Clock, Timer, RotateCcw, Lock, UserCheck, ArrowUpCircle, FileText, Filter } from 'lucide-react';
+import { Shield, Key, Plus, Trash2, RefreshCw, Copy, CheckCircle, XCircle, AlertTriangle, Crown, Zap, Hash, Users, BarChart3, Ban, Unlock, Download, Clock, Timer, RotateCcw, Lock, UserCheck, ArrowUpCircle, FileText, Filter, Tag, ToggleLeft, ToggleRight } from 'lucide-react';
 
 const API = 'http://localhost:5000/api';
+const LICENSE_API = 'https://license-server-nine-dun.vercel.app';
 
 export default function Admin() {
     // ===== Admin Auth Gate =====
@@ -87,6 +88,77 @@ export default function Admin() {
     const [auditLogs, setAuditLogs] = useState([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logFilter, setLogFilter] = useState('');
+
+    // ===== Promo Manager State =====
+    const [showPromos, setShowPromos] = useState(false);
+    const [promos, setPromos] = useState([]);
+    const [promosLoading, setPromosLoading] = useState(false);
+    const [showPromoForm, setShowPromoForm] = useState(false);
+    const [promoMsg, setPromoMsg] = useState('');
+    const [promoForm, setPromoForm] = useState({
+        code: '', description: '',
+        discount_type: 'percent', discount_value: '',
+        max_uses: '', expires_at: '', product_ids: []
+    });
+
+    const PRODUCT_OPTIONS = [
+        { id: 'pro_30', label: 'Pro 30 Hari (Rp69k)' },
+        { id: 'pro_90', label: 'Pro 90 Hari (Rp129k)' },
+        { id: 'pro_365', label: 'Pro 365 Hari (Rp250k)' },
+    ];
+
+    const loadPromos = async () => {
+        setPromosLoading(true);
+        try {
+            const res = await fetch(`${LICENSE_API}/api/promo?admin=1`, {
+                headers: { 'x-admin-key': adminPassword }
+            });
+            const data = await res.json();
+            setPromos(data.promos || []);
+        } catch { setPromoMsg('❌ Gagal load promo'); }
+        setPromosLoading(false);
+    };
+
+    const createPromo = async () => {
+        if (!promoForm.code) return setPromoMsg('❌ Kode wajib diisi');
+        if (!promoForm.discount_value || Number(promoForm.discount_value) <= 0) return setPromoMsg('❌ Nilai diskon harus > 0');
+        try {
+            const body = {
+                code: promoForm.code.toUpperCase().trim(),
+                description: promoForm.description,
+                discount_type: promoForm.discount_type,
+                discount_value: Number(promoForm.discount_value),
+                max_uses: promoForm.max_uses ? Number(promoForm.max_uses) : null,
+                expires_at: promoForm.expires_at || null,
+                product_ids: promoForm.product_ids.length > 0 ? promoForm.product_ids : null,
+            };
+            const res = await fetch(`${LICENSE_API}/api/promo`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-admin-key': adminPassword },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok) return setPromoMsg(`❌ ${data.error}`);
+            setPromoMsg(`✅ Kode "${data.promo.code}" berhasil dibuat!`);
+            setShowPromoForm(false);
+            setPromoForm({ code: '', description: '', discount_type: 'percent', discount_value: '', max_uses: '', expires_at: '', product_ids: [] });
+            loadPromos();
+        } catch { setPromoMsg('❌ Gagal membuat promo'); }
+    };
+
+    const deletePromo = async (code, deactivate = false) => {
+        const action = deactivate ? 'deactivate' : 'delete';
+        const confirm = window.confirm(deactivate ? `Nonaktifkan kode "${code}"?` : `Hapus permanen kode "${code}"?`);
+        if (!confirm) return;
+        try {
+            await fetch(`${LICENSE_API}/api/promo?code=${code}&action=${deactivate ? 'deactivate' : ''}`, {
+                method: 'DELETE',
+                headers: { 'x-admin-key': adminPassword }
+            });
+            setPromoMsg(`✅ Kode "${code}" ${deactivate ? 'dinonaktifkan' : 'dihapus'}`);
+            loadPromos();
+        } catch { setPromoMsg('❌ Gagal'); }
+    };
 
     const loadLogs = async (filter = '') => {
         setLogsLoading(true);
@@ -505,6 +577,10 @@ export default function Admin() {
                 )}
                 <button className="btn btn-ghost" onClick={() => { setShowLogs(!showLogs); if (!showLogs) loadLogs(logFilter); }} style={{ gap: 6 }}>
                     <FileText size={14} /> {showLogs ? 'Hide Logs' : 'Audit Log'}
+                </button>
+                <button className="btn btn-ghost" onClick={() => { setShowPromos(!showPromos); if (!showPromos) loadPromos(); }}
+                    style={{ gap: 6, color: showPromos ? '#f59e0b' : undefined }}>
+                    <Tag size={14} /> {showPromos ? 'Hide Promos' : '🏷️ Promo Codes'}
                 </button>
             </div>
 
@@ -953,6 +1029,207 @@ export default function Admin() {
                     </motion.div>
                 )}
             </AnimatePresence>
+            {/* ===== PROMO MANAGER ===== */}
+            <AnimatePresence>
+                {showPromos && (
+                    <motion.div className="card" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                        style={{ marginBottom: 20, padding: 20 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 16 }}>
+                                <Tag size={18} style={{ color: '#f59e0b' }} /> Promo Code Manager
+                            </h3>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button className="btn btn-ghost btn-sm" onClick={loadPromos} style={{ gap: 4 }}>
+                                    <RefreshCw size={12} /> Refresh
+                                </button>
+                                <button className="btn btn-primary btn-sm" onClick={() => setShowPromoForm(!showPromoForm)} style={{ gap: 4 }}>
+                                    <Plus size={14} /> Tambah Kode
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Promo message */}
+                        {promoMsg && (
+                            <div style={{
+                                padding: '8px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13,
+                                background: promoMsg.startsWith('✅') ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                                color: promoMsg.startsWith('✅') ? '#10b981' : '#ef4444',
+                                border: `1px solid ${promoMsg.startsWith('✅') ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`
+                            }}>{promoMsg}</div>
+                        )}
+
+                        {/* Add Promo Form */}
+                        <AnimatePresence>
+                            {showPromoForm && (
+                                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                                    style={{ overflow: 'hidden', marginBottom: 16, padding: '16px', background: 'rgba(245,158,11,0.05)', borderRadius: 10, border: '1px solid rgba(245,158,11,0.2)' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                        <div className="form-group">
+                                            <label className="form-label">Kode Promo *</label>
+                                            <input className="input-field" placeholder="contoh: LEBARAN25"
+                                                value={promoForm.code} style={{ textTransform: 'uppercase', fontFamily: 'monospace', letterSpacing: 1 }}
+                                                onChange={e => setPromoForm(p => ({ ...p, code: e.target.value.toUpperCase() }))} />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Deskripsi (untuk admin)</label>
+                                            <input className="input-field" placeholder="Promo Lebaran 2026"
+                                                value={promoForm.description}
+                                                onChange={e => setPromoForm(p => ({ ...p, description: e.target.value }))} />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Tipe Diskon</label>
+                                            <div className="chip-group">
+                                                {[['percent', '% Persen'], ['flat', 'Rp Flat']].map(([v, l]) => (
+                                                    <button key={v} className={`chip ${promoForm.discount_type === v ? 'active' : ''}`}
+                                                        onClick={() => setPromoForm(p => ({ ...p, discount_type: v }))}>{l}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">
+                                                {promoForm.discount_type === 'percent' ? 'Persen Diskon (%)' : 'Potongan (Rp)'} *
+                                            </label>
+                                            <input className="input-field" type="number" min="1"
+                                                placeholder={promoForm.discount_type === 'percent' ? 'contoh: 20' : 'contoh: 15000'}
+                                                value={promoForm.discount_value}
+                                                onChange={e => setPromoForm(p => ({ ...p, discount_value: e.target.value }))} />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Maks Pemakaian (kosongi = unlimited)</label>
+                                            <input className="input-field" type="number" min="1" placeholder="contoh: 50"
+                                                value={promoForm.max_uses}
+                                                onChange={e => setPromoForm(p => ({ ...p, max_uses: e.target.value }))} />
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Berlaku Sampai (kosongi = tidak ada batas)</label>
+                                            <input className="input-field" type="date"
+                                                value={promoForm.expires_at ? promoForm.expires_at.split('T')[0] : ''}
+                                                onChange={e => setPromoForm(p => ({ ...p, expires_at: e.target.value ? e.target.value + 'T23:59:59Z' : '' }))} />
+                                        </div>
+                                    </div>
+                                    <div className="form-group" style={{ marginTop: 8 }}>
+                                        <label className="form-label">Berlaku untuk Produk (kosongi = semua produk)</label>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                                            {PRODUCT_OPTIONS.map(p => {
+                                                const checked = promoForm.product_ids.includes(p.id);
+                                                return (
+                                                    <label key={p.id} style={{
+                                                        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                                                        padding: '4px 10px', borderRadius: 6, fontSize: 12,
+                                                        background: checked ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.04)',
+                                                        border: `1px solid ${checked ? '#8b5cf6' : 'rgba(255,255,255,0.08)'}`,
+                                                        color: checked ? '#a78bfa' : 'var(--text-muted)'
+                                                    }}>
+                                                        <input type="checkbox" style={{ display: 'none' }} checked={checked}
+                                                            onChange={e => setPromoForm(prev => ({
+                                                                ...prev,
+                                                                product_ids: e.target.checked
+                                                                    ? [...prev.product_ids, p.id]
+                                                                    : prev.product_ids.filter(x => x !== p.id)
+                                                            }))} />
+                                                        {checked ? '✓ ' : ''}{p.label}
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                            {promoForm.product_ids.length === 0 ? '⚡ Berlaku untuk semua produk' : `🔒 Khusus: ${promoForm.product_ids.join(', ')}`}
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                        <button className="btn btn-primary btn-sm" onClick={createPromo}>💾 Simpan Kode</button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => { setShowPromoForm(false); setPromoMsg(''); }}>Batal</button>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* Promo List */}
+                        {promosLoading ? (
+                            <div style={{ textAlign: 'center', padding: 20 }}>
+                                <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-cyan)' }} />
+                            </div>
+                        ) : promos.length === 0 ? (
+                            <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Belum ada kode promo.</p>
+                        ) : (
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                            {['Kode', 'Diskon', 'Produk', 'Pakai/Maks', 'Expired', 'Status', 'Aksi'].map(h => (
+                                                <th key={h} style={thStyle}>{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {promos.map(p => (
+                                            <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', opacity: p.active ? 1 : 0.4 }}>
+                                                <td style={tdStyle}>
+                                                    <code style={{
+                                                        fontFamily: 'monospace', fontWeight: 700, fontSize: 13,
+                                                        color: p.active ? '#f59e0b' : 'var(--text-muted)',
+                                                        letterSpacing: 1
+                                                    }}>{p.code}</code>
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <span style={{ fontWeight: 600, color: '#10b981' }}>
+                                                        {p.discount_type === 'percent'
+                                                            ? `${p.discount_value}%`
+                                                            : `Rp${Number(p.discount_value).toLocaleString('id')}`}
+                                                    </span>
+                                                    <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>
+                                                        ({p.discount_type === 'percent' ? 'persen' : 'flat'})
+                                                    </span>
+                                                    {p.description && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p.description}</div>}
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                                        {p.product_ids?.length ? p.product_ids.join(', ') : '⚡ Semua'}
+                                                    </span>
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <span style={{ fontWeight: 600, color: (p.max_uses && p.used_count >= p.max_uses) ? '#ef4444' : '#10b981' }}>
+                                                        {p.used_count}/{p.max_uses ?? '∞'}
+                                                    </span>
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <span style={{ fontSize: 11, color: p.expires_at && new Date(p.expires_at) < new Date() ? '#ef4444' : 'var(--text-muted)' }}>
+                                                        {p.expires_at ? new Date(p.expires_at).toLocaleDateString('id-ID') : '∞ Tidak ada batas'}
+                                                    </span>
+                                                </td>
+                                                <td style={tdStyle}>
+                                                    <span style={{
+                                                        padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                                                        background: p.active ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                                                        color: p.active ? '#10b981' : '#ef4444'
+                                                    }}>
+                                                        {p.active ? '● Aktif' : '● Nonaktif'}
+                                                    </span>
+                                                </td>
+                                                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                                                    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                                                        {p.active && (
+                                                            <button className="btn btn-ghost btn-sm" onClick={() => deletePromo(p.code, true)}
+                                                                title="Nonaktifkan" style={{ padding: '3px 8px', color: '#f59e0b', fontSize: 11 }}>
+                                                                ⏸ Off
+                                                            </button>
+                                                        )}
+                                                        <button className="btn btn-ghost btn-sm" onClick={() => deletePromo(p.code, false)}
+                                                            title="Hapus" style={{ padding: '3px 8px', color: '#ef4444' }}>
+                                                            <Trash2 size={12} />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
         </div>
     );
 }
