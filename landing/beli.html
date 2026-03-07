@@ -1234,8 +1234,9 @@
                                 <div
                                     style="background:#fff;border-radius:17px;padding:12px;display:flex;align-items:center;justify-content:center;min-width:190px;min-height:190px;">
                                     <img id="qr-image" style="width:190px;height:190px;border-radius:6px;display:none;"
-                                        src="" alt="QR Code" onload="this.style.display='block'"
-                                        onerror="document.getElementById('qr-fallback').style.display='flex';this.style.display='none'">
+                                        src="" alt="QR Code"
+                                        onload="this.style.display='block';document.getElementById('qr-fallback').style.display='none';"
+                                        onerror="document.getElementById('qr-fallback').style.display='flex';this.style.display='none';">
                                     <div id="qr-fallback"
                                         style="display:none;width:190px;height:190px;flex-direction:column;align-items:center;justify-content:center;gap:8px;">
                                         <span style="font-size:40px;">⚡</span>
