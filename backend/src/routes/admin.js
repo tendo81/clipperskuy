@@ -80,7 +80,7 @@ async function onlineRequest(path, method = 'GET', body = null) {
             'Content-Type': 'application/json',
             'x-admin-key': ONLINE_ADMIN_KEY,
         },
-        signal: AbortSignal.timeout(5000), // 5 second timeout
+        signal: AbortSignal.timeout(20000), // 20 second timeout (GET /api/admin butuh banyak queries)
     };
     if (body && method !== 'GET') {
         options.body = JSON.stringify(body);
@@ -99,6 +99,25 @@ async function onlineRequest(path, method = 'GET', body = null) {
 
 // ===== GET /api/admin/licenses — List all keys (from online server, cached) =====
 router.get('/licenses', async (req, res) => {
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+
+    // Force refresh: langsung fetch dari online, skip cache
+    if (forceRefresh) {
+        clearCache();
+        try {
+            const data = await onlineRequest('/api/admin');
+            const result = { keys: data.keys || [] };
+            setCache('licenses', result);
+            return res.json(result);
+        } catch (err) {
+            console.warn('[Admin] Force refresh failed:', err.message);
+            // Fallback ke lokal jika online gagal
+            let localKeys = [];
+            try { localKeys = all('SELECT * FROM license_keys ORDER BY created_at DESC') || []; } catch (e) { }
+            return res.json({ keys: localKeys, _source: 'local_fallback' });
+        }
+    }
+
     // Return cached data immediately if available
     const cached = getCached('licenses');
     if (cached) {

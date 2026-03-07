@@ -90,15 +90,13 @@ module.exports = async (req, res) => {
             const generated = [];
             for (let i = 0; i < numKeys; i++) {
                 const licenseKey = generateKey(tier, durDays);
-                const expiresAt = durDays > 0
-                    ? new Date(Date.now() + durDays * 24 * 60 * 60 * 1000).toISOString()
-                    : null;
+                // expires_at = null saat dibuat — expiry mulai saat key PERTAMA DIAKTIFKAN
                 const { data, error } = await db
                     .from('license_keys')
-                    .insert({ license_key: licenseKey, tier, status: 'active', duration_days: durDays, expires_at: expiresAt, max_activations: maxAct, notes })
+                    .insert({ license_key: licenseKey, tier, status: 'active', duration_days: durDays, expires_at: null, max_activations: maxAct, notes })
                     .select().single();
                 if (error) return res.status(500).json({ error: 'DB insert failed', detail: error.message });
-                generated.push({ id: data.id, key: data.license_key, tier, status: 'active', duration_days: durDays, expires_at: expiresAt, max_activations: maxAct });
+                generated.push({ id: data.id, key: data.license_key, tier, status: 'active', duration_days: durDays, expires_at: null, max_activations: maxAct });
             }
             return res.json({ message: `Generated ${generated.length} key(s)`, keys: generated });
         } catch (err) {

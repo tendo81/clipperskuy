@@ -133,8 +133,17 @@ module.exports = async (req, res) => {
         }
 
         // Update key status to 'used'
+        const activatedNow = new Date().toISOString();
+        const expiresAtFromActivation = dbKey.duration_days > 0
+            ? new Date(Date.now() + dbKey.duration_days * 86400000).toISOString()
+            : null;
+
         await db.from('license_keys')
-            .update({ status: 'used' })
+            .update({
+                status: 'used',
+                expires_at: expiresAtFromActivation,  // Set expiry dari tanggal aktivasi
+                machine_id: machine_id
+            })
             .eq('id', dbKey.id);
 
         // Audit log
@@ -146,15 +155,15 @@ module.exports = async (req, res) => {
             details: { machine_name, app_version, tier: dbKey.tier }
         });
 
-        // Calculate expiry
-        const { expiresAt, daysRemaining } = calculateExpiry(dbKey, { activated_at: new Date().toISOString() });
+        // Calculate expiry from activation time (now)
+        const { expiresAt, daysRemaining } = calculateExpiry(dbKey, { activated_at: activatedNow });
 
         return res.json({
             valid: true,
             tier: dbKey.tier,
             expiresAt,
             daysRemaining,
-            activatedAt: new Date().toISOString(),
+            activatedAt: activatedNow,
             machineId: machine_id,
             bound: true,
             message: 'License aktif! Key ini sekarang terikat ke perangkat ini.'

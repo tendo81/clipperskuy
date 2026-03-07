@@ -176,11 +176,14 @@ export default function Admin() {
         }
     };
 
-    const loadData = async () => {
+    const loadData = async (forceRefresh = false) => {
         try {
+            const licenseUrl = forceRefresh
+                ? `${API}/admin/licenses?refresh=1`
+                : `${API}/admin/licenses`;
             const [keysRes, statsRes] = await Promise.all([
-                adminFetch(`${API}/admin/licenses`).then(r => r.json()),
-                adminFetch(`${API}/admin/stats`).then(r => r.json())
+                adminFetch(licenseUrl).then(r => r.json()),
+                adminFetch(`${API}/admin/stats?refresh=${forceRefresh ? 1 : 0}`).then(r => r.json())
             ]);
             setKeys(keysRes.keys || []);
             setStats(statsRes);
@@ -189,6 +192,12 @@ export default function Admin() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const refreshNow = () => {
+        setLoading(true);
+        setMsg('');
+        loadData(true); // force bypass cache
     };
 
     useEffect(() => { if (authenticated) loadData(); }, [authenticated]);
@@ -388,7 +397,13 @@ export default function Admin() {
     };
 
     const formatExpiry = (k) => {
-        if (!k.expires_at) return { text: '♾️ Lifetime', color: '#10b981' };
+        if (!k.expires_at) {
+            // Jika duration_days ada (key akan expire) tapi belum diaktifkan
+            if (k.duration_days && k.duration_days > 0) {
+                return { text: `⏳ Belum diaktifkan (${k.duration_days}d)`, color: '#94a3b8' };
+            }
+            return { text: '♾️ Lifetime', color: '#10b981' };
+        }
         const exp = new Date(k.expires_at);
         const now = new Date();
         const days = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
@@ -567,7 +582,7 @@ export default function Admin() {
                 <button className="btn btn-primary" onClick={() => setShowGenForm(!showGenForm)} style={{ gap: 6 }}>
                     <Plus size={16} /> Generate Keys
                 </button>
-                <button className="btn btn-ghost" onClick={loadData} style={{ gap: 6 }}>
+                <button className="btn btn-ghost" onClick={refreshNow} style={{ gap: 6 }}>
                     <RefreshCw size={14} /> Refresh
                 </button>
                 {keys.length > 0 && (

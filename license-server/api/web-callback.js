@@ -76,7 +76,7 @@ module.exports = async (req, res) => {
             tier,
             status: 'active',
             duration_days: durationDays,
-            expires_at: expiresAt,
+            expires_at: null,  // Expiry dihitung sejak PERTAMA KALI AKTIVASI, bukan sejak dibuat
             max_activations: 1,
             notes: `Web checkout (callback) - ${order.order_id}`
         })
