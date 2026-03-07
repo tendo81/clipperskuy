@@ -1140,6 +1140,21 @@
                     <div class="form-hint">Untuk mengirim license key. Pastikan email aktif.</div>
                 </div>
 
+                <div class="form-group" style="margin-top:6px">
+                    <label class="form-label" for="input-promo">Kode Promo <span
+                            style="font-weight:400;color:#94a3b8;font-size:12px;">— opsional</span></label>
+                    <div style="display:flex;gap:8px;">
+                        <input class="form-input" type="text" id="input-promo" placeholder="Masukkan kode promo"
+                            maxlength="20" style="text-transform:uppercase;flex:1;"
+                            oninput="this.value=this.value.toUpperCase()">
+                        <button type="button" onclick="checkPromo()" id="btn-promo"
+                            style="padding:0 16px;background:var(--primary);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap;">
+                            Pakai
+                        </button>
+                    </div>
+                    <div id="promo-result" style="margin-top:6px;font-size:13px;display:none;"></div>
+                </div>
+
                 <div class="divider"></div>
 
                 <div id="error-msg" class="alert alert-error" style="display:none;"></div>
@@ -1469,7 +1484,12 @@
                 const res = await fetch(`${LICENSE_API}/api/web-create`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_id: selectedPlan, name, email })
+                    body: JSON.stringify({
+                        product_id: selectedPlan,
+                        name,
+                        email,
+                        promo_code: validPromoCode || null
+                    })
                 });
                 const data = await res.json();
 
@@ -1495,6 +1515,52 @@
                 btn.innerHTML = '⚡ Lanjut ke Pembayaran';
             }
         }
+
+        // --- Promo Code Logic ---
+        let validPromoCode = null;
+
+        async function checkPromo() {
+            const code = document.getElementById('input-promo').value.trim().toUpperCase();
+            const result = document.getElementById('promo-result');
+            const btnPromo = document.getElementById('btn-promo');
+            if (!code) { result.style.display = 'none'; return; }
+            if (!selectedPlan) {
+                result.style.display = 'block';
+                result.innerHTML = '<span style="color:#f87171">⚠️ Pilih paket dulu sebelum pakai promo</span>';
+                return;
+            }
+            btnPromo.disabled = true;
+            btnPromo.textContent = '...';
+            try {
+                const res = await fetch(`${LICENSE_API}/api/promo?code=${code}&product_id=${selectedPlan}`);
+                const data = await res.json();
+                result.style.display = 'block';
+                if (data.valid) {
+                    validPromoCode = code;
+                    const disc = data.discount_type === 'percent'
+                        ? `${data.discount_value}%`
+                        : `Rp${data.discount_amount.toLocaleString('id')}`;
+                    const finalFmt = `Rp${data.final_price.toLocaleString('id')}`;
+                    const remaining = data.uses_left !== null ? ` | Sisa ${data.uses_left}x` : '';
+                    result.innerHTML = `<span style="color:#4ade80">✅ Kode valid! Hemat <b>${disc}</b> → Bayar <b>${finalFmt}</b>${remaining}</span>`;
+                } else {
+                    validPromoCode = null;
+                    result.innerHTML = `<span style="color:#f87171">❌ ${data.error || 'Kode tidak valid'}</span>`;
+                }
+            } catch (e) {
+                result.style.display = 'block';
+                result.innerHTML = '<span style="color:#f87171">Gagal cek promo. Coba lagi.</span>';
+                validPromoCode = null;
+            }
+            btnPromo.disabled = false;
+            btnPromo.textContent = 'Pakai';
+        }
+
+        // Enter key di input promo
+        document.addEventListener('DOMContentLoaded', () => {
+            const promoInput = document.getElementById('input-promo');
+            if (promoInput) promoInput.addEventListener('keydown', e => { if (e.key === 'Enter') checkPromo(); });
+        });
 
         function showPayment(data) {
             document.getElementById('payment-loading').style.display = 'none';
