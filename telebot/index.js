@@ -30,8 +30,9 @@ const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY || '';
 const BAYARGG_API_KEY = process.env.BAYARGG_API_KEY || '';
 // BAYARGG_METHOD: gopay_qris | qris_user | qris (default: gopay_qris)
 const BAYARGG_METHOD = process.env.BAYARGG_METHOD || 'gopay_qris';
-// Gunakan bayar.gg jika ada API key-nya, fallback ke Pakasir
-const USE_BAYARGG = !!BAYARGG_API_KEY;
+// Pakasir lebih murah (1% vs bayar.gg 2% + Rp50k/bulan) dan tidak perlu login ulang
+// Set USE_BAYARGG = false untuk selalu pakai Pakasir
+const USE_BAYARGG = false; // was: !!BAYARGG_API_KEY
 const SUPPORT_GROUP = process.env.SUPPORT_GROUP_LINK || 'https://t.me/+GANTI_DENGAN_LINK_GRUP';
 
 // ============ DATABASE (Redis + JSON fallback) ============
