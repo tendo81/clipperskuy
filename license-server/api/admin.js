@@ -55,22 +55,29 @@ module.exports = async (req, res) => {
                 .select('*')
                 .order('created_at', { ascending: false });
             if (error) throw error;
-            const enriched = [];
-            for (const key of keys || []) {
-                const { count } = await db
-                    .from('license_activations')
-                    .select('*', { count: 'exact', head: true })
-                    .eq('license_key_id', key.id)
-                    .is('deactivated_at', null);
-                const { data: lastActivation } = await db
-                    .from('license_activations')
-                    .select('machine_id, machine_name, ip_address, last_seen_at, activated_at')
-                    .eq('license_key_id', key.id)
-                    .is('deactivated_at', null)
-                    .order('last_seen_at', { ascending: false })
-                    .limit(1).single();
-                enriched.push({ ...key, activation_count: count || 0, last_machine: lastActivation || null });
+
+            // Ambil SEMUA activations sekaligus (1 query, bukan N queries)
+            const { data: allActivations } = await db
+                .from('license_activations')
+                .select('license_key_id, machine_id, machine_name, ip_address, last_seen_at, activated_at')
+                .is('deactivated_at', null)
+                .order('last_seen_at', { ascending: false });
+
+            // Gabungkan di memory (O(n) — sangat cepat)
+            const activationMap = {};
+            const countMap = {};
+            for (const act of allActivations || []) {
+                const kid = act.license_key_id;
+                countMap[kid] = (countMap[kid] || 0) + 1;
+                if (!activationMap[kid]) activationMap[kid] = act; // ambil yang terbaru
             }
+
+            const enriched = (keys || []).map(key => ({
+                ...key,
+                activation_count: countMap[key.id] || 0,
+                last_machine: activationMap[key.id] || null
+            }));
+
             return res.json({ keys: enriched });
         } catch (err) {
             return res.status(500).json({ error: err.message });

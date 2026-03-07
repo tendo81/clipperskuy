@@ -200,7 +200,8 @@ export default function Admin() {
         loadData(true); // force bypass cache
     };
 
-    useEffect(() => { if (authenticated) loadData(); }, [authenticated]);
+    // Load online data setiap kali authenticated (force bypass cache)
+    useEffect(() => { if (authenticated) loadData(true); }, [authenticated]);
 
     const generateKeys = async () => {
         try {
