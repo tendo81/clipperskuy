@@ -440,7 +440,7 @@ async function renderClip(clipId, io) {
                         // Foreground: crop source centered on face, then scale to target size
                         `[b]crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
                         // Overlay foreground centered vertically on blurred background
-                        `[bg][fg]overlay=0:(H-h)/2`
+                        `[bg][fg]overlay=0:(H-h)/2[ftblur_out]`
                     ].join(';');
 
                     console.log(`[Render] Face Track Blur: srcW=${srcW} srcH=${srcH} crop=${cropW}x${cropH}@${cropX},${cropY} fgH=${fgHEven} (${Math.round(fgHEven / outH * 100)}% fill) faceXY=${Math.round(avgFaceX)},${Math.round(avgFaceY)}`);
@@ -470,7 +470,7 @@ async function renderClip(clipId, io) {
                         `[0:v]split[a][b]`,
                         `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=30:10[bg]`,
                         `[b]crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
-                        `[bg][fg]overlay=0:(H-h)/2`
+                        `[bg][fg]overlay=0:(H-h)/2[ftblur_out]`
                     ].join(';');
                 }
             } catch (e) {
@@ -547,6 +547,12 @@ async function renderClip(clipId, io) {
     const ftBlurIsSplit = faceTrackBlurFilter && faceTrackBlurFilter.includes('[0:v]split');
     const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || podcastIsSplit || ftBlurIsSplit || watermarkFilter || musicTrack);
     const vf = faceTrackBlurFilter || podcastFilter || faceTrackFilter || buildVideoFilter(reframingMode, outW, outH, sourceW);
+
+    // Detect if vf is a complex filter graph:
+    // - face_track_blur ends with [ftblur_out]
+    // - podcast split ends with vstack
+    // - fit/split mode uses [0:v]split internally
+    const isComplexVf = vf.includes('[0:v]') && (vf.includes('[ftblur_out]') || vf.includes('vstack') || reframingMode === 'fit' || reframingMode === 'split');
 
     // Build subtitle filter string — two variants:
     // subFilter       : for -vf usage (colons escaped as \\:)
@@ -724,13 +730,6 @@ async function renderClip(clipId, io) {
         audioArgs = { simple: audioFilter };
     }
 
-    // Detect if vf is already a complex filter graph (fit/split/podcast modes start with [0:v]split)
-    const isComplexVf = vf.includes('[0:v]');
-
-    // When hookOverlay exists, we MUST use filter_complex with overlay
-    const needsOverlay = hookOverlay && hookInputIdx >= 0;
-    const mustUseComplex = useFilterComplex || needsOverlay;
-
     // ── Subtitle 2-pass strategy ──────────────────────────────────────────────
     // ASS subtitle filter reliably FAILS inside -filter_complex on Windows
     // because the path "C:\\..." contains ":" which is the filter option separator.
@@ -759,6 +758,7 @@ async function renderClip(clipId, io) {
     // IMPORTANT: Re-evaluate needsOverlay AFTER hookOverlay may have been set to null above.
     // (needsOverlay was computed before isFaceTrackMode check which can null hookOverlay)
     const needsOverlay2 = hookOverlay && hookInputIdx >= 0;
+    const mustUseComplex = useFilterComplex || needsOverlay2;
     const needsSubtitlePass2 = (isComplexVf || mustUseComplex) && (subFilter || hookTitleFilter || progressBarFilter);
 
 
@@ -783,6 +783,11 @@ async function renderClip(clipId, io) {
                 fullFilter = vstackTagged + (extraFiltersPass1
                     ? `;[vsout]${extraFiltersPass1}[vid]`
                     : `;[vsout]null[vid]`);
+            } else if (vf.includes('[ftblur_out]')) {
+                // face_track_blur with watermark: route [ftblur_out] → [vid]
+                fullFilter = vf + (extraFiltersPass1
+                    ? `;[ftblur_out]${extraFiltersPass1}[vid]`
+                    : `;[ftblur_out]null[vid]`);
             } else {
                 fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
             }
@@ -820,14 +825,22 @@ async function renderClip(clipId, io) {
             // then route [vsout] → extraFilters → [outv]
             const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
             if (vstackTagged !== vf) {
-                // Successfully tagged vstack output
+                // Successfully tagged vstack output (podcast split mode)
                 if (extraFiltersPass1) {
                     fullFilter = vstackTagged + `;[vsout]${extraFiltersPass1}[outv]`;
                 } else {
                     fullFilter = vstackTagged + `;[vsout]null[outv]`;
                 }
+            } else if (vf.includes('[ftblur_out]')) {
+                // face_track_blur: filter already has [ftblur_out] as output label
+                // Route [ftblur_out] → extraFilters → [outv]
+                if (extraFiltersPass1) {
+                    fullFilter = vf + `;[ftblur_out]${extraFiltersPass1}[outv]`;
+                } else {
+                    fullFilter = vf + `;[ftblur_out]null[outv]`;
+                }
             } else {
-                // Fallback: vstack not found, append comma-style (may fail for some filters)
+                // Fallback: append comma-style (may fail for some filters)
                 fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
             }
         } else {
