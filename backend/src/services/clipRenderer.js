@@ -1395,7 +1395,9 @@ async function getEncoder(settings) {
             return { encoder: encoderSetting, encoderArgs: ['-preset', 'p4', '-tune', 'hq'] };
         }
         if (encoderSetting.includes('amf')) {
-            return { encoder: encoderSetting, encoderArgs: ['-quality', 'balanced'] };
+            // -bf 0: disable B-frames (reduces pipeline delay, prevents black frames at start)
+            // -refs 1: minimal reference frames (faster init)
+            return { encoder: encoderSetting, encoderArgs: ['-quality', 'balanced', '-bf', '0', '-refs', '1'] };
         }
         if (encoderSetting.includes('qsv')) {
             return { encoder: encoderSetting, encoderArgs: ['-preset', 'medium'] };
@@ -1410,7 +1412,8 @@ async function getEncoder(settings) {
     }
     if (hwAccel === 'amd' || hwAccel === 'amf') {
         console.log('[Render] Using AMD AMF (from hw_accel setting)');
-        return { encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced'] };
+        // -bf 0: disable B-frames to prevent black frames at encoder startup
+        return { encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced', '-bf', '0', '-refs', '1'] };
     }
     if (hwAccel === 'intel' || hwAccel === 'qsv') {
         console.log('[Render] Using Intel QSV (from hw_accel setting)');
@@ -1465,7 +1468,8 @@ async function _detectGpuEncoderAsync() {
             candidates.push({ encoder: 'h264_nvenc', encoderArgs: ['-preset', 'p4', '-tune', 'hq'] });
         }
         if (gpuName.includes('amd') || gpuName.includes('radeon')) {
-            candidates.push({ encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced'] });
+            // -bf 0: disable B-frames to prevent black frames at encoder startup
+            candidates.push({ encoder: 'h264_amf', encoderArgs: ['-quality', 'balanced', '-bf', '0', '-refs', '1'] });
         }
         if (gpuName.includes('intel') || gpuName.includes('uhd') || gpuName.includes('iris') || gpuName.includes('arc')) {
             candidates.push({ encoder: 'h264_qsv', encoderArgs: ['-preset', 'medium'] });
