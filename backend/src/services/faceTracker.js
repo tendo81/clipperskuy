@@ -92,12 +92,24 @@ async function analyzeRegion(imagePath, x, y, w, h) {
         const vavg = parseFloat((output.match(/VAVG:\s*([\d.]+)/) || [])[1] || '128');
         const ydif = parseFloat((output.match(/YDIF:\s*([\d.]+)/) || [])[1] || '0');
         let score = 0;
-        const skinU = (uavg >= 95 && uavg <= 150), skinV = (vavg >= 125 && vavg <= 180);
-        const validBrightness = (yavg >= 50 && yavg <= 240);
+
+        // Expanded skin tone range for various skin tones (light to dark/sawo matang):
+        // YCbCr skin: Cb(U) ~77-127, Cr(V) ~133-173 (wider range for darker skin)
+        const skinU = (uavg >= 80 && uavg <= 155);   // Cb: wider range
+        const skinV = (vavg >= 120 && vavg <= 185);   // Cr: wider range
+        const validBrightness = (yavg >= 40 && yavg <= 240);
+
         if (skinU && skinV && validBrightness) score += 50;
-        else if (skinU || skinV) score += 15;
-        if (yavg >= 80 && yavg <= 200) score += 20; else if (yavg >= 50) score += 10;
-        if (ydif > 5 && ydif < 40) score += 15; else if (ydif > 2) score += 5;
+        else if ((skinU || skinV) && validBrightness) score += 20;
+
+        // Moderate brightness bonus (avoid pure white walls/windows = yavg > 230)
+        if (yavg >= 70 && yavg <= 210) score += 20;
+        else if (yavg >= 40 && yavg < 70) score += 10;
+
+        // Edge/texture bonus (faces have more texture than flat backgrounds)
+        if (ydif > 5 && ydif < 50) score += 15;
+        else if (ydif > 2) score += 5;
+
         return { yavg, uavg, vavg, ydif, score };
     } catch (e) {
         return { yavg: 128, uavg: 128, vavg: 128, ydif: 0, score: 0 };
@@ -213,15 +225,16 @@ async function detectROI(imagePath) {
 
         const regions = await Promise.all(regionPromises);
 
-        // Apply position bias: faces are typically in the upper 2/3 and center columns
+        // Apply position bias: faces are typically in the upper 2/3
         for (const r of regions) {
-            // Vertical bias: prefer upper rows (row 0 and 1 are more likely to have faces)
-            if (r.row === 0) r.score += 10;
-            else if (r.row === 1) r.score += 5;
-            // Row 2 (bottom) usually has desks/hands — no bonus
+            // Vertical bias: prefer upper-mid rows (row 1 most likely has face/torso)
+            if (r.row === 0) r.score += 8;   // Top: might have face
+            else if (r.row === 1) r.score += 12; // Mid: most likely face/body
+            // Row 2 (bottom) usually has desks/hands/legs — small bonus
 
-            // Horizontal bias: center columns are more likely
-            if (r.col === 1 || r.col === 2) r.score += 5;
+            // Horizontal bias: VERY small center bonus, don't penalize sides
+            // People sit anywhere (left, center, right) in podcast/interview settings
+            if (r.col === 1 || r.col === 2) r.score += 2; // tiny center preference
         }
 
         // Sort by score descending
