@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, Key, Plus, Trash2, RefreshCw, Copy, CheckCircle, XCircle, AlertTriangle, Crown, Zap, Hash, Users, BarChart3, Ban, Unlock, Download, Clock, Timer, RotateCcw, Lock, UserCheck, ArrowUpCircle, FileText, Filter, Tag, ToggleLeft, ToggleRight } from 'lucide-react';
 
-const API = 'http://localhost:5000/api';
+// Admin panel directly calls license-server (no local backend needed)
 const LICENSE_API = 'https://license-server-nine-dun.vercel.app';
+const API = LICENSE_API; // alias untuk kompatibilitas
+
 
 export default function Admin() {
     // ===== Admin Auth Gate =====
@@ -31,21 +33,20 @@ export default function Admin() {
         setAuthLoading(true);
         setAuthError('');
         try {
-            const res = await fetch(`${API}/admin/verify`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: passwordInput })
+            // Verifikasi langsung ke license-server dengan x-admin-key
+            const res = await fetch(`${LICENSE_API}/api/admin?action=stats`, {
+                method: 'GET',
+                headers: { 'x-admin-key': passwordInput }
             });
-            const data = await res.json();
-            if (data.success) {
+            if (res.ok) {
                 setAdminPassword(passwordInput);
                 sessionStorage.setItem('admin_password', passwordInput);
                 setAuthenticated(true);
             } else {
-                setAuthError(data.error || 'Wrong password');
+                setAuthError('Password salah');
             }
         } catch (e) {
-            setAuthError('Connection error');
+            setAuthError('Connection error - pastikan internet aktif');
         }
         setAuthLoading(false);
     };
@@ -56,7 +57,7 @@ export default function Admin() {
             ...options,
             headers: {
                 ...options.headers,
-                'x-admin-password': adminPassword
+                'x-admin-key': adminPassword  // license-server pakai x-admin-key
             }
         });
     };
@@ -164,8 +165,8 @@ export default function Admin() {
         setLogsLoading(true);
         try {
             const url = filter
-                ? `${API}/admin/logs?action=${filter}&limit=100`
-                : `${API}/admin/logs?limit=100`;
+                ? `${LICENSE_API}/api/admin?action=logs&filter_action=${filter}&limit=100`
+                : `${LICENSE_API}/api/admin?action=logs&limit=100`;
             const res = await adminFetch(url);
             const data = await res.json();
             setAuditLogs(data.logs || data.recentActivity || []);
@@ -178,12 +179,9 @@ export default function Admin() {
 
     const loadData = async (forceRefresh = false) => {
         try {
-            const licenseUrl = forceRefresh
-                ? `${API}/admin/licenses?refresh=1`
-                : `${API}/admin/licenses`;
             const [keysRes, statsRes] = await Promise.all([
-                adminFetch(licenseUrl).then(r => r.json()),
-                adminFetch(`${API}/admin/stats?refresh=${forceRefresh ? 1 : 0}`).then(r => r.json())
+                adminFetch(`${LICENSE_API}/api/admin`).then(r => r.json()),
+                adminFetch(`${LICENSE_API}/api/admin?action=stats`).then(r => r.json())
             ]);
             setKeys(keysRes.keys || []);
             setStats(statsRes);
@@ -207,14 +205,13 @@ export default function Admin() {
         try {
             setGenerating(true);
             setMsg('');
-            const res = await adminFetch(`${API}/admin/licenses/generate`, {
+            const res = await adminFetch(`${LICENSE_API}/api/admin`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     tier: genTier,
                     count: genCount,
                     notes: genNotes,
-                    customKey: genCustomKey || undefined,
                     duration_days: genDuration,
                     max_activations: genMaxAct
                 })
@@ -239,7 +236,7 @@ export default function Admin() {
     const revokeKey = async (id) => {
         if (!confirm('Revoke this license key?')) return;
         try {
-            await adminFetch(`${API}/admin/licenses/${id}/revoke`, { method: 'PUT' });
+            await adminFetch(`${LICENSE_API}/api/admin?id=${id}&action=revoke`, { method: 'PUT' });
             setMsg('Key revoked');
             loadData();
         } catch (err) {
@@ -249,7 +246,7 @@ export default function Admin() {
 
     const reactivateKey = async (id) => {
         try {
-            await adminFetch(`${API}/admin/licenses/${id}/activate`, { method: 'PUT' });
+            await adminFetch(`${LICENSE_API}/api/admin?id=${id}&action=activate`, { method: 'PUT' });
             setMsg('Key re-activated');
             loadData();
         } catch (err) {
@@ -264,7 +261,7 @@ export default function Admin() {
             message: `Delete key ${key}? This cannot be undone.`,
             fn: async () => {
                 try {
-                    await adminFetch(`${API}/admin/licenses/${id}`, { method: 'DELETE' });
+                    await adminFetch(`${LICENSE_API}/api/admin?id=${id}&action=delete`, { method: 'DELETE' });
                     setMsg('✅ Key deleted');
                     loadData();
                 } catch (err) { setMsg(`❌ Error: ${err.message}`); }
@@ -280,7 +277,7 @@ export default function Admin() {
             message: `Reset semua aktivasi untuk key ${key}? Key akan bisa dipakai di perangkat baru.`,
             fn: async () => {
                 try {
-                    const res = await adminFetch(`${API}/admin/licenses/${id}/reset`, { method: 'PUT' });
+                    const res = await adminFetch(`${LICENSE_API}/api/admin?id=${id}&action=reset`, { method: 'PUT' });
                     const data = await res.json();
                     setMsg(`✅ ${data.message}`);
                     loadData();
@@ -297,7 +294,7 @@ export default function Admin() {
             message: `Tandai key ${key} sebagai sudah digunakan? (untuk key yang sudah diaktivasi di komputer lain)`,
             fn: async () => {
                 try {
-                    const res = await adminFetch(`${API}/admin/licenses/${id}/mark-used`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                    const res = await adminFetch(`${LICENSE_API}/api/admin?id=${id}&action=unbind`, { method: 'PUT' });
                     const data = await res.json();
                     setMsg(`✅ ${data.message}`);
                     loadData();
@@ -318,7 +315,7 @@ export default function Admin() {
         if (!upgradeModal) return;
         try {
             setUpgrading(true);
-            const res = await adminFetch(`${API}/admin/licenses/${upgradeModal.id}/upgrade`, {
+            const res = await adminFetch(`${LICENSE_API}/api/admin?id=${upgradeModal.id}&action=upgrade`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tier: upgradeTier, duration_days: upgradeDuration })
