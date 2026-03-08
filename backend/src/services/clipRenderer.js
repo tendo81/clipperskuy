@@ -633,9 +633,10 @@ async function renderClip(clipId, io) {
     // are far apart (the double -ss offsets don't add up correctly).
     const args1 = [
         '-y',
+        '-fflags', '+genpts',           // Fix timestamp issues (prevents black frames with GPU encoders)
+        '-avoid_negative_ts', 'make_zero', // Prevent negative timestamps causing black frames
         '-ss', String(clip.start_time),
         '-i', project.source_path,
-        '-t', String(duration),
     ];
 
     // Track input indexes
@@ -910,7 +911,8 @@ async function renderClip(clipId, io) {
         }
     }
 
-    // Enforce duration limit: add -t before output (input -t may be ignored with filter_complex split)
+    // Enforce duration limit: add -t before output path
+    // Note: -t here as OUTPUT duration is more reliable than input -t with filter_complex
     args1.push('-t', String(duration), outputPath);
 
     const result1 = await runFFmpeg(args1, duration, emit, io, project.id);
