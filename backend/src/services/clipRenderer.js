@@ -548,11 +548,12 @@ async function renderClip(clipId, io) {
     const useFilterComplex = (reframingMode === 'fit' || reframingMode === 'split' || podcastIsSplit || ftBlurIsSplit || watermarkFilter || musicTrack);
     const vf = faceTrackBlurFilter || podcastFilter || faceTrackFilter || buildVideoFilter(reframingMode, outW, outH, sourceW);
 
-    // Detect if vf is a complex filter graph:
-    // - face_track_blur ends with [ftblur_out]
-    // - podcast split ends with vstack
-    // - fit/split mode uses [0:v]split internally
-    const isComplexVf = vf.includes('[0:v]') && (vf.includes('[ftblur_out]') || vf.includes('vstack') || reframingMode === 'fit' || reframingMode === 'split');
+    // Detect if vf is a complex filter graph via its output label.
+    // Every complex filter MUST have an explicit output label — this avoids ambiguity.
+    // Labels: [ftblur_out] = face_track_blur, [fit_out] = fit, [split_out] = split mode,
+    //         vstack = podcast split (podcast uses its own builder, not this flag)
+    const COMPLEX_OUTPUT_LABELS = ['[ftblur_out]', '[fit_out]', '[split_out]', 'vstack'];
+    const isComplexVf = vf.includes('[0:v]') && COMPLEX_OUTPUT_LABELS.some(label => vf.includes(label));
 
     // Build subtitle filter string — two variants:
     // subFilter       : for -vf usage (colons escaped as \\:)
@@ -776,20 +777,27 @@ async function renderClip(clipId, io) {
         // Label sequence: [0:v] → crop/scale → [vid] → watermark overlay → [wm_out] → hook overlay → [outv2]
         let fullFilter;
         if (isComplexVf) {
-            // isComplexVf means vf already starts with [0:v] and ends with terminal (e.g. vstack)
-            // Tag vstack output → [vsout] then route to filters → [vid]
-            const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
-            if (vstackTagged !== vf) {
-                fullFilter = vstackTagged + (extraFiltersPass1
-                    ? `;[vsout]${extraFiltersPass1}[vid]`
-                    : `;[vsout]null[vid]`);
-            } else if (vf.includes('[ftblur_out]')) {
-                // face_track_blur with watermark: route [ftblur_out] → [vid]
+            // Helper: extract the last output label from a complex vf string
+            // e.g. '...overlay=0:0[ftblur_out]' → '[ftblur_out]'
+            // e.g. '...vstack=inputs=2' → null (unlabelled, needs tagging)
+            const lastLabelMatch = vf.match(/\[([a-z0-9_]+)\]\s*$/i);
+            if (lastLabelMatch) {
+                // vf already has explicit output label — route it directly to [vid]
+                const outLabel = `[${lastLabelMatch[1]}]`;
                 fullFilter = vf + (extraFiltersPass1
-                    ? `;[ftblur_out]${extraFiltersPass1}[vid]`
-                    : `;[ftblur_out]null[vid]`);
+                    ? `;${outLabel}${extraFiltersPass1}[vid]`
+                    : `;${outLabel}null[vid]`);
             } else {
-                fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
+                // vstack or unlabelled: tag vstack output dynamically
+                const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
+                if (vstackTagged !== vf) {
+                    fullFilter = vstackTagged + (extraFiltersPass1
+                        ? `;[vsout]${extraFiltersPass1}[vid]`
+                        : `;[vsout]null[vid]`);
+                } else {
+                    // Last resort fallback (should not happen with labeled filters)
+                    fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
+                }
             }
         } else {
             fullFilter = `[0:v]${vf}` + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[vid]';
@@ -814,34 +822,26 @@ async function renderClip(clipId, io) {
         // Label: [0:v] → crop/scale/etc → [outv] → (hook overlay) → [outv2]
         let fullFilter;
         if (isComplexVf) {
-            // For podcast split: vf ends with 'vstack=inputs=3' (NO trailing label)
-            // We must add label via SEMICOLON notation: ';[label_from_vstack][outv]'
-            // BUT vstack output is unlabelled by default — we need to relabel it.
-            // Solution: replace the LAST terminal filter to add output label,
-            // then chain hook overlay if needed.
-            // Simpler: just append ';' + extraFiltersPass1 as a new filter on [outv],
-            // and label the vstack output in place.
-            // We tag vstack output by replacing 'vstack=inputs=N' → 'vstack=inputs=N[vsout]'
-            // then route [vsout] → extraFilters → [outv]
-            const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
-            if (vstackTagged !== vf) {
-                // Successfully tagged vstack output (podcast split mode)
-                if (extraFiltersPass1) {
-                    fullFilter = vstackTagged + `;[vsout]${extraFiltersPass1}[outv]`;
-                } else {
-                    fullFilter = vstackTagged + `;[vsout]null[outv]`;
-                }
-            } else if (vf.includes('[ftblur_out]')) {
-                // face_track_blur: filter already has [ftblur_out] as output label
-                // Route [ftblur_out] → extraFilters → [outv]
-                if (extraFiltersPass1) {
-                    fullFilter = vf + `;[ftblur_out]${extraFiltersPass1}[outv]`;
-                } else {
-                    fullFilter = vf + `;[ftblur_out]null[outv]`;
-                }
+            // Helper: extract the last output label from a complex vf string automatically.
+            // This avoids hard-coding per-mode labels — any new mode only needs a labeled output.
+            const lastLabelMatch = vf.match(/\[([a-z0-9_]+)\]\s*$/i);
+            if (lastLabelMatch) {
+                // vf already has explicit output label — route it to [outv]
+                const outLabel = `[${lastLabelMatch[1]}]`;
+                fullFilter = vf + (extraFiltersPass1
+                    ? `;${outLabel}${extraFiltersPass1}[outv]`
+                    : `;${outLabel}null[outv]`);
             } else {
-                // Fallback: append comma-style (may fail for some filters)
-                fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
+                // vstack or unlabelled: tag vstack output dynamically
+                const vstackTagged = vf.replace(/(vstack=inputs=\d+)$/, '$1[vsout]');
+                if (vstackTagged !== vf) {
+                    fullFilter = vstackTagged + (extraFiltersPass1
+                        ? `;[vsout]${extraFiltersPass1}[outv]`
+                        : `;[vsout]null[outv]`);
+                } else {
+                    // Last resort fallback (should not happen with labeled filters)
+                    fullFilter = vf + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
+                }
             }
         } else {
             fullFilter = `[0:v]${vf}` + (extraFiltersPass1 ? `,${extraFiltersPass1}` : '') + '[outv]';
@@ -1298,7 +1298,7 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
 function buildVideoFilter(mode, outW, outH, sourceW = 0) {
     // Lanczos = highest quality scaler (barely slower than bilinear)
     const scaleFlags = ':flags=lanczos';
-    // Only sharpen when upscaling (source smaller than output) ΓÇö saves render time on HD sources
+    // Only sharpen when upscaling (source smaller than output) — saves render time on HD sources
     const needsSharpen = sourceW > 0 && sourceW < outW;
     const sharpen = needsSharpen ? ',unsharp=5:5:0.5:5:5:0.0' : '';
 
@@ -1307,12 +1307,13 @@ function buildVideoFilter(mode, outW, outH, sourceW = 0) {
             return `scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH}${sharpen}`;
 
         case 'fit':
-            // Fit with blur background ΓÇö popular TikTok/Reels style
+            // Fit with blur background — popular TikTok/Reels style
+            // [fit_out] label allows filter_complex builder to route output correctly
             return [
                 `[0:v]split[a][b]`,
                 `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=20:5[bg]`,
                 `[b]scale=${outW}:${outH}:force_original_aspect_ratio=decrease${scaleFlags}${sharpen}[fg]`,
-                `[bg][fg]overlay=(W-w)/2:(H-h)/2`
+                `[bg][fg]overlay=(W-w)/2:(H-h)/2[fit_out]`
             ].join(';');
 
         case 'face_track':
@@ -1320,11 +1321,12 @@ function buildVideoFilter(mode, outW, outH, sourceW = 0) {
 
         case 'split': {
             const halfH = Math.floor(outH / 2);
+            // [split_out] label allows filter_complex builder to route output correctly
             return [
                 `[0:v]split[a][b]`,
                 `[a]scale=${outW}:${halfH}:force_original_aspect_ratio=decrease${scaleFlags}${sharpen},pad=${outW}:${halfH}:(ow-iw)/2:(oh-ih)/2[top]`,
                 `[b]scale=${outW * 2}:-2${scaleFlags},crop=${outW}:${halfH}${sharpen}[bottom]`,
-                `[top][bottom]vstack`
+                `[top][bottom]vstack[split_out]`
             ].join(';');
         }
 
