@@ -638,10 +638,10 @@ async function renderClip(clipId, io) {
     // This decodes from the nearest keyframe to clip.start_time, ensuring exact positioning.
     // Do NOT use -ss after -i (output-seeking), as it causes subtitle desync when keyframes
     // are far apart (the double -ss offsets don't add up correctly).
+    // NOTE: Do NOT add -fflags +genpts or -avoid_negative_ts — these flags interfere with
+    // AMD AMF encoder and can cause black video output.
     const args1 = [
         '-y',
-        '-fflags', '+genpts',           // Fix timestamp issues (prevents black frames with GPU encoders)
-        '-avoid_negative_ts', 'make_zero', // Prevent negative timestamps causing black frames
         '-ss', String(clip.start_time),
         '-i', project.source_path,
     ];
