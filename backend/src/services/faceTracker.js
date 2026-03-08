@@ -1,22 +1,19 @@
 /**
- * ClipperSkuy — FFmpeg-based Face Tracker (v2)
- * 
- * Improved face detection using FFmpeg signalstats + grid analysis:
- * 1. Extract sample frames from clip segment
- * 2. Split each frame into grid regions
- * 3. Analyze brightness, saturation, and edge density per region
- * 4. Score regions by skin-tone and face likelihood heuristics
- * 5. Generate smooth crop coordinates following the best region
- * 
- * No Python, no TensorFlow, no native modules needed.
- * Pure FFmpeg — guaranteed to work in packaged Electron apps.
+ * ClipperSkuy — Face Tracker (v3 — ONNX UltraFace)
+ *
+ * Face detection: ONNX Runtime + UltraFace slim-320 (~10ms/frame)
+ * Fallback:       YUV heuristic (if model not found)
+ * Generates smooth crop coordinates for face_track and face_track_blur modes.
  */
+
 
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 const path = require('path');
 const fs = require('fs-extra');
+const { detectFaces: detectFacesOnnx } = require('./faceDetectorOnnx');
+
 
 const SAMPLE_RATE = 2;  // Sample every N seconds (2s = fewer frames, faster for long videos)
 const SMOOTH_WINDOW = 5; // Smooth over N frames
@@ -360,25 +357,52 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration, star
             return { positions: [], cropFilter: null };
         }
 
-        console.log(`[FaceTracker] Analyzing ${frames.length} frames with grid-based detection...`);
+        console.log(`[FaceTracker] Analyzing ${frames.length} frames with ONNX face detection...`);
 
-        // Detect face region in each frame
+        // Get source video dimensions (needed to scale ONNX results)
+        const ffprobePath2 = process.env.FFPROBE_PATH || 'ffprobe';
+        const probeCmd2 = `"${ffprobePath2}" -v quiet -print_format json -show_streams "${videoPath}"`;
+        const { stdout: pOut2 } = await execAsync(probeCmd2, { timeout: 10000 });
+        const pData2 = JSON.parse(pOut2);
+        const vStream2 = pData2.streams.find(s => s.codec_type === 'video');
+        const srcWLocal = vStream2?.width || 640;
+        const srcHLocal = vStream2?.height || 360;
+
+        // Detect face in each frame using ONNX UltraFace
         const rawPositions = [];
         for (let i = 0; i < frames.length; i++) {
-            const region = await detectROI(frames[i]);
-            if (region && region.confidence > 0.15) {
+            let faces = [];
+            try {
+                faces = await detectFacesOnnx(frames[i], srcWLocal, srcHLocal);
+            } catch (onnxErr) {
+                console.warn(`[FaceTracker] ONNX error frame ${i}: ${onnxErr.message} — trying YUV fallback`);
+                const region = await detectROI(frames[i]);
+                if (region && region.confidence > 0.15) faces = [region];
+            }
+
+            if (faces.length > 0) {
+                // Use the face with highest confidence
+                const best = faces.sort((a, b) => b.confidence - a.confidence)[0];
+                // Face center = center of bounding box
                 rawPositions.push({
                     time: i * SAMPLE_RATE,
-                    ...region
+                    x: best.x + best.w / 2,   // center X
+                    y: best.y + best.h / 2,   // center Y
+                    w: best.w,
+                    h: best.h,
+                    confidence: best.confidence
                 });
+                console.log(`[FaceTracker] Frame ${i}: face at center=(${Math.round(best.x + best.w / 2)},${Math.round(best.y + best.h / 2)}) conf=${best.confidence.toFixed(2)}`);
             } else {
-                console.log(`[FaceTracker] Frame ${i}: skipped (low confidence or null)`);
+                // ONNX found no face — try YUV fallback
+                console.log(`[FaceTracker] Frame ${i}: ONNX no face → YUV fallback`);
+                const region = await detectROI(frames[i]);
+                if (region && region.confidence > 0.15) {
+                    rawPositions.push({ time: i * SAMPLE_RATE, ...region });
+                } else {
+                    console.log(`[FaceTracker] Frame ${i}: skipped (both ONNX and YUV failed)`);
+                }
             }
-        }
-
-        if (rawPositions.length === 0) {
-            console.log('[FaceTracker] No face regions detected in any frame, using center crop');
-            return { positions: [], cropFilter: null };
         }
 
         console.log(`[FaceTracker] Detected faces in ${rawPositions.length}/${frames.length} frames`);
