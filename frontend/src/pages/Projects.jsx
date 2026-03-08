@@ -170,7 +170,25 @@ export default function Projects() {
                             {filtered.map((p, i) => {
                                 const st = statusConfig[p.status] || statusConfig.uploaded;
                                 return (
-                                    <motion.div key={p.id} custom={i} initial="hidden" animate="visible" exit={{ opacity: 0, scale: 0.9 }} variants={fadeIn}>
+                                    <motion.div key={p.id} custom={i} initial="hidden" animate="visible" exit={{ opacity: 0, scale: 0.9 }} variants={fadeIn}
+                                        style={{ position: 'relative' }}>
+                                        {/* Delete button OUTSIDE Link to avoid navigation conflict */}
+                                        <button onClick={() => {
+                                            if (confirm('Hapus project ini beserta semua clip-nya?')) {
+                                                fetch(`${API}/projects/${p.id}`, { method: 'DELETE' })
+                                                    .then(() => setProjects(prev => prev.filter(x => x.id !== p.id)))
+                                                    .catch(err => console.error('Delete failed:', err));
+                                            }
+                                        }} className="btn btn-ghost btn-icon"
+                                            style={{
+                                                position: 'absolute', top: 8, right: 8, zIndex: 10,
+                                                width: 30, height: 30, borderRadius: '50%',
+                                                background: 'rgba(0,0,0,0.6)', color: '#ef4444',
+                                                backdropFilter: 'blur(4px)', border: 'none', cursor: 'pointer'
+                                            }}
+                                            title="Hapus project">
+                                            <Trash2 size={14} />
+                                        </button>
                                         <Link to={`/projects/${p.id}`} style={{ textDecoration: 'none' }}>
                                             <div className="project-card">
                                                 <div className="card-thumb">
@@ -197,13 +215,7 @@ export default function Projects() {
                                                     <div className="project-name">{p.name}</div>
                                                     <div className="project-meta">
                                                         <span className={`badge ${st.cls}`}>{st.label}</span>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                            {p.file_size > 0 && <span style={{ fontSize: 11 }}>{formatSize(p.file_size)}</span>}
-                                                            <button onClick={(e) => deleteProject(p.id, e)} className="btn btn-ghost btn-icon"
-                                                                style={{ width: 26, height: 26, color: 'var(--text-muted)' }}>
-                                                                <Trash2 size={13} />
-                                                            </button>
-                                                        </div>
+                                                        {p.file_size > 0 && <span style={{ fontSize: 11 }}>{formatSize(p.file_size)}</span>}
                                                     </div>
                                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
                                                         {formatDate(p.created_at)}
