@@ -73,6 +73,7 @@ function getBaseArgs(playerClient = null) {
         '--max-sleep-interval', '2',
         '--no-check-certificates',
         '--no-warnings',
+        '--remote-components', 'ejs:github',  // Download JS challenge solver terbaru untuk unlock HD formats
     ];
     // Only force player_client when explicitly needed (fallback strategies)
     // Default yt-dlp client selection gets ALL formats including HD via JS solver
