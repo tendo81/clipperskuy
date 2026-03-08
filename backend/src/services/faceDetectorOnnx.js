@@ -112,14 +112,45 @@ function nms(boxes, scores, thresh) {
 }
 
 /**
+ * Quick skin-tone check on a specific region of an image using raw pixel buffer.
+ * Returns true if the region looks like it could contain skin.
+ */
+function hasSkinTone(rawRGB, x1, y1, x2, y2, imgW) {
+    let skinPixels = 0, totalPixels = 0;
+    const bx1 = Math.max(0, Math.floor(x1));
+    const by1 = Math.max(0, Math.floor(y1));
+    const bx2 = Math.min(MODEL_W - 1, Math.ceil(x2));
+    const by2 = Math.min(MODEL_H - 1, Math.ceil(y2));
+
+    for (let y = by1; y < by2; y += 2) {     // skip every other row for speed
+        for (let x = bx1; x < bx2; x += 2) {
+            const idx = (y * MODEL_W + x) * 3;
+            const r = rawRGB[idx], g = rawRGB[idx + 1], b = rawRGB[idx + 2];
+            totalPixels++;
+            // Convert to YCbCr approximation inline
+            const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+            const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+            const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+            // Skin tone range in YCbCr
+            if (Y > 40 && Y < 240 && Cb >= 90 && Cb <= 148 && Cr >= 130 && Cr <= 180) {
+                skinPixels++;
+            }
+        }
+    }
+    if (totalPixels === 0) return false;
+    const ratio = skinPixels / totalPixels;
+    return ratio >= 0.08;  // at least 8% pixels look like skin
+}
+
+/**
  * Detect faces in an image file.
  * @param {string} imagePath  - Path to JPEG/PNG frame
  * @param {number} srcW       - Original image width (to scale bboxes back)
  * @param {number} srcH       - Original image height
- * @param {number} [scoreThresh=0.65] - Minimum confidence
+ * @param {number} [scoreThresh=0.85] - Minimum confidence (raised to reduce false positives)
  * @returns {Promise<Array<{x,y,w,h,confidence}>>} Detected faces in original coords
  */
-async function detectFaces(imagePath, srcW, srcH, scoreThresh = 0.65) {
+async function detectFaces(imagePath, srcW, srcH, scoreThresh = 0.85) {
     if (!fs.existsSync(MODEL_PATH)) {
         console.warn('[FaceDetector] Model file missing:', MODEL_PATH);
         return [];
@@ -129,7 +160,7 @@ async function detectFaces(imagePath, srcW, srcH, scoreThresh = 0.65) {
     try {
         const session = await getSession();
 
-        // 1. Preprocessing
+        // 1. Preprocessing — get raw pixels AND keep for skin tone validation
         const rawPixels = await extractRawPixels(imagePath);
         const floatData = preprocessRGB(rawPixels);
         const inputTensor = new ort.Tensor('float32', floatData, [1, 3, MODEL_H, MODEL_W]);
@@ -139,8 +170,6 @@ async function detectFaces(imagePath, srcW, srcH, scoreThresh = 0.65) {
         const results = await session.run(feeds);
 
         // 3. Parse outputs
-        // UltraFace outputs: 'scores' (1,4420,2) and 'boxes' (1,4420,4)
-        // Output order may vary — detect by shape
         let scoresOut, boxesOut;
         for (const name of session.outputNames) {
             const out = results[name];
@@ -159,18 +188,42 @@ async function detectFaces(imagePath, srcW, srcH, scoreThresh = 0.65) {
         for (let i = 0; i < numAnchors; i++) {
             const faceScore = scoresOut[i * 2 + 1];
             if (faceScore < scoreThresh) continue;
-            // boxes are normalized [0..1]
-            validBoxes.push([
-                boxesOut[i * 4] * MODEL_W,
-                boxesOut[i * 4 + 1] * MODEL_H,
-                boxesOut[i * 4 + 2] * MODEL_W,
-                boxesOut[i * 4 + 3] * MODEL_H
-            ]);
+
+            const x1 = boxesOut[i * 4] * MODEL_W;
+            const y1 = boxesOut[i * 4 + 1] * MODEL_H;
+            const x2 = boxesOut[i * 4 + 2] * MODEL_W;
+            const y2 = boxesOut[i * 4 + 3] * MODEL_H;
+            const bw = x2 - x1;
+            const bh = y2 - y1;
+
+            // ── Filter 1: reject detections in the TOP 25% of frame ──
+            // Lamps and ceiling objects are almost always in the top portion
+            const centerY = (y1 + y2) / 2;
+            if (centerY < MODEL_H * 0.25) {
+                console.log(`[FaceDetector] Skip: detection in top 25% (y=${centerY.toFixed(0)}) — likely lamp/ceiling`);
+                continue;
+            }
+
+            // ── Filter 2: aspect ratio sanity check ──
+            // Human face bbox roughly square to 1:1.4 (w:h). Lamps often wider than tall.
+            const ar = bw / bh;
+            if (ar > 2.0 || ar < 0.3) {
+                console.log(`[FaceDetector] Skip: weird aspect ratio ${ar.toFixed(2)}`);
+                continue;
+            }
+
+            // ── Filter 3: skin tone validation using raw pixels ──
+            if (!hasSkinTone(rawPixels, x1, y1, x2, y2, MODEL_W)) {
+                console.log(`[FaceDetector] Skip: no skin tone in bbox (${x1.toFixed(0)},${y1.toFixed(0)}) score=${faceScore.toFixed(2)} — likely lamp/object`);
+                continue;
+            }
+
+            validBoxes.push([x1, y1, x2, y2]);
             validScores.push(faceScore);
         }
 
         if (validBoxes.length === 0) {
-            console.log(`[FaceDetector] No faces (score>${scoreThresh}) in ${Date.now() - t0}ms`);
+            console.log(`[FaceDetector] No valid faces after filtering in ${Date.now() - t0}ms`);
             return [];
         }
 
