@@ -179,12 +179,20 @@ export default function Admin() {
 
     const loadData = async (forceRefresh = false) => {
         try {
-            const [keysRes, statsRes] = await Promise.all([
+            const [keysRes, statsRaw] = await Promise.all([
                 adminFetch(`${LICENSE_API}/api/admin`).then(r => r.json()),
                 adminFetch(`${LICENSE_API}/api/admin?action=stats`).then(r => r.json())
             ]);
             setKeys(keysRes.keys || []);
-            setStats(statsRes);
+            // Normalize stats: Vercel returns flat {total, active, ...} 
+            // but UI expects {licenses: {total, active}, tiers: {pro, enterprise}}
+            const s = statsRaw;
+            const normalized = s.licenses ? s : {
+                licenses: { total: s.total || 0, active: s.active || 0, used: s.used || 0, revoked: s.revoked || 0 },
+                tiers: s.tiers || { pro: s.pro || 0, enterprise: s.enterprise || 0 },
+                projects: s.projects || 0
+            };
+            setStats(normalized);
         } catch (err) {
             setMsg(`Error loading: ${err.message}`);
         } finally {
