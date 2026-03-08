@@ -243,6 +243,21 @@ router.put('/licenses/:id/upgrade', async (req, res) => {
 
 // ===== GET /api/admin/stats — Dashboard stats (online, cached) =====
 router.get('/stats', async (req, res) => {
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+
+    if (forceRefresh) {
+        clearCache();
+        try {
+            const data = await onlineRequest('/api/admin?action=stats');
+            const result = normalizeStats(data);
+            setCache('stats', result);
+            return res.json(result);
+        } catch (err) {
+            // Fallback ke lokal
+            return res.json(getLocalStats());
+        }
+    }
+
     const cached = getCached('stats');
     if (cached) {
         res.json(cached);
