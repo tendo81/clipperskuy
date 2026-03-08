@@ -103,7 +103,7 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
     // Build list of strategies to try
     // IMPORTANT: Browser cookies are needed for HD formats (720p+)!
     // YouTube now requires PO Token for HD; without cookies only 360p is available.
-    // So we try WITH cookies first, then fall back to no-cookies (360p only).
+    // So we try WITH cookies FIRST, then fall back to no-cookies (360p only).
     const strategies = [];
 
     // Check if user has a preferred browser in settings
@@ -116,15 +116,12 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
         }
     } catch (e) { /* ignore */ }
 
-    // 1. Default yt-dlp (no forced player_client, no cookies) — gets HD via JS solver
-    strategies.push({ name: 'default (auto)', args: [], client: null });
-
-    // 2. cookies.txt (manual export = most reliable for HD)
+    // 1. cookies.txt (manual export = most reliable for HD)
     if (hasCookiesFile) {
         strategies.push({ name: 'cookies.txt', args: ['--cookies', cookiesPath], client: null });
     }
 
-    // 3. Preferred browser cookies
+    // 2. Preferred browser cookies
     if (preferredBrowser) {
         strategies.push({
             name: `browser: ${preferredBrowser} (preferred)`,
@@ -133,14 +130,19 @@ function runYtDlpWithRetry(extraArgs, opts = {}) {
         });
     }
 
-    // 4. All installed browsers with cookies (for HD access with PO token)
+    // 3. All installed browsers with cookies (for HD access with PO token)
     for (const browser of installedBrowsers) {
-        strategies.push({
-            name: `browser: ${browser}`,
-            args: ['--cookies-from-browser', browser],
-            client: null
-        });
+        if (browser !== preferredBrowser) {
+            strategies.push({
+                name: `browser: ${browser}`,
+                args: ['--cookies-from-browser', browser],
+                client: null
+            });
+        }
     }
+
+    // 4. Default yt-dlp (no forced player_client, no cookies) — may only get 360p
+    strategies.push({ name: 'default (auto, no cookies)', args: [], client: null });
 
     // 5. Forced player_clients as LAST fallback (likely only 360p)
     for (const client of playerClients) {
