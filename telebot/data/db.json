@@ -75,7 +75,8 @@
       "license_key": "6YGM-8EZL-P1BF-6E1A",
       "created_at": "2026-02-25T14:30:13.460Z",
       "paid_at": "2026-02-25T14:32:06.924Z",
-      "payment_method": "pakasir"
+      "payment_method": "pakasir",
+      "rating_requested": true
     },
     {
       "id": "CS-MM25BTD1313C",
@@ -91,7 +92,9 @@
       "license_key": "Z5Z4-DPGW-PYBR-14AB",
       "created_at": "2026-02-25T14:45:03.206Z",
       "paid_at": "2026-02-25T14:45:42.476Z",
-      "payment_method": "pakasir"
+      "payment_method": "pakasir",
+      "rating_requested": true,
+      "rating": 2
     },
     {
       "id": "CS-MM8DBJYNCAAE",
@@ -205,5 +208,19 @@
     }
   ],
   "blocked_users": {},
-  "blacklisted_keys": {}
+  "blacklisted_keys": {},
+  "changelog": {
+    "version": "v2.0.0",
+    "date": "2026-04-07",
+    "changes": [
+      "🎮 Trial gratis 1 hari untuk user baru",
+      "👑 VIP Tier — diskon 5% selamanya setelah 2x beli",
+      "🏆 Leaderboard Referral",
+      "🎰 Spin Wheel — hadiah harian",
+      "⏰ Reminder expired + diskon perpanjangan",
+      "💭 Follow-up otomatis order belum bayar",
+      "⭐ Rating request setelah 7 hari",
+      "📊 Laporan harian ke admin"
+    ]
+  }
 }

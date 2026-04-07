@@ -35,6 +35,35 @@ const BAYARGG_METHOD = process.env.BAYARGG_METHOD || 'gopay_qris';
 const USE_BAYARGG = false; // was: !!BAYARGG_API_KEY
 const SUPPORT_GROUP = process.env.SUPPORT_GROUP_LINK || 'https://t.me/+GANTI_DENGAN_LINK_GRUP';
 
+// ============ SELF-HEALTH CHECK ============
+// Ping Telegram API setiap 2 menit. Kalau 3x gagal berturut-turut → auto-restart
+let healthFailCount = 0;
+const HEALTH_CHECK_INTERVAL = 2 * 60 * 1000; // 2 menit
+const MAX_FAIL = 3;
+
+function startHealthCheck() {
+    setInterval(async () => {
+        try {
+            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`, { timeout: 10000 });
+            if (res.ok) {
+                healthFailCount = 0; // Reset counter
+            } else {
+                healthFailCount++;
+                console.log(`⚠️ Health check failed (${healthFailCount}/${MAX_FAIL}): HTTP ${res.status}`);
+            }
+        } catch (e) {
+            healthFailCount++;
+            console.log(`⚠️ Health check failed (${healthFailCount}/${MAX_FAIL}): ${e.message}`);
+        }
+
+        if (healthFailCount >= MAX_FAIL) {
+            console.log('❌ Bot unresponsive! Auto-restarting...');
+            process.exit(1); // Exit → run_bot.bat akan restart otomatis
+        }
+    }, HEALTH_CHECK_INTERVAL);
+    console.log('🏥 Health check active (every 2 min, auto-restart after 3 fails)');
+}
+
 // ============ DATABASE (Redis + JSON fallback) ============
 const DB_FILE = path.join(__dirname, 'data', 'db.json');
 
@@ -3795,8 +3824,18 @@ bot.catch((err, ctx) => {
     console.error('❌ Bot error:', err.message);
 });
 
-bot.launch()
-    .then(async () => {
+// ============ LAUNCH (Manual Polling — anti-hang) ============
+(async function main() {
+    try {
+        // Step 1: Delete any existing webhook
+        console.log('🧹 Clearing webhook...');
+        await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+        console.log('✅ Webhook cleared');
+
+        // Step 2: Use startPolling directly (bot.launch() hangs on Windows)
+        console.log('🚀 Starting polling...');
+        bot.startPolling();
+        console.log('✅ Polling started!');
         console.log('');
         console.log('╔═══════════════════════════════════════════╗');
         console.log('║   🤖 ClipperSkuy Telebot is RUNNING!     ║');
@@ -3870,12 +3909,15 @@ bot.launch()
             }
         }
         console.log(`[Commands] ✅ User commands registered (${userCommands.length} commands)`);
-    })
-    .catch(err => {
+        startHealthCheck(); // Start health monitoring
+
+    } catch (err) {
         console.error('❌ Bot failed to start:', err.message);
         process.exit(1);
-    });
+    }
 
-// Graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    // Graceful stop
+    process.once('SIGINT', () => bot.stop('SIGINT'));
+    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+})();
+
