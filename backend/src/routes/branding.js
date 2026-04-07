@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const multer = require('multer');
 
-const dataDir = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', 'data');
+const dataDir = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 const brandingDir = path.join(dataDir, 'branding');
 fs.ensureDirSync(brandingDir);
 

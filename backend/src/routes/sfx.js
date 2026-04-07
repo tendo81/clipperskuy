@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
-const { getDb, saveDatabase, all, get, run } = require('../database');
+const { all, get, run } = require('../database');
 
 const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 const SFX_DIR = path.join(DATA_DIR, 'sfx');

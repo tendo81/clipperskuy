@@ -17,7 +17,7 @@ function getVideoInfo(filePath) {
                 duration: metadata.format.duration || 0,
                 width: videoStream?.width || 0,
                 height: videoStream?.height || 0,
-                fps: videoStream?.r_frame_rate ? eval(videoStream.r_frame_rate) : 30,
+                fps: videoStream?.r_frame_rate ? (() => { const p = videoStream.r_frame_rate.split('/'); return p.length === 2 ? (parseFloat(p[0]) / parseFloat(p[1])) || 30 : parseFloat(p[0]) || 30; })() : 30,
                 codec: videoStream?.codec_name || 'unknown',
                 bitrate: metadata.format.bit_rate || 0,
                 fileSize: metadata.format.size || 0,

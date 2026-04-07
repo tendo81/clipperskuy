@@ -8,8 +8,8 @@
       "order_count": 2,
       "total_spent": 319000,
       "active_order": "CS-MM24MJWRECFB",
-      "pending_promo": null,
-      "waiting_promo_for": "pro_30"
+      "pending_promo": "FLASH4L2U",
+      "waiting_promo_for": null
     }
   },
   "orders": [
@@ -110,10 +110,100 @@
       "license_key": null,
       "created_at": "2026-03-01T23:15:25.007Z",
       "paid_at": null
+    },
+    {
+      "id": "CS-MNN77GD5C139",
+      "user_id": "482006626",
+      "user_name": "dee zenn",
+      "username": "skuysdazen",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "original_price": 69000,
+      "price": 49000,
+      "discount_code": "FLASH4L2U",
+      "status": "pending",
+      "license_key": null,
+      "created_at": "2026-04-06T13:00:31.003Z",
+      "paid_at": null
+    },
+    {
+      "id": "CS-MNN77WWO9F29",
+      "user_id": "482006626",
+      "user_name": "dee zenn",
+      "username": "skuysdazen",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "original_price": 69000,
+      "price": 49000,
+      "discount_code": "FLASH4L2U",
+      "status": "pending",
+      "license_key": null,
+      "created_at": "2026-04-06T13:00:52.440Z",
+      "paid_at": null
+    },
+    {
+      "id": "CS-MNN788VKFBCA",
+      "user_id": "482006626",
+      "user_name": "dee zenn",
+      "username": "skuysdazen",
+      "product_id": "pro_30",
+      "product_name": "⚡ ClipperSkuy Pro — 30 Hari",
+      "tier": "pro",
+      "duration": 30,
+      "original_price": 69000,
+      "price": 49000,
+      "discount_code": "FLASH4L2U",
+      "status": "cancelled",
+      "license_key": null,
+      "created_at": "2026-04-06T13:01:07.952Z",
+      "paid_at": null,
+      "payment_method": "pakasir"
     }
   ],
   "stats": {
     "total_orders": 2,
     "total_revenue": 319000
-  }
+  },
+  "discounts": {
+    "REFNDGYMD": {
+      "active": true,
+      "percent": 10,
+      "type": "percent",
+      "quota": null,
+      "used": 0,
+      "expires_at": null,
+      "owner_id": "482006626",
+      "products": []
+    },
+    "FLASH4L2U": {
+      "active": true,
+      "amount": 20000,
+      "type": "amount",
+      "quota": 50,
+      "used": 0,
+      "expires_at": "2026-04-06T13:58:17.142Z",
+      "products": [
+        "pro_30"
+      ]
+    }
+  },
+  "tickets": [
+    {
+      "id": "TKT-MNN55KS6",
+      "user_id": "482006626",
+      "user_name": "dee zenn",
+      "username": "skuysdazen",
+      "message": "License tidak bisa aktif",
+      "status": "open",
+      "created_at": "2026-04-06T12:03:04.182Z",
+      "replied_at": null,
+      "reply": null
+    }
+  ],
+  "blocked_users": {},
+  "blacklisted_keys": {}
 }

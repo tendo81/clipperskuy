@@ -59,7 +59,31 @@ router.post('/validate-key', async (req, res) => {
 router.post('/reset', (req, res) => {
     try {
         run('DELETE FROM settings');
-        res.json({ success: true, message: 'All settings reset to default' });
+
+        // Re-insert defaults so app stays functional
+        const defaults = {
+            'output_dir': '',
+            'groq_api_key': '',
+            'gemini_api_key': '',
+            'ai_provider_primary': 'groq',
+            'ai_provider_fallback': 'gemini',
+            'hw_accel': 'auto',
+            'encoder': 'auto',
+            'quality_preset': 'balanced',
+            'default_platform': 'tiktok',
+            'default_language': 'auto',
+            'theme': 'dark',
+            'yt_cookie_browser': 'auto',
+            'export_filename_template': '{number}_{title}'
+        };
+        for (const [key, value] of Object.entries(defaults)) {
+            run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', [key, value]);
+        }
+
+        const rows = all('SELECT * FROM settings');
+        const settings = {};
+        rows.forEach(row => { settings[row.key] = row.value; });
+        res.json({ success: true, message: 'All settings reset to default', settings });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

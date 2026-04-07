@@ -389,94 +389,92 @@ async function renderClip(clipId, io) {
             emit(8, '🔒 Face Track + Blur adalah fitur PRO — menggunakan mode fit');
             reframingMode = 'fit';
         } else {
+            // Get source dimensions OUTSIDE try-catch with safe defaults
+            let srcWBlur = 1920, srcHBlur = 1080;
+            try {
+                const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+                const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${project.source_path}"`;
+                const { stdout: probeOut } = await require('util').promisify(require('child_process').exec)(probeCmd, { timeout: 8000 });
+                const probeData = JSON.parse(probeOut);
+                const videoStream = probeData.streams.find(s => s.codec_type === 'video');
+                if (videoStream) { srcWBlur = videoStream.width; srcHBlur = videoStream.height; }
+            } catch (probeErr) {
+                console.warn('[Render] face_track_blur probe failed, using defaults 1920x1080:', probeErr.message.substring(0, 80));
+            }
+
+            const scaleFlags = ':flags=lanczos';
+            const fgFillRatio = 0.85;
+            const fgH = Math.round(outH * fgFillRatio);
+            const fgHEven = fgH % 2 === 0 ? fgH : fgH - 1;
+            const cropAR = outW / fgHEven;
+            let defaultCropH = srcHBlur;
+            let defaultCropW = Math.round(defaultCropH * cropAR);
+            if (defaultCropW > srcWBlur) {
+                defaultCropW = srcWBlur;
+                defaultCropH = Math.round(srcWBlur / cropAR);
+                defaultCropH = defaultCropH % 2 === 0 ? defaultCropH : defaultCropH - 1;
+            }
+            defaultCropW = defaultCropW % 2 === 0 ? defaultCropW : defaultCropW - 1;
+            const defaultCropX = Math.round((srcWBlur - defaultCropW) / 2);
+            const defaultCropY = Math.round((srcHBlur - defaultCropH) / 2);
+            const blurW = Math.round(outW / 4) % 2 === 0 ? Math.round(outW / 4) : Math.round(outW / 4) + 1;
+            const blurH = Math.round(outH / 4) % 2 === 0 ? Math.round(outH / 4) : Math.round(outH / 4) + 1;
+
+            // Safe fallback: center blur filter (used if detection fails or throws)
+            const centerBlurFilter = [
+                `[0:v]split[a][b]`,
+                `[a]scale=-2:${outH}:flags=fast_bilinear,crop=${outW}:${outH},scale=${blurW}:${blurH}:flags=fast_bilinear,boxblur=8:3,scale=${outW}:${outH}:flags=fast_bilinear[bg]`,
+                `[b]crop=${defaultCropW}:${defaultCropH}:${defaultCropX}:${defaultCropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
+                `[bg][fg]overlay=0:(H-h)/2[ftblur_out]`
+            ].join(';');
+
+            // Pre-assign center blur as default — overridden below if face detection works
+            faceTrackBlurFilter = centerBlurFilter;
+
             try {
                 emit(12, 'Analyzing face positions for blur mode...');
                 const result = await generateFaceTrackCrop(project.source_path, outW, outH, duration, clip.start_time);
-                const scaleFlags = ':flags=lanczos';
-
-                // Get source dimensions to build proper filter
-                const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
-                const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${project.source_path}"`;
-                const { stdout: probeOut } = await require('util').promisify(require('child_process').exec)(probeCmd, { timeout: 10000 });
-                const probeData = JSON.parse(probeOut);
-                const videoStream = probeData.streams.find(s => s.codec_type === 'video');
-                const srcW = videoStream ? videoStream.width : 1920;
-                const srcH = videoStream ? videoStream.height : 1080;
 
                 if (result.positions.length > 0) {
                     // Get average face position for centering
                     const avgFaceX = result.positions.reduce((s, p) => s + p.x, 0) / result.positions.length;
                     const avgFaceY = result.positions.reduce((s, p) => s + p.y, 0) / result.positions.length;
 
-                    // Target: foreground fills ~75% of output height
-                    // This keeps blur bars thin (just enough for hook text + subtitles)
-                    const fgFillRatio = 0.75;
-                    const fgH = Math.round(outH * fgFillRatio);
-                    const fgHEven = fgH % 2 === 0 ? fgH : fgH - 1;
-
-                    // Calculate how much of the source to crop to achieve this fill
-                    // We want: crop(cropW x cropH) → scale(outW x fgHEven)
-                    // Maintain crop aspect ratio = outW/fgHEven
-                    const cropAR = outW / fgHEven;
-                    let cropH = srcH;  // Use full source height
-                    let cropW = Math.round(cropH * cropAR);
-
-                    // If cropW exceeds source width, fit by width instead
-                    if (cropW > srcW) {
-                        cropW = srcW;
-                        cropH = Math.round(srcW / cropAR);
-                        cropH = cropH % 2 === 0 ? cropH : cropH - 1;
+                    // Target: foreground fills ~85% of output height
+                    const cropH_face = srcHBlur;
+                    let cropW_face = Math.round(cropH_face * cropAR);
+                    if (cropW_face > srcWBlur) {
+                        cropW_face = srcWBlur;
                     }
-                    cropW = cropW % 2 === 0 ? cropW : cropW - 1;
+                    cropW_face = cropW_face % 2 === 0 ? cropW_face : cropW_face - 1;
+                    let cropH_faceEven = Math.round(cropW_face / cropAR);
+                    cropH_faceEven = cropH_faceEven % 2 === 0 ? cropH_faceEven : cropH_faceEven - 1;
 
                     // Center crop on face position
-                    const cropX = Math.max(0, Math.min(Math.round(avgFaceX - cropW / 2), srcW - cropW));
-                    const cropY = Math.max(0, Math.min(Math.round(avgFaceY - cropH / 2), srcH - cropH));
+                    const cropX_face = Math.max(0, Math.min(Math.round(avgFaceX - cropW_face / 2), srcWBlur - cropW_face));
+                    const cropY_face = Math.max(0, Math.min(Math.round(avgFaceY - cropH_faceEven / 2), srcHBlur - cropH_faceEven));
 
+                    // Scale-Down Blur Trick: bg scaled to 25% → cheap blur → scale back
                     faceTrackBlurFilter = [
                         `[0:v]split[a][b]`,
-                        // Background: scale+crop to fill entire output, then blur heavily
-                        `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=30:10[bg]`,
-                        // Foreground: crop source centered on face, then scale to target size
-                        `[b]crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
-                        // Overlay foreground centered vertically on blurred background
+                        `[a]scale=-2:${outH}:flags=fast_bilinear,crop=${outW}:${outH},scale=${blurW}:${blurH}:flags=fast_bilinear,boxblur=8:3,scale=${outW}:${outH}:flags=fast_bilinear[bg]`,
+                        `[b]crop=${cropW_face}:${cropH_faceEven}:${cropX_face}:${cropY_face},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
                         `[bg][fg]overlay=0:(H-h)/2[ftblur_out]`
                     ].join(';');
 
-                    console.log(`[Render] Face Track Blur: srcW=${srcW} srcH=${srcH} crop=${cropW}x${cropH}@${cropX},${cropY} fgH=${fgHEven} (${Math.round(fgHEven / outH * 100)}% fill) faceXY=${Math.round(avgFaceX)},${Math.round(avgFaceY)}`);
+                    console.log(`[Render] Face Track Blur: src=${srcWBlur}x${srcHBlur} crop=${cropW_face}x${cropH_faceEven}@${cropX_face},${cropY_face} fgH=${fgHEven} faceXY=${Math.round(avgFaceX)},${Math.round(avgFaceY)}`);
                     emit(18, `Face Track Blur: ${result.positions.length} positions, ${Math.round(fgHEven / outH * 100)}% fill`);
                 } else {
-                    // No faces detected — zoom into center of source
+                    // No faces detected — center zoom with blur (already set as default above)
+                    console.log(`[Render] Face Track Blur: no faces detected — using center crop blur`);
                     emit(15, 'No faces detected, using center zoom with blur');
-                    const fgFillRatio = 0.75;
-                    const fgH = Math.round(outH * fgFillRatio);
-                    const fgHEven = fgH % 2 === 0 ? fgH : fgH - 1;
-
-                    const cropAR = outW / fgHEven;
-                    let cropH = srcH;
-                    let cropW = Math.round(cropH * cropAR);
-                    if (cropW > srcW) {
-                        cropW = srcW;
-                        cropH = Math.round(srcW / cropAR);
-                        cropH = cropH % 2 === 0 ? cropH : cropH - 1;
-                    }
-                    cropW = cropW % 2 === 0 ? cropW : cropW - 1;
-
-                    // Center crop
-                    const cropX = Math.round((srcW - cropW) / 2);
-                    const cropY = Math.round((srcH - cropH) / 2);
-
-                    faceTrackBlurFilter = [
-                        `[0:v]split[a][b]`,
-                        `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=30:10[bg]`,
-                        `[b]crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${outW}:${fgHEven}${scaleFlags}[fg]`,
-                        `[bg][fg]overlay=0:(H-h)/2[ftblur_out]`
-                    ].join(';');
                 }
             } catch (e) {
-                console.warn('[Render] Face track blur failed, falling back to fit:', e.message);
-                emit(15, 'Face track blur failed, using fit mode');
-                reframingMode = 'fit';
+                // Keep centerBlurFilter (already assigned above) — DO NOT fall back to 'fit'
+                console.error('[FaceDetect] ERROR:', e.message);
+                console.error('[FaceDetect] Stack:', e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : 'no stack');
+                emit(15, `Face detection error: ${e.message.substring(0, 80)} — center blur used`);
+                // faceTrackBlurFilter is still set to centerBlurFilter from above
             }
         }
     }
@@ -741,19 +739,40 @@ async function renderClip(clipId, io) {
     // pass2 = subtitle + text overlays (always via -vf, no filter_complex)
     //
     // ── Face Track + Hook overlay ─────────────────────────────────────────────
-    // Dynamic crop filter uses 'if(between(t,...))' with single-quotes that
-    // conflict with filter_complex escaping on Windows (FFmpeg shell parsing).
-    // When face tracking is active (podcastFilter with crop keyframes), we CANNOT
-    // safely put hook PNG overlay inside filter_complex.
-    // Solution: treat hook as pass-2 via drawtext (hookTitleFilter) for face-track clips.
-    const isFaceTrackMode = podcastFilter && !podcastIsSplit; // face tracking, not split screen
+    // face_track, face_track_blur, podcast single-speaker all use filter_complex.
+    // Hook PNG overlay inside filter_complex causes Windows escaping issues:
+    //   enable='between(t,0,5)' single quotes conflict with filter_complex escaping.
+    // Solution: for ALL face-track modes, move hook to drawtext pass-2.
+    const isFaceTrackMode = faceTrackFilter ||      // face_track mode with dynamic keyframes
+        faceTrackBlurFilter ||                       // face_track_blur mode (blur bars top/bottom)
+        (podcastFilter && !podcastIsSplit);          // podcast single-speaker
     if (isFaceTrackMode && hookOverlay) {
-        // Move hook from PNG overlay (pass1 filter_complex) to drawtext pass2
-        const hookFallback = await buildHookTitleFilter({ ...clip, _forceFallback: true }, outW, outH, duration, null);
-        if (typeof hookFallback === 'string' && hookFallback) {
-            hookTitleFilter = hookFallback;
-        }
+        // PNG overlay cannot go in filter_complex (Windows escaping issues).
+        // Keep PNG info for pass-2 overlay via movie filter in -vf.
+        clip._hookPass2 = {
+            imagePath: hookOverlay.imagePath,
+            overlayX: hookOverlay.overlayX,
+            overlayY: hookOverlay.overlayY,
+            enableExpr: hookOverlay.enableExpr || null,
+            duration: hookOverlay.duration || 5
+        };
+        console.log(`[Render] Face track mode: hook PNG saved for pass-2 at (${clip._hookPass2.overlayX}, ${clip._hookPass2.overlayY})`);
+        // IMPORTANT: save imagePath BEFORE nulling hookOverlay
+        const hookImgPathToRemove = hookOverlay.imagePath;
         hookOverlay = null; // disable PNG overlay in pass1
+
+        // Remove the hook PNG input from args1 (was added earlier as -loop 1 -framerate 1 -i <path>)
+        // Leaving it in args1 as unmapped stream can cause FFmpeg errors
+        if (hookInputIdx >= 0) {
+            const loopIdx = args1.indexOf('-loop');
+            // Verify this is the right -loop arg (the hook input)
+            if (loopIdx !== -1 && loopIdx + 3 < args1.length && args1[loopIdx + 3] === hookImgPathToRemove) {
+                args1.splice(loopIdx, 4); // remove: -loop 1 -framerate 1 -i <hookPath>
+                inputIdx--;               // fix input counter
+                hookInputIdx = -1;        // mark as removed
+                console.log('[Render] Hook PNG input removed from args (not needed in filter_complex)');
+            }
+        }
     }
 
     // IMPORTANT: Re-evaluate needsOverlay AFTER hookOverlay may have been set to null above.
@@ -981,6 +1000,48 @@ async function renderClip(clipId, io) {
             }
         }
 
+        // ===== PASS 2b: Hook PNG overlay for face_track modes =====
+        if (clip._hookPass2 && fs.existsSync(clip._hookPass2.imagePath) && fs.existsSync(outputPath)) {
+            const hp = clip._hookPass2;
+            emit(97, 'Burning hook overlay...');
+            const hookTempPath = outputPath.replace('.mp4', '_prehook.mp4');
+            let hookRenameOk = false;
+            try {
+                fs.renameSync(outputPath, hookTempPath);
+                hookRenameOk = true;
+            } catch (e) {
+                console.warn('[Render] Pass 2b: could not rename for hook overlay:', e.message);
+            }
+            if (hookRenameOk && fs.existsSync(hookTempPath)) {
+                const enableExpr = hp.enableExpr
+                    ? hp.enableExpr.replace(/enable=/, '').replace(/'/g, '')
+                    : `between(t,0,${hp.duration})`;
+                // Use -i for PNG (no path escaping issues) + filter_complex overlay
+                const hookFC = `[0:v][1:v]overlay=x=${hp.overlayX}:y=${hp.overlayY}:enable='${enableExpr}',format=yuv420p[outv]`;
+                const argsHook = [
+                    '-y',
+                    '-i', hookTempPath,
+                    '-loop', '1', '-framerate', '1', '-t', String(duration), '-i', hp.imagePath,
+                    '-filter_complex', hookFC,
+                    '-map', '[outv]', '-map', '0:a',
+                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                    '-c:a', 'copy',
+                    '-t', String(duration),
+                    '-movflags', '+faststart',
+                    outputPath
+                ];
+                console.log(`[Render] Pass 2b: hook PNG overlay — ${hp.imagePath}`);
+                const resultHook = await runFFmpeg(argsHook, duration, emit, io, project.id);
+                if (!resultHook.success || !validateOutput(outputPath)) {
+                    console.warn('[Render] Pass 2b hook overlay failed, using video without hook');
+                    try { fs.renameSync(hookTempPath, outputPath); } catch (e) { }
+                } else {
+                    console.log('[Render] Pass 2b hook overlay: OK');
+                    try { fs.unlinkSync(hookTempPath); } catch (e) { }
+                }
+            }
+        }
+
         if (!fs.existsSync(outputPath)) {
             console.error('[Render] Output missing after pass 2 — render failed');
         } else {
@@ -1138,7 +1199,6 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
 
     const hookDuration = settings.duration != null ? settings.duration : 5;
     const position = settings.position || 'top';
-    const fontSize = settings.fontSize || Math.round(outW / 11);
     const hookStyle = settings.hookStyle || 'podcast';
 
     const HOOK_STYLES = {
@@ -1161,7 +1221,25 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
         .replace(/[':%;]/g, ' ').replace(/"/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
     if (!cleanText) return '';
 
-    const marginY = Math.round(outH * 0.08);
+    const blurZoneH = clip._blurZoneH || 0; // = outH * 0.075 ≈ 144px for face_track_blur
+    let fontSize = settings.fontSize || Math.round(outW / 13); // /13 = 83px (~62pt) — clear dan impactful, 3-4 lines per typical hook
+
+    // For face_track_blur, hook must fit within the top blur zone.
+    // Estimate hook height: 2 lines * lineHeight + 2*padY + 2*border
+    // lineHeight ≈ fontSize * 1.2, padY ≈ fontSize * 0.30, border ≈ 6
+    // Total ≈ 2*(fontSize*1.2) + 2*(fontSize*0.30) + 12 = fontSize*3.0 + 12
+    if (blurZoneH > 0) {
+        // Shrink fontSize so 2-line hook + padding fits in blurZoneH with a small safe margin
+        const safeH = blurZoneH - 16; // 16px safe margin from top edge
+        // Max fontSize: safeH / 3.2 (accounts for 2 lines + padding + border)
+        const maxFontSize = Math.floor(safeH / 3.2);
+        if (fontSize > maxFontSize) {
+            fontSize = maxFontSize;
+            console.log(`[HookTitle] blur mode: fontSize clamped to ${fontSize} to fit in ${blurZoneH}px zone`);
+        }
+    }
+
+    let marginY = blurZoneH > 0 ? Math.round(outH * 0.04) : Math.round(outH * 0.08); // blur: 4% from top, normal: 8%
     const enableExpr = hookDuration > 0 ? `enable='between(t,0,${hookDuration})'` : '';
 
     // =====================================================
@@ -1174,13 +1252,22 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
             const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'hook_gen_gdi.ps1');
             const padX = Math.round(fontSize * 0.5);
             const padY = Math.round(fontSize * 0.35);
-            const maxW = outW - Math.round(outW * 0.14);
-            const psFontSize = Math.round(fontSize * 0.75);
+            const maxW = Math.round(outW * 0.80); // 80% of outW — space kanan kiri ~10% each side
+            // Pass fontSize in PIXELS — PS script uses GraphicsUnit::Pixel (DPI-independent)
+            const psFontSize = Math.round(fontSize * 1.4); // lebih besar supaya impactful
 
-            // Write text to temp file (preserves emoji/Unicode through pipeline)
+            // Strip emoji before writing to file — GDI+ System.Drawing cannot render emoji
+            // and produces □□ placeholder glyphs. Remove them cleanly.
             const { exec } = require('child_process');
+            const gdiSafeText = cleanText
+                .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{2B50}\u{2764}\u{203C}\u{2049}]/gu, '')
+                .replace(/\s+/g, ' ').trim();
+            if (!gdiSafeText) {
+                // Hook text was all emoji — skip PNG, use fallback
+                throw new Error('Hook text is all emoji after stripping');
+            }
             const textFilePath = path.join(clipDir, '_hook_text.txt');
-            fs.writeFileSync(textFilePath, cleanText, 'utf-8');
+            fs.writeFileSync(textFilePath, Buffer.from(gdiSafeText, 'utf8')); // no BOM — raw UTF-8 bytes
 
             const args = [
                 `"${textFilePath}"`,
@@ -1253,10 +1340,13 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     let fontPath = fontCandidates.find(f => fs.existsSync(f)) || path.join(systemFontsDir, 'arial.ttf');
     const escapedFontPath = fontPath.split(path.sep).join('/').replace(/:/g, '\\:');
 
-    const padX = Math.round(fontSize * 0.45);
-    const padY = Math.round(fontSize * 0.30);
-    const avgCharWidth = fontSize * 0.62;
-    const maxCharsPerLine = Math.max(6, Math.floor((outW - outW * 0.1 - padX * 2) / avgCharWidth));
+    // Drawtext path uses a smaller, safer font size — estimasi karakter tidak seakurat GDI+ MeasureString
+    // PNG path (above) pakai outW/11 yang lebih besar dan akurat via PowerShell
+    const dtFontSize = Math.round(outW / 13); // 83px for 1080p — sedikit lebih kecil dari PNG path
+    const padX = Math.round(dtFontSize * 0.45);
+    const padY = Math.round(dtFontSize * 0.30);
+    const avgCharWidth = dtFontSize * 0.65; // sedikit lebih besar (Montserrat ExtraBold lebih lebar dari Arial)
+    const maxCharsPerLine = Math.max(6, Math.floor((outW * 0.75 - padX * 2) / avgCharWidth)); // 75% frame width
 
     const words = noEmojiText.split(/\s+/);
     const wLines = [];
@@ -1269,15 +1359,20 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     if (currentLine) wLines.push(currentLine);
     while (wLines.length > 4) { const o = wLines.pop(); wLines[wLines.length - 1] += ' ' + o; }
 
-    const lineHeight = Math.round(fontSize * 1.20);
+    const lineHeight = Math.round(dtFontSize * 1.20);
     const totalTextH = wLines.length * lineHeight;
-    const longestLine = wLines.reduce((a, b) => a.length > b.length ? a : b, '');
-    const boxW = Math.min(outW - Math.round(outW * 0.1), Math.round(longestLine.length * avgCharWidth) + padX * 2);
+    // Fixed boxW = 78% of outW — TIDAK pakai estimasi longestLine karena tidak akurat
+    // Ini memastikan box dan teks selalu konsisten
+    const boxW = Math.round(outW * 0.78);
     const boxH = totalTextH + padY * 2;
     const boxX = Math.round((outW - boxW) / 2);
     const bw = Math.max(4, borderThk);
 
-    let boxY = position === 'bottom' ? outH - boxH - marginY * 2 : marginY;
+    // In blur mode: border at top = boxY-bw. If boxY (=marginY=4) and bw=6, that's y=-2 → off-frame!
+    // Clamp boxY so the outer border is always inside the frame (y >= 0)
+    let rawBoxY = position === 'bottom' ? outH - boxH - marginY * 2 : marginY;
+    let boxY = position === 'bottom' ? rawBoxY : Math.max(bw + 2, rawBoxY);
+
 
     const filters = [];
     filters.push('drawbox=x=' + (boxX - bw) + ':y=' + (boxY - bw) + ':w=' + (boxW + bw * 2) + ':h=' + (boxH + bw * 2) +
@@ -1285,8 +1380,10 @@ async function buildHookTitleFilter(clip, outW, outH, duration, clipDir) {
     filters.push('drawbox=x=' + boxX + ':y=' + boxY + ':w=' + boxW + ':h=' + boxH +
         ':color=0x' + bgColor + '@1.0:t=fill' + dtEnableExpr);
     for (let i = 0; i < wLines.length; i++) {
-        filters.push("drawtext=text='" + wLines[i] + "':fontfile='" + escapedFontPath + "':fontsize=" + fontSize +
-            ':fontcolor=0x' + textColor + ':x=(w-tw)/2:y=' + (boxY + padY + i * lineHeight) + dtEnableExpr);
+        // x = boxX + (boxW - tw) / 2 — center teks dalam BOX, bukan dalam video frame!
+        // x=(w-tw)/2 sebelumnya center di video → teks meluber keluar box jika tw > boxW
+        filters.push("drawtext=text='" + wLines[i] + "':fontfile='" + escapedFontPath + "':fontsize=" + dtFontSize +
+            ':fontcolor=0x' + textColor + ':x=' + boxX + '+((' + boxW + '-tw)/2):y=' + (boxY + padY + i * lineHeight) + dtEnableExpr);
     }
     return filters.join(',');
 }
@@ -1309,12 +1406,17 @@ function buildVideoFilter(mode, outW, outH, sourceW = 0) {
         case 'fit':
             // Fit with blur background — popular TikTok/Reels style
             // [fit_out] label allows filter_complex builder to route output correctly
-            return [
-                `[0:v]split[a][b]`,
-                `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},boxblur=20:5[bg]`,
-                `[b]scale=${outW}:${outH}:force_original_aspect_ratio=decrease${scaleFlags}${sharpen}[fg]`,
-                `[bg][fg]overlay=(W-w)/2:(H-h)/2[fit_out]`
-            ].join(';');
+            // Scale-Down Blur Trick for fit mode
+            {
+                const fitBlurW = Math.round(outW / 4) % 2 === 0 ? Math.round(outW / 4) : Math.round(outW / 4) + 1;
+                const fitBlurH = Math.round(outH / 4) % 2 === 0 ? Math.round(outH / 4) : Math.round(outH / 4) + 1;
+                return [
+                    `[0:v]split[a][b]`,
+                    `[a]scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH},scale=${fitBlurW}:${fitBlurH}:flags=fast_bilinear,boxblur=8:3,scale=${outW}:${outH}:flags=fast_bilinear[bg]`,
+                    `[b]scale=${outW}:${outH}:force_original_aspect_ratio=decrease${scaleFlags}${sharpen}[fg]`,
+                    `[bg][fg]overlay=(W-w)/2:(H-h)/2[fit_out]`
+                ].join(';');
+            }
 
         case 'face_track':
             return `scale=${outW}:${outH}:force_original_aspect_ratio=increase${scaleFlags},crop=${outW}:${outH}${sharpen}`;
@@ -1855,7 +1957,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // If subtitles appear TOO LATE after this change: reduce to 0.3
     // Subtitle delay (seconds): 0.3s compensates for Whisper early detection.
     // Lower = subtitles appear earlier (less delay). Raise if subs still appear too early.
-    const SUBTITLE_DELAY = 0.7;
+    const SUBTITLE_DELAY = 0.5;
 
     // Per-word highlight: all words visible, only the current word gets highlight color
     // This matches the preview behavior exactly

@@ -10,8 +10,123 @@ const { getYoutubeInfo, downloadYoutube, getYoutubeCaptions, downloadYoutubeCapt
 const { processProject, cancelProject, addToQueue, removeFromQueue, getQueueStatus, retranscribeProject } = require('../services/pipeline');
 const { renderClip, renderAllClips } = require('../services/clipRenderer');
 const { canCreateProject, incrementProjectCount, getRenderLimits } = require('../services/license');
+const { keyPool } = require('../services/keyPool');
 
 const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
+
+/**
+ * Shared AI call helper — uses keyPool for automatic key rotation + rate limit cooldown.
+ * @param {object} settings - Settings object with groq_api_key and gemini_api_key
+ * @param {string} prompt - The prompt text
+ * @param {string} systemMessage - System message for the AI
+ * @param {object} opts - { groqModel, groqTemp, groqMaxTokens, geminiTemp, geminiMaxTokens }
+ * @returns {string|null} AI response text or null
+ */
+async function callAIWithKeyPool(settings, prompt, systemMessage, opts = {}) {
+    const {
+        groqModel = 'llama-3.3-70b-versatile',
+        groqTemp = 0.85,
+        groqMaxTokens = 6000,
+        geminiTemp = 0.6,
+        geminiMaxTokens = 6000
+    } = opts;
+
+    const primary = settings.ai_provider_primary || 'groq';
+    let aiResult = null;
+
+    // --- Try primary provider first ---
+    if (primary === 'groq' && settings.groq_api_key) {
+        keyPool.setKeyString('groq', settings.groq_api_key);
+        const keys = keyPool.parseKeys(settings.groq_api_key);
+        for (let attempt = 0; attempt < keys.length && !aiResult; attempt++) {
+            const keyInfo = keyPool.getKey('groq', settings.groq_api_key);
+            if (!keyInfo) break;
+            try {
+                const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${keyInfo.key}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: groqModel,
+                        messages: [
+                            { role: 'system', content: systemMessage },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: groqTemp,
+                        max_tokens: groqMaxTokens
+                    })
+                });
+                if (resp.ok) {
+                    const r = await resp.json();
+                    aiResult = r.choices?.[0]?.message?.content;
+                    keyPool.markSuccess(keyInfo.key);
+                } else if (resp.status === 429) {
+                    keyPool.markRateLimited('groq', keyInfo.key, 60000);
+                }
+            } catch (e) { continue; }
+        }
+    }
+
+    // --- Fallback: Gemini ---
+    if (!aiResult && settings.gemini_api_key) {
+        keyPool.setKeyString('gemini', settings.gemini_api_key);
+        const keys = keyPool.parseKeys(settings.gemini_api_key);
+        for (let attempt = 0; attempt < keys.length && !aiResult; attempt++) {
+            const keyInfo = keyPool.getKey('gemini', settings.gemini_api_key);
+            if (!keyInfo) break;
+            try {
+                const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${keyInfo.key}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: { temperature: geminiTemp, maxOutputTokens: geminiMaxTokens }
+                    })
+                });
+                if (resp.ok) {
+                    const r = await resp.json();
+                    aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text;
+                    keyPool.markSuccess(keyInfo.key);
+                } else if (resp.status === 429) {
+                    keyPool.markRateLimited('gemini', keyInfo.key, 60000);
+                }
+            } catch (e) { continue; }
+        }
+    }
+
+    // --- Double fallback: if primary was gemini, try groq ---
+    if (!aiResult && primary !== 'groq' && settings.groq_api_key) {
+        keyPool.setKeyString('groq', settings.groq_api_key);
+        const keys = keyPool.parseKeys(settings.groq_api_key);
+        for (let attempt = 0; attempt < keys.length && !aiResult; attempt++) {
+            const keyInfo = keyPool.getKey('groq', settings.groq_api_key);
+            if (!keyInfo) break;
+            try {
+                const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${keyInfo.key}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: groqModel,
+                        messages: [
+                            { role: 'system', content: systemMessage },
+                            { role: 'user', content: prompt }
+                        ],
+                        temperature: groqTemp,
+                        max_tokens: groqMaxTokens
+                    })
+                });
+                if (resp.ok) {
+                    const r = await resp.json();
+                    aiResult = r.choices?.[0]?.message?.content;
+                    keyPool.markSuccess(keyInfo.key);
+                } else if (resp.status === 429) {
+                    keyPool.markRateLimited('groq', keyInfo.key, 60000);
+                }
+            } catch (e) { continue; }
+        }
+    }
+
+    return aiResult;
+}
 
 // File upload config
 const storage = multer.diskStorage({
@@ -152,7 +267,8 @@ router.get('/', (req, res) => {
 });
 
 // GET /api/projects/:id
-router.get('/:id', (req, res) => {
+// Guard: only match UUID-shaped IDs so static routes like /templates, /youtube, /clear-cache pass through
+router.get('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -242,7 +358,7 @@ router.post('/upload', upload.single('video'), async (req, res) => {
 });
 
 // PUT /api/projects/:id — Update project
-router.put('/:id', (req, res) => {
+router.put('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -264,7 +380,7 @@ router.put('/:id', (req, res) => {
 });
 
 // POST /api/projects/:id/process — Start AI processing pipeline
-router.post('/:id/process', async (req, res) => {
+router.post('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/process', async (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -299,7 +415,7 @@ router.post('/:id/process', async (req, res) => {
 });
 
 // POST /api/projects/:id/reset-status — Force-reset stuck processing status
-router.post('/:id/reset-status', (req, res) => {
+router.post('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/reset-status', (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -321,7 +437,7 @@ router.post('/:id/reset-status', (req, res) => {
 });
 
 // POST /api/projects/:id/retranscribe — Re-transcribe to get word-level timestamps
-router.post('/:id/retranscribe', async (req, res) => {
+router.post('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/retranscribe', async (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -352,7 +468,7 @@ router.post('/:id/retranscribe', async (req, res) => {
 });
 
 // POST /api/projects/:id/cancel — Cancel active processing
-router.post('/:id/cancel', (req, res) => {
+router.post('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/cancel', (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -553,6 +669,40 @@ router.post('/clips/:clipId/reset-render', (req, res) => {
     }
 });
 
+// POST /api/projects/clips/reset-all-stuck — Reset ALL stuck rendering clips (any project)
+// Useful after server crash: resets orphaned 'rendering' clips that have no active FFmpeg process.
+router.post('/clips/reset-all-stuck', (req, res) => {
+    try {
+        const stuckClips = all(
+            `SELECT c.id, c.clip_number, c.title, p.name as proj_name
+             FROM clips c JOIN projects p ON c.project_id = p.id
+             WHERE c.status = 'rendering'`
+        );
+
+        if (stuckClips.length === 0) {
+            return res.json({ message: 'No stuck renders found', reset: 0, clips: [] });
+        }
+
+        const resetClips = [];
+        for (const c of stuckClips) {
+            run("UPDATE clips SET status = 'detected', output_path = NULL WHERE id = ?", [c.id]);
+            resetClips.push({ id: c.id, clip_number: c.clip_number, title: c.title, project: c.proj_name });
+            console.log(`[Render] Bulk reset: Clip#${c.clip_number} "${c.title}" in "${c.proj_name}" → detected`);
+        }
+
+        const io = req.app.get('io');
+        if (io) io.emit('clips:bulk-reset', { count: resetClips.length });
+
+        res.json({
+            message: `Reset ${resetClips.length} stuck render(s) to 'detected'`,
+            reset: resetClips.length,
+            clips: resetClips
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // PUT /api/projects/:id/clips/bulk-style — Set caption style for multiple clips
 router.put('/:id/clips/bulk-style', (req, res) => {
     try {
@@ -654,7 +804,7 @@ router.post('/clips/:clipId/split', (req, res) => {
             return res.status(400).json({ error: 'Split time must be between clip start and end' });
         }
 
-        const { v4: uuidv4 } = require('uuid');
+
 
         // Update original clip to end at split_time
         run('UPDATE clips SET end_time = ?, duration = ?, status = ?, output_path = NULL WHERE id = ?',
@@ -731,7 +881,7 @@ router.post('/clips/merge', (req, res) => {
 });
 
 // DELETE /api/projects/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res) => {
     try {
         const project = get('SELECT * FROM projects WHERE id = ?', [req.params.id]);
         if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -744,6 +894,17 @@ router.delete('/:id', (req, res) => {
         if (project.thumbnail_path) {
             const thumbFull = path.join(DATA_DIR, project.thumbnail_path);
             if (fs.existsSync(thumbFull)) fs.removeSync(thumbFull);
+        }
+
+        // Delete rendered clip files from disk
+        const clips = all('SELECT output_path, thumbnail_path FROM clips WHERE project_id = ?', [req.params.id]);
+        for (const c of clips) {
+            if (c.output_path && fs.existsSync(c.output_path)) {
+                try { fs.removeSync(c.output_path); } catch (e) { }
+            }
+            if (c.thumbnail_path && fs.existsSync(c.thumbnail_path)) {
+                try { fs.removeSync(c.thumbnail_path); } catch (e) { }
+            }
         }
 
         run('DELETE FROM clips WHERE project_id = ?', [req.params.id]);
@@ -1048,8 +1209,7 @@ router.post('/:id/open-folder', (req, res) => {
             : clipsDir;
 
         // Create dir if it doesn't exist
-        const fs2 = require('fs-extra');
-        fs2.ensureDirSync(targetDir);
+        fs.ensureDirSync(targetDir);
 
         // Open in Windows Explorer
         exec(`explorer "${targetDir}"`, (err) => {
@@ -1068,7 +1228,7 @@ router.get('/clips/:clipId/path', (req, res) => {
         const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
         if (!clip) return res.status(404).json({ error: 'Clip not found' });
         if (!clip.output_path) return res.status(404).json({ error: 'Clip not rendered' });
-        res.json({ path: clip.output_path, exists: require('fs').existsSync(clip.output_path) });
+        res.json({ path: clip.output_path, exists: fs.existsSync(clip.output_path) });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1104,7 +1264,7 @@ router.put('/:id/transcript', (req, res) => {
             if (!full_text || !full_text.trim()) {
                 return res.status(400).json({ error: 'Transcript text is required for new transcripts' });
             }
-            const { v4: uuidv4 } = require('uuid');
+
             const segStr = segment_data ? (typeof segment_data === 'string' ? segment_data : JSON.stringify(segment_data)) : '[]';
             run(`INSERT INTO transcripts (id, project_id, full_text, language, provider, segment_data, word_data)
                  VALUES (?, ?, ?, ?, 'manual', ?, '[]')`,
@@ -1194,7 +1354,7 @@ router.post('/:id/transcript/upload', transcriptUpload.single('file'), (req, res
         }
 
         // Save to database
-        const { v4: uuidv4 } = require('uuid');
+
         run('DELETE FROM transcripts WHERE project_id = ?', [req.params.id]);
         run(`INSERT INTO transcripts (id, project_id, full_text, language, provider, segment_data, word_data)
              VALUES (?, ?, ?, ?, ?, ?, '[]')`,
@@ -1292,7 +1452,7 @@ router.post('/:id/transcript/paste', (req, res) => {
         }
 
         // Save to database
-        const { v4: uuidv4 } = require('uuid');
+
         run('DELETE FROM transcripts WHERE project_id = ?', [req.params.id]);
         run(`INSERT INTO transcripts (id, project_id, full_text, language, provider, segment_data, word_data)
              VALUES (?, ?, ?, ?, ?, ?, '[]')`,
@@ -1348,7 +1508,7 @@ router.post('/:id/captions/import', async (req, res) => {
         const result = await downloadYoutubeCaptions(project.source_url, lang, tempDir);
 
         // Save to database
-        const { v4: uuidv4 } = require('uuid');
+
         run('DELETE FROM transcripts WHERE project_id = ?', [req.params.id]);
         run(`INSERT INTO transcripts (id, project_id, full_text, language, provider, segment_data, word_data)
              VALUES (?, ?, ?, ?, ?, ?, '[]')`,
@@ -1404,9 +1564,8 @@ router.post('/clips/:clipId/generate-social', async (req, res) => {
 
         // Get clip's transcript portion
         let clipText = clip.hook_text || clip.title || '';
-        if (transcript) {
-            const parsed = typeof transcript.content === 'string' ? JSON.parse(transcript.content) : transcript.content;
-            const segments = parsed?.segments || [];
+        if (transcript && transcript.segment_data) {
+            const segments = JSON.parse(transcript.segment_data || '[]');
             clipText = segments
                 .filter(s => s.start >= clip.start_time && s.end <= clip.end_time + 2)
                 .map(s => s.text)
@@ -1567,56 +1726,11 @@ Generate social media copy for ALL platforms. Return ONLY a JSON object (no mark
   }
 }`;
 
-        // Try Groq first, then Gemini
-        let aiResult = null;
-        const primary = settings.ai_provider_primary || 'groq';
-
-        if (primary === 'groq' && settings.groq_api_key) {
-            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'llama-3.3-70b-versatile',
-                            messages: [
-                                { role: 'system', content: 'You are a viral content copywriter. Return ONLY valid JSON. No markdown, no explanation. Write hooks that reference SPECIFIC details from the transcript.' },
-                                { role: 'user', content: prompt }
-                            ],
-                            temperature: 0.85,
-                            max_tokens: 6000
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.choices?.[0]?.message?.content;
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
-
-        if (!aiResult && settings.gemini_api_key) {
-            const keys = settings.gemini_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: { temperature: 0.6, maxOutputTokens: 6000 }
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text;
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
+        // Call AI with keyPool rotation
+        const aiResult = await callAIWithKeyPool(settings, prompt,
+            'You are a viral content copywriter. Return ONLY valid JSON. No markdown, no explanation. Write hooks that reference SPECIFIC details from the transcript.',
+            { groqTemp: 0.85, groqMaxTokens: 6000, geminiTemp: 0.6, geminiMaxTokens: 6000 }
+        );
 
         if (!aiResult) {
             return res.status(500).json({ error: 'AI provider not available. Check API keys in Settings.' });
@@ -1691,9 +1805,8 @@ router.post('/clips/:clipId/generate-hook', async (req, res) => {
 
         // Get clip's transcript portion
         let clipText = clip.title || '';
-        if (transcript) {
-            const parsed = typeof transcript.content === 'string' ? JSON.parse(transcript.content) : transcript.content;
-            const segments = parsed?.segments || [];
+        if (transcript && transcript.segment_data) {
+            const segments = JSON.parse(transcript.segment_data || '[]');
             clipText = segments
                 .filter(s => s.start >= clip.start_time && s.end <= clip.end_time + 2)
                 .map(s => s.text)
@@ -1747,82 +1860,12 @@ RULES:
 
 Return ONLY the hook text. No quotes, no explanation, no prefix. Just the raw hook text.`;
 
-        let aiResult = null;
-        const primary = settings.ai_provider_primary || 'groq';
-
-        if (primary === 'groq' && settings.groq_api_key) {
-            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'llama-3.3-70b-versatile',
-                            messages: [
-                                { role: 'system', content: 'You generate viral hook text. Return ONLY the hook text, nothing else.' },
-                                { role: 'user', content: prompt }
-                            ],
-                            temperature: 0.9,
-                            max_tokens: 200
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.choices?.[0]?.message?.content?.trim();
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
-
-        if (!aiResult && settings.gemini_api_key) {
-            const keys = settings.gemini_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: { temperature: 0.7, maxOutputTokens: 200 }
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
-
-        // Fallback for Groq first
-        if (!aiResult && primary !== 'groq' && settings.groq_api_key) {
-            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'llama-3.3-70b-versatile',
-                            messages: [
-                                { role: 'system', content: 'You generate viral hook text. Return ONLY the hook text, nothing else.' },
-                                { role: 'user', content: prompt }
-                            ],
-                            temperature: 0.9,
-                            max_tokens: 200
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.choices?.[0]?.message?.content?.trim();
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
+        // Call AI with keyPool rotation
+        let aiResult = await callAIWithKeyPool(settings, prompt,
+            'You generate viral hook text. Return ONLY the hook text, nothing else.',
+            { groqTemp: 0.9, groqMaxTokens: 200, geminiTemp: 0.7, geminiMaxTokens: 200 }
+        );
+        if (aiResult) aiResult = aiResult.trim();
 
         if (!aiResult) {
             return res.status(500).json({ error: 'AI provider not available. Check API keys in Settings.' });
@@ -1862,71 +1905,11 @@ Return ONLY the hook text. No quotes, no explanation, no prefix. Just the raw ho
 // ========================================
 // Thumbnail Generator — Extract best frames
 // ========================================
-router.post('/clips/:clipId/thumbnails', async (req, res) => {
-    try {
-        const clip = get('SELECT * FROM clips WHERE id = ?', [req.params.clipId]);
-        if (!clip) return res.status(404).json({ error: 'Clip not found' });
-
-        const project = get('SELECT * FROM projects WHERE id = ?', [clip.project_id]);
-        if (!project || !project.source_path) return res.status(404).json({ error: 'Project video not found' });
-
-        const fs = require('fs-extra');
-        const { execSync } = require('child_process');
-
-        if (!fs.existsSync(project.source_path)) {
-            return res.status(404).json({ error: 'Source video file not found on disk' });
-        }
-
-        const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
-        const thumbDir = path.join(DATA_DIR, 'thumbnails', clip.id);
-        fs.ensureDirSync(thumbDir);
-
-        const clipDuration = (clip.end_time || 0) - (clip.start_time || 0);
-        if (clipDuration <= 0) return res.status(400).json({ error: 'Invalid clip duration' });
-
-        // Pick 6 strategic timestamps
-        const timestamps = [
-            { t: clip.start_time + 0.5, label: 'Opening' },
-            { t: clip.start_time + Math.min(3, clipDuration * 0.1), label: 'Hook' },
-            { t: clip.start_time + clipDuration * 0.25, label: '25%' },
-            { t: clip.start_time + clipDuration * 0.5, label: 'Middle' },
-            { t: clip.start_time + clipDuration * 0.75, label: '75%' },
-            { t: clip.end_time - 1, label: 'Ending' },
-        ];
-
-        const thumbnails = [];
-        for (let i = 0; i < timestamps.length; i++) {
-            const { t, label } = timestamps[i];
-            const outFile = path.join(thumbDir, `thumb_${i + 1}.jpg`);
-            try {
-                execSync(
-                    `ffmpeg -y -ss ${t.toFixed(2)} -i "${project.source_path}" -vframes 1 -q:v 2 "${outFile}"`,
-                    { timeout: 10000, stdio: 'ignore' }
-                );
-                if (fs.existsSync(outFile)) {
-                    thumbnails.push({
-                        url: `http://localhost:5000/api/projects/clips/${clip.id}/thumbnail/${i + 1}`,
-                        label,
-                        index: i + 1
-                    });
-                }
-            } catch (e) {
-                console.warn(`[Thumbnail] Frame ${i + 1} failed:`, e.message);
-            }
-        }
-
-        res.json({ success: true, thumbnails });
-    } catch (err) {
-        console.error('[Thumbnail] Error:', err.message);
-        res.status(500).json({ error: err.message });
-    }
-});
+// NOTE: Duplicate thumbnail handler removed — using the better async version below (line ~2195+)
 
 // Serve individual thumbnail images
 router.get('/clips/:clipId/thumbnail/:index', (req, res) => {
-    const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
     const thumbPath = path.join(DATA_DIR, 'thumbnails', req.params.clipId, `thumb_${req.params.index}.jpg`);
-    const fs = require('fs-extra');
     if (fs.existsSync(thumbPath)) {
         res.sendFile(thumbPath);
     } else {
@@ -1987,54 +1970,11 @@ Analyze and return ONLY valid JSON (no markdown):
   "soundTrend": "trending audio/sound recommendation if applicable"
 }`;
 
-        let aiResult = null;
-        const primary = settings.ai_provider_primary || 'groq';
-
-        if (primary === 'groq' && settings.groq_api_key) {
-            const keys = settings.groq_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: 'llama-3.3-70b-versatile',
-                            messages: [
-                                { role: 'system', content: 'You are a viral content analyst. Return ONLY valid JSON.' },
-                                { role: 'user', content: prompt }
-                            ],
-                            temperature: 0.7, max_tokens: 2000
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.choices?.[0]?.message?.content;
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
-
-        if (!aiResult && settings.gemini_api_key) {
-            const keys = settings.gemini_api_key.split(',').map(k => k.trim()).filter(k => k);
-            for (const key of keys) {
-                try {
-                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }],
-                            generationConfig: { temperature: 0.5, maxOutputTokens: 2048 }
-                        })
-                    });
-                    if (resp.ok) {
-                        const r = await resp.json();
-                        aiResult = r.candidates?.[0]?.content?.parts?.[0]?.text;
-                        break;
-                    }
-                } catch (e) { continue; }
-            }
-        }
+        // Call AI with keyPool rotation
+        const aiResult = await callAIWithKeyPool(settings, prompt,
+            'You are a viral content analyst. Return ONLY valid JSON.',
+            { groqTemp: 0.7, groqMaxTokens: 2000, geminiTemp: 0.5, geminiMaxTokens: 2048 }
+        );
 
         if (!aiResult) {
             return res.status(500).json({ error: 'AI provider not available' });

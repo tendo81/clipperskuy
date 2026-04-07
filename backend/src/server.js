@@ -41,8 +41,9 @@ io.on('connection', (socket) => {
 });
 
 // Health check (available before DB init)
+const PKG_VERSION = require('../package.json').version || '1.0.0';
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: PKG_VERSION, timestamp: new Date().toISOString() });
 });
 
 // Start server after DB is ready
@@ -52,10 +53,11 @@ async function start() {
     startAutoSave();
     console.log('[DB] Database ready (auto-save enabled)');
 
-    // Auto-reset projects stuck in processing states (from previous crashed session)
-    // These are projects that were transcribing/analyzing when the server last died.
+    // ─── Startup cleanup: reset ALL stuck states from previous crashed session ──
     try {
       const { run, all } = require('./database');
+
+      // 1. Reset stuck PROJECTS (transcribing/analyzing/clipping with no active worker)
       const stuckProjects = all(
         "SELECT id, name, status FROM projects WHERE status IN ('transcribing', 'analyzing', 'clipping')"
       );
@@ -66,12 +68,78 @@ async function start() {
             "UPDATE projects SET status = 'failed', error_message = 'Processing interrupted (server restarted)', updated_at = datetime('now') WHERE id = ?",
             [p.id]
           );
-          console.log(`  → Reset: "${p.name}" (${p.id}) — was ${p.status}`);
+          console.log(`  → Reset project: "${p.name}" — was ${p.status}`);
         }
       }
+
+      // 2. Reset stuck CLIPS (status='rendering' but no FFmpeg running after server restart)
+      // On startup, no renders are active — any clip still marked 'rendering' is an orphan.
+      const stuckClips = all(
+        "SELECT c.id, c.clip_number, c.title, p.name as proj_name FROM clips c JOIN projects p ON c.project_id = p.id WHERE c.status = 'rendering'"
+      );
+      if (stuckClips.length > 0) {
+        console.log(`[Startup] Resetting ${stuckClips.length} orphaned render(s) → 'detected':`);
+        for (const c of stuckClips) {
+          run("UPDATE clips SET status = 'detected', output_path = NULL WHERE id = ?", [c.id]);
+          console.log(`  → Reset clip #${c.clip_number} "${c.title}" in "${c.proj_name}"`);
+        }
+      }
+
+      // 3. Fix 'rendered' clips whose output file is missing from disk
+      // This can happen if files are deleted manually or moved to another drive.
+      const { existsSync } = require('fs');
+      const renderedWithPath = all(
+        "SELECT id, clip_number, title FROM clips WHERE status = 'rendered' AND output_path IS NOT NULL"
+      );
+      let orphanFixed = 0;
+      for (const c of renderedWithPath) {
+        const row = all("SELECT output_path FROM clips WHERE id = ?", [c.id])[0];
+        if (row && !existsSync(row.output_path)) {
+          run("UPDATE clips SET status = 'detected', output_path = NULL WHERE id = ?", [c.id]);
+          orphanFixed++;
+        }
+      }
+      if (orphanFixed > 0) {
+        console.log(`[Startup] Fixed ${orphanFixed} clip(s) with missing output files → 'detected'`);
+      }
     } catch (e) {
-      console.warn('[Startup] Could not reset stuck projects:', e.message);
+      console.warn('[Startup] Could not reset stuck states:', e.message);
     }
+
+
+    // ─── Render Watchdog: periodically detect truly stuck renders ─────────────
+    // A render is "stuck" if its DB status is 'rendering' but FFmpeg process
+    // is NOT running. This catches crashes that happen mid-render without cleanup.
+    // Runs every 10 minutes. Only resets if BOTH conditions are true:
+    //   1. clip.status === 'rendering'
+    //   2. no 'ffmpeg' process is currently running on the system
+    const { execSync } = require('child_process');
+    const WATCHDOG_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+    setInterval(() => {
+      try {
+        const { run: wRun, all: wAll } = require('./database');
+        const renderingClips = wAll("SELECT id, clip_number, title FROM clips WHERE status = 'rendering'");
+        if (renderingClips.length === 0) return;
+
+        // Check if FFmpeg is actually running
+        let ffmpegRunning = false;
+        try {
+          const taskList = execSync('tasklist /FI "IMAGENAME eq ffmpeg.exe" /NH /FO CSV', { timeout: 5000 }).toString();
+          ffmpegRunning = taskList.includes('ffmpeg.exe');
+        } catch (e) { /* tasklist failed — assume FFmpeg may be running, skip reset */ return; }
+
+        if (!ffmpegRunning) {
+          console.log(`[Watchdog] ${renderingClips.length} stuck render(s) detected — no FFmpeg process running. Resetting...`);
+          for (const c of renderingClips) {
+            wRun("UPDATE clips SET status = 'detected', output_path = NULL WHERE id = ?", [c.id]);
+            console.log(`  [Watchdog] Reset clip #${c.clip_number} "${c.title || ''}" → detected`);
+          }
+        }
+      } catch (e) {
+        console.warn('[Watchdog] Error during render watchdog check:', e.message);
+      }
+    }, WATCHDOG_INTERVAL_MS);
+    console.log('[Startup] Render watchdog active (checks every 10 minutes)');
 
     // Routes (loaded after DB init)
     const projectRoutes = require('./routes/projects');

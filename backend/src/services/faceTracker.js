@@ -1,289 +1,102 @@
-/**
- * ClipperSkuy — Face Tracker (v3 — ONNX UltraFace)
- *
- * Face detection: ONNX Runtime + UltraFace slim-320 (~10ms/frame)
- * Fallback:       YUV heuristic (if model not found)
- * Generates smooth crop coordinates for face_track and face_track_blur modes.
- */
-
-
-const { exec } = require('child_process');
+﻿const path = require('path');
+const fs = require('fs');
 const { promisify } = require('util');
+const { exec } = require('child_process');
 const execAsync = promisify(exec);
-const path = require('path');
-const fs = require('fs-extra');
+
+// Face detector (ONNX YuNet)
 const { detectFaces: detectFacesOnnx } = require('./faceDetectorOnnx');
 
+// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const SAMPLE_RATE = 2;    // seconds between sample frames (1 frame per 2s)
+const SMOOTH_WINDOW = 5;  // smoothing window for position averaging
 
-const SAMPLE_RATE = 2;  // Sample every N seconds (2s = fewer frames, faster for long videos)
-const SMOOTH_WINDOW = 5; // Smooth over N frames
-const GRID_COLS = 4;     // Split frame into 4 columns
-const GRID_ROWS = 3;     // Split frame into 3 rows
-const FRAME_EXTRACT_TIMEOUT = 45000; // 45s max per frame extraction (AV1 can be slow)
-
-/**
- * Extract sample frames from a specific segment of a video
- */
-async function extractSampleFrames(videoPath, outputDir, fps = 1 / SAMPLE_RATE, startTime = 0, clipDuration = 0) {
-    fs.ensureDirSync(outputDir);
-
-    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-
-    // Fast I-frame only seeking for long videos (especially AV1 from YouTube).
-    // -skip_frame noref: skip non-reference frames during seeking (decode only keyframes)
-    // -ss before -i: fast input seek (jumps to nearest keyframe, no decode)
-    // This makes seeking to minute 29+ feasible without decoding 40k frames.
-    const sampleDur = clipDuration > 0 ? Math.min(clipDuration, 8) : 8;
-    let cmd = `"${ffmpegPath}" -skip_frame noref -ss ${startTime} -i "${videoPath}" -t ${sampleDur}`;
-    // Lower resolution for faster analysis: scale to max 480px wide
-    cmd += ` -vf "fps=${fps},scale=480:-2" -q:v 6 -y "${path.join(outputDir, 'frame_%04d.jpg')}"`;
-    console.log(`[FaceTracker] Extracting frames (fast I-frame seek): start=${startTime}s, dur=${sampleDur}s`);
-
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-            console.error('[FaceTracker] Frame extraction timed out — returning empty');
-            resolve([]);
-        }, FRAME_EXTRACT_TIMEOUT);
-
-        exec(cmd, { timeout: FRAME_EXTRACT_TIMEOUT + 5000 }, (err) => {
-            clearTimeout(timer);
-            if (err) {
-                console.error(`[FaceTracker] Frame extraction err:`, err.message.substring(0, 150));
-            }
-            const files = (fs.existsSync(outputDir) ? fs.readdirSync(outputDir) : [])
-                .filter(f => f.startsWith('frame_') && f.endsWith('.jpg'))
-                .sort()
-                .map(f => path.join(outputDir, f));
-            console.log(`[FaceTracker] Got ${files.length} frames`);
-            resolve(files);
-        });
-    });
+// â”€â”€ Helper: cleanup temp dir (native Node, no fs-extra) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function removeTempDir(dir) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
 }
 
-
-/**
- * Analyze a specific region of an image for face-likelihood metrics.
- * Uses FFmpeg signalstats to compute brightness (YAVG), saturation (UAVG/VAVG).
- * Face regions tend to have: moderate-high brightness, specific saturation range (skin tones).
- * 
- * @param {string} imagePath - Path to the image
- * @param {number} x - Region X offset
- * @param {number} y - Region Y offset
- * @param {number} w - Region width  
- * @param {number} h - Region height
- * @returns {{ yavg: number, uavg: number, vavg: number, score: number }}
- */
-/**
- * Analyze a specific region of an image for face-likelihood metrics.
- * Uses FFmpeg signalstats to compute brightness (YAVG), saturation (UAVG/VAVG).
- * @returns {{ yavg, uavg, vavg, score }}
- */
-async function analyzeRegion(imagePath, x, y, w, h) {
+// â”€â”€ Helper: extract sample frames from a video clip using FFmpeg â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function extractSampleFrames(videoPath, tempDir, intervalSecs, startTime, duration) {
+    await fs.promises.mkdir(tempDir, { recursive: true });
     const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-    try {
-        const cmd = `"${ffmpegPath}" -i "${imagePath}" -vf "crop=${w}:${h}:${x}:${y},signalstats=stat=tout+vrep+brng" -f null -frames:v 1 - 2>&1`;
-        const { stdout, stderr } = await execAsync(cmd, { timeout: 8000 });
-        const output = (stderr || '') + (stdout || '');
-        const yavg = parseFloat((output.match(/YAVG:\s*([\d.]+)/) || [])[1] || '128');
-        const uavg = parseFloat((output.match(/UAVG:\s*([\d.]+)/) || [])[1] || '128');
-        const vavg = parseFloat((output.match(/VAVG:\s*([\d.]+)/) || [])[1] || '128');
-        const ydif = parseFloat((output.match(/YDIF:\s*([\d.]+)/) || [])[1] || '0');
-        let score = 0;
-
-        // Skin tone YCbCr range (restored to original tight range to avoid false positives)
-        // Gold/yellow objects have HIGH V (>185) so max V=180 avoids them
-        // Colorful tiles have very HIGH saturation (extreme U or V values)
-        const skinU = (uavg >= 95 && uavg <= 145);  // Cb: tight range, avoids gold
-        const skinV = (vavg >= 128 && vavg <= 178);  // Cr: tight range, avoids extreme colors
-        const validBrightness = (yavg >= 50 && yavg <= 235);
-
-        if (skinU && skinV && validBrightness) score += 50;
-        else if (skinU && skinV) score += 25;          // skin color but extreme brightness
-        else if ((skinU || skinV) && validBrightness) score += 10;
-
-        // Moderate brightness (avoid blown-out whites and very dark regions)
-        if (yavg >= 80 && yavg <= 200) score += 20;
-        else if (yavg >= 50 && yavg < 80) score += 8;
-
-        // Edge/texture bonus — faces have texture, flat walls don't
-        if (ydif > 5 && ydif < 40) score += 15;
-        else if (ydif > 2) score += 5;
-
-        return { yavg, uavg, vavg, ydif, score };
-    } catch (e) {
-        return { yavg: 128, uavg: 128, vavg: 128, ydif: 0, score: 0 };
-    }
+    const fps = 1 / Math.max(0.1, intervalSecs);
+    const safeStart = Math.max(0, startTime);
+    const safeDur = Math.max(1, duration);
+    // Extract at 480px wide (FRAME_W) â€” consistent with ONNX input expectations
+    const cmd = `"${ffmpegPath}" -ss ${safeStart} -t ${safeDur} -i "${videoPath}" -vf "fps=${fps.toFixed(4)},scale=480:-2" -q:v 3 "${tempDir}/frame_%04d.jpg" -y`;
+    await execAsync(cmd, { timeout: 120000 });
+    const files = fs.readdirSync(tempDir).filter(f => f.endsWith('.jpg')).sort();
+    return files.map(f => path.join(tempDir, f));
 }
 
-/**
- * Fast single-call frame analysis: splits frame into N columns and analyzes all via one FFmpeg
- * Returns array of YUV stats per column. MUCH faster than N separate analyzeRegion calls.
- */
-async function analyzeFrameColumns(imagePath, numCols = 4) {
-    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
-    const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
-    try {
-        // Get dimensions first
-        const { stdout: pOut } = await execAsync(`"${ffprobePath}" -v quiet -print_format json -show_streams "${imagePath}"`, { timeout: 5000 });
-        const pData = JSON.parse(pOut);
-        const stream = pData.streams.find(s => s.codec_type === 'video');
-        if (!stream) return [];
-        const imgW = stream.width, imgH = stream.height;
-        const colW = Math.floor(imgW / numCols);
-
-        // Build filter_complex: split into N columns and get signalstats for each
-        // Each signalstats output goes to metadata logs in stderr
-        const splits = [];
-        for (let i = 0; i < numCols; i++) {
-            const x = i * colW;
-            const w = (i === numCols - 1) ? (imgW - x) : colW;
-            // Upper 2/3 of frame (lower third is table/desk, reduces noise)
-            const h = Math.floor(imgH * 0.67);
-            splits.push(`[s${i}]crop=${w}:${h}:${x}:0,signalstats=stat=tout+vrep+brng[cs${i}]`);
-        }
-
-        const inputSplit = `[0:v]split=${numCols}` + Array.from({ length: numCols }, (_, i) => `[s${i}]`).join('') + ';';
-        const filterStr = inputSplit + splits.join(';');
-        // Map all outputs to null sinks
-        const maps = Array.from({ length: numCols }, (_, i) => `-map [cs${i}]`).join(' ');
-        const cmd = `"${ffmpegPath}" -i "${imagePath}" -filter_complex "${filterStr}" ${maps} -f null -frames:v 1 - 2>&1`;
-
-        const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
-        const output = (stderr || '') + (stdout || '');
-
-        // Parse per-column stats — signalstats outputs sequentially per stream
-        // Each stream outputs: lavfi.signalstats.YAVG / UAVG / VAVG
-        const colResults = [];
-        const yMatches = [...output.matchAll(/YAVG[=:]\s*([\d.]+)/g)];
-        const uMatches = [...output.matchAll(/UAVG[=:]\s*([\d.]+)/g)];
-        const vMatches = [...output.matchAll(/VAVG[=:]\s*([\d.]+)/g)];
-
-        for (let i = 0; i < numCols; i++) {
-            const yavg = parseFloat((yMatches[i] || [])[1] || '128');
-            const uavg = parseFloat((uMatches[i] || [])[1] || '128');
-            const vavg = parseFloat((vMatches[i] || [])[1] || '128');
-            const skinU = (uavg >= 95 && uavg <= 150), skinV = (vavg >= 125 && vavg <= 180);
-            const valid = (yavg >= 50 && yavg <= 240);
-            let score = 0;
-            if (skinU && skinV && valid) score += 50;
-            else if (skinU || skinV) score += 15;
-            if (yavg >= 80 && yavg <= 200) score += 20; else if (yavg >= 50) score += 10;
-            colResults.push({ col: i, x: i * colW, w: colW, score, yavg, uavg, vavg });
-        }
-        return colResults;
-    } catch (e) {
-        console.warn('[FaceAnalysis] analyzeFrameColumns error:', e.message.substring(0, 80));
-        return [];
-    }
-}
-
-/**
- * Detect the primary face/person region in a frame using grid analysis.
- * Splits the frame into a grid, analyzes each cell, and finds the best candidate.
- * 
- * @param {string} imagePath - Path to frame image
- * @returns {{ x: number, y: number, w: number, h: number, confidence: number } | null}
- */
+// â”€â”€ Helper: simple YUV-based ROI fallback when ONNX fails â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Returns { x, y, w, h, confidence } or null
 async function detectROI(imagePath) {
-    const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
-
     try {
-        // Get image dimensions
-        const probeCmd = `"${ffprobePath}" -v quiet -print_format json -show_streams "${imagePath}"`;
-        const { stdout: probeOut } = await execAsync(probeCmd, { timeout: 5000 });
-        const probeData = JSON.parse(probeOut);
-        const stream = probeData.streams.find(s => s.codec_type === 'video');
-        if (!stream) return null;
-
-        const imgW = stream.width;
-        const imgH = stream.height;
-
-        const cellW = Math.floor(imgW / GRID_COLS);
-        const cellH = Math.floor(imgH / GRID_ROWS);
-
-        // Analyze each grid cell in parallel (max 12 cells = fast)
-        const regionPromises = [];
-        for (let row = 0; row < GRID_ROWS; row++) {
-            for (let col = 0; col < GRID_COLS; col++) {
-                const rx = col * cellW;
-                const ry = row * cellH;
-                const rw = (col === GRID_COLS - 1) ? imgW - rx : cellW;
-                const rh = (row === GRID_ROWS - 1) ? imgH - ry : cellH;
-
-                regionPromises.push(
-                    analyzeRegion(imagePath, rx, ry, rw, rh).then(result => ({
-                        ...result,
-                        col, row,
-                        cx: rx + rw / 2,  // center X
-                        cy: ry + rh / 2,  // center Y
-                        rx, ry, rw, rh
-                    }))
-                );
-            }
-        }
-
-        const regions = await Promise.all(regionPromises);
-
-        // Apply position bias: faces typically in upper 2/3 of frame
-        for (const r of regions) {
-            // Vertical bias: middle row (row 1) is most likely to have face/torso
-            if (r.row === 0) r.score += 8;    // Top: could be face
-            else if (r.row === 1) r.score += 12; // Middle: most likely face/body  
-            // Row 2 (bottom): no bonus — typically hands/desk/feet
-
-            // NO horizontal bias — people sit anywhere (left/center/right)
-            // The skin tone score itself should determine position
-        }
-
-        // Sort by score descending
-        regions.sort((a, b) => b.score - a.score);
-
-        const best = regions[0];
-
-        // Debug log top 3 regions
-        console.log(`[FaceTracker] Top regions:`);
-        regions.slice(0, 4).forEach(r => {
-            console.log(`  row=${r.row} col=${r.col} score=${r.score} Y=${r.yavg?.toFixed(1)} U=${r.uavg?.toFixed(1)} V=${r.vavg?.toFixed(1)} ydif=${r.ydif?.toFixed(1)}`);
-        });
-
-        if (best.score < 20) {
-            // No convincing face region found
-            console.log(`[FaceTracker] Low confidence: best score=${best.score} at (${best.col},${best.row})`);
-            // Fallback: center-biased upper region  
-            return {
-                x: imgW / 2,
-                y: imgH * 0.38,
-                w: Math.round(imgW * 0.4),
-                h: Math.round(imgH * 0.5),
-                confidence: 0.2
-            };
-        }
-
-        // Find cluster of high-scoring adjacent cells to get better center
-        const topRegions = regions.filter(r => r.score >= best.score * 0.6);
-        let weightedX = 0, weightedY = 0, totalScore = 0;
-        for (const r of topRegions) {
-            weightedX += r.cx * r.score;
-            weightedY += r.cy * r.score;
-            totalScore += r.score;
-        }
-
-        const faceX = weightedX / totalScore;
-        const faceY = weightedY / totalScore;
-        const confidence = Math.min(1.0, best.score / 80);
-
-        console.log(`[FaceTracker] Best region: score=${best.score} pos=(${Math.round(faceX)},${Math.round(faceY)}) confidence=${confidence.toFixed(2)} topCells=${topRegions.length}`);
-
-        return {
-            x: Math.round(faceX),
-            y: Math.round(faceY),
-            w: Math.round(imgW * 0.3),
-            h: Math.round(imgH * 0.4),
-            confidence
-        };
+        const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+        const { stdout } = await execAsync(
+            `"${ffprobePath}" -v quiet -print_format json -show_streams "${imagePath}"`,
+            { timeout: 5000 }
+        );
+        const data = JSON.parse(stdout);
+        const s = (data.streams || []).find(s => s.codec_type === 'video');
+        if (!s) return null;
+        // Return upper-center as best guess for face position (most common in talking-head video)
+        const w = s.width || 480;
+        const h = s.height || 270;
+        return { x: Math.round(w * 0.25), y: Math.round(h * 0.1), w: Math.round(w * 0.5), h: Math.round(h * 0.5), confidence: 0.1 };
     } catch (e) {
-        console.error(`[FaceTracker] detectROI error: ${e.message}`);
         return null;
+    }
+}
+
+// â”€â”€ Helper: analyze a region of an image for face likelihood â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Returns { score } where score > 40 = likely face region
+async function analyzeRegion(imagePath, rx, ry, rw, rh) {
+    try {
+        const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+        // Use signalstats to get average luminance/saturation â€” proxy for skin tone presence
+        const cmd = `"${ffmpegPath}" -i "${imagePath}" -vf "crop=${rw}:${rh}:${rx}:${ry},signalstats=stat=tout" -an -f null - 2>&1`;
+        const { stdout, stderr } = await execAsync(cmd, { timeout: 8000 }).catch(e => ({ stdout: '', stderr: e.stderr || '' }));
+        const output = stdout + stderr;
+        // Extract YAVG (luma average) â€” skin tone is typically 80-200
+        const yMatch = output.match(/YAVG:([\d.]+)/);
+        const yavg = yMatch ? parseFloat(yMatch[1]) : 128;
+        // Heuristic: luma in skin range boosts score
+        const skinScore = (yavg >= 80 && yavg <= 210) ? 35 : 0;
+        return { score: skinScore };
+    } catch (e) {
+        return { score: 0 };
+    }
+}
+
+// â”€â”€ Helper: analyze N vertical columns of a frame for face presence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+async function analyzeFrameColumns(imagePath, numCols) {
+    try {
+        const ffprobePath = process.env.FFPROBE_PATH || 'ffprobe';
+        const { stdout } = await execAsync(
+            `"${ffprobePath}" -v quiet -print_format json -show_streams "${imagePath}"`,
+            { timeout: 5000 }
+        );
+        const data = JSON.parse(stdout);
+        const s = (data.streams || []).find(s => s.codec_type === 'video');
+        if (!s) return [];
+        const imgW = s.width || 480;
+        const imgH = s.height || 270;
+        const cellW = Math.floor(imgW / numCols);
+
+        const results = await Promise.all(
+            Array.from({ length: numCols }, async (_, col) => {
+                const rx = col * cellW;
+                const rw = (col === numCols - 1) ? imgW - rx : cellW;
+                const r = await analyzeRegion(imagePath, rx, 0, rw, imgH);
+                return { col, x: rx, w: rw, score: r.score };
+            })
+        );
+        return results;
+    } catch (e) {
+        return [];
     }
 }
 
@@ -359,7 +172,7 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration, star
 
         console.log(`[FaceTracker] Analyzing ${frames.length} frames with ONNX face detection...`);
 
-        // Get source video dimensions (needed to scale ONNX results)
+        // Get source video dimensions (for final crop filter coordinates)
         const ffprobePath2 = process.env.FFPROBE_PATH || 'ffprobe';
         const probeCmd2 = `"${ffprobePath2}" -v quiet -print_format json -show_streams "${videoPath}"`;
         const { stdout: pOut2 } = await execAsync(probeCmd2, { timeout: 10000 });
@@ -368,69 +181,207 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration, star
         const srcWLocal = vStream2?.width || 640;
         const srcHLocal = vStream2?.height || 360;
 
-        // Detect face in each frame using ONNX UltraFace
+        // YuNet handles letterbox unprojection internally and returns coordinates
+        // in the original image space (srcW x srcH). We pass srcW/srcH so it can
+        // correctly unproject. Extracted frames are 480px wide but YuNet letterboxes
+        // to 640x640 Ã¢â‚¬â€ the FRAME_W/FRAME_H here is what detectFacesOnnx receives as srcW/srcH.
+        // For YUV fallback (detectROI), frames are 480px wide, so we still need scale factors.
+        const FRAME_W = 480;
+        const frameAR = srcHLocal / srcWLocal;
+        const FRAME_H = Math.round(FRAME_W * frameAR);
+        // Scale ratio for YUV fallback only: frame-space coords Ã¢â€ â€™ source video coords
+        const scaleX = srcWLocal / FRAME_W;
+        const scaleY = srcHLocal / FRAME_H;
+
+        // Detect face in each frame using ONNX YuNet
         const rawPositions = [];
         for (let i = 0; i < frames.length; i++) {
             let faces = [];
             try {
-                faces = await detectFacesOnnx(frames[i], srcWLocal, srcHLocal);
+                // YuNet: pass FRAME dimensions so it correctly unprojects letterbox coords.
+                // Returned coordinates are already in FRAME space (0..FRAME_W, 0..FRAME_H).
+                faces = await detectFacesOnnx(frames[i], FRAME_W, FRAME_H);
             } catch (onnxErr) {
-                console.warn(`[FaceTracker] ONNX error frame ${i}: ${onnxErr.message} — trying YUV fallback`);
+                console.warn(`[FaceTracker] ONNX error frame ${i}: ${onnxErr.message} Ã¢â‚¬â€ trying YUV fallback`);
                 const region = await detectROI(frames[i]);
-                if (region && region.confidence > 0.15) faces = [region];
+                if (region && region.confidence > 0.15) {
+                    // detectROI returns coords in frame space Ã¢â‚¬â€ scale to source video space
+                    faces = [{
+                        x: Math.round(region.x * scaleX),
+                        y: Math.round(region.y * scaleY),
+                        w: Math.round((region.w || 60) * scaleX),
+                        h: Math.round((region.h || 60) * scaleY),
+                        confidence: region.confidence
+                    }];
+                }
             }
 
             if (faces.length > 0) {
-                // Use the face with highest confidence
-                const best = faces.sort((a, b) => b.confidence - a.confidence)[0];
-                // Face center = center of bounding box
-                rawPositions.push({
-                    time: i * SAMPLE_RATE,
-                    x: best.x + best.w / 2,   // center X
-                    y: best.y + best.h / 2,   // center Y
-                    w: best.w,
-                    h: best.h,
-                    confidence: best.confidence
+                // Filter out false positives:
+                // - Bounding box too large relative to frame (>40% of frame area = not a real face)
+                // - Suspiciously low confidence (< 0.55) when high-conf alternatives exist
+                const frameArea = FRAME_W * FRAME_H; // 480*270 = 129600
+                const maxFaceAreaRatio = 0.40; // max 40% of frame = real face limit
+                const hasHighConf = faces.some(f => f.confidence >= 0.65);
+
+                const validFaces = faces.filter(f => {
+                    const faceArea = f.w * f.h;
+                    const areaRatio = faceArea / frameArea;
+                    if (areaRatio > maxFaceAreaRatio) {
+                        console.log(`[FaceTracker] Frame ${i}: skip large bbox ${f.w}x${f.h} (${(areaRatio * 100).toFixed(0)}% frame) conf=${f.confidence.toFixed(2)}`);
+                        return false;
+                    }
+                    if (hasHighConf && f.confidence < 0.55) {
+                        console.log(`[FaceTracker] Frame ${i}: skip low-conf face conf=${f.confidence.toFixed(2)}`);
+                        return false;
+                    }
+                    return true;
                 });
-                console.log(`[FaceTracker] Frame ${i}: face at center=(${Math.round(best.x + best.w / 2)},${Math.round(best.y + best.h / 2)}) conf=${best.confidence.toFixed(2)}`);
+
+                if (validFaces.length > 0) {
+                    // Store ALL valid detected faces for this frame (not just best)
+                    // We'll select the consistent subject in phase 2
+                    const frameFaces = validFaces.map(f => ({
+                        time: i * SAMPLE_RATE,
+                        x: Math.round((f.x + f.w / 2) * scaleX),
+                        y: Math.round((f.y + f.h / 2) * scaleY),
+                        w: Math.round(f.w * scaleX),
+                        h: Math.round(f.h * scaleY),
+                        confidence: f.confidence
+                    }));
+                    rawPositions.push(...frameFaces);
+                    const best = frameFaces.reduce((a, b) => a.confidence > b.confidence ? a : b);
+                    console.log(`[FaceTracker] Frame ${i}: ${validFaces.length} valid (of ${faces.length}), best=(${best.x},${best.y}) conf=${best.confidence.toFixed(2)}`);
+                } else {
+                    console.log(`[FaceTracker] Frame ${i}: all ${faces.length} detection(s) filtered (false positive)`);
+                }
             } else {
-                // ONNX found no face — try YUV fallback
-                console.log(`[FaceTracker] Frame ${i}: ONNX no face → YUV fallback`);
+                // ONNX found no face Ã¢â‚¬â€ try YUV fallback
+                console.log(`[FaceTracker] Frame ${i}: ONNX no face Ã¢â€ â€™ YUV fallback`);
                 const region = await detectROI(frames[i]);
                 if (region && region.confidence > 0.15) {
-                    rawPositions.push({ time: i * SAMPLE_RATE, ...region });
+                    rawPositions.push({
+                        time: i * SAMPLE_RATE,
+                        x: Math.round(region.x * scaleX),
+                        y: Math.round(region.y * scaleY),
+                        w: Math.round((region.w || 80) * scaleX),
+                        h: Math.round((region.h || 80) * scaleY),
+                        confidence: region.confidence
+                    });
                 } else {
                     console.log(`[FaceTracker] Frame ${i}: skipped (both ONNX and YUV failed)`);
                 }
             }
         }
 
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Phase 2: Find the most CONSISTENT subject to track Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+        // When multiple faces are detected (e.g. 2-person interview), rawPositions
+        // has multiple entries per frame. We need to identify ONE subject and track
+        // that person throughout the clip.
+        // Strategy: cluster all detected centers by X position, pick the cluster
+        // (= person) whose center is closest to the median Ã¢â‚¬â€ avoiding the host
+        // who often sits at center/slightly-left while guest is at the right.
+
+        // First, find the median X of all detections to find the "main speaker zone"
+        const allX = rawPositions.map(p => p.x).sort((a, b) => a - b);
+        const medianX = allX[Math.floor(allX.length / 2)];
+        const medianY = rawPositions.map(p => p.y).sort((a, b) => a - b)[Math.floor(rawPositions.length / 2)];
+        console.log(`[FaceTracker] Median face center: (${medianX}, ${medianY}) across ${rawPositions.length} total detections`);
+
+        // For each frame-time, keep only the face closest to the median position
+        const frameGroups = {};
+        for (const p of rawPositions) {
+            const timeKey = p.time;
+            if (!frameGroups[timeKey]) frameGroups[timeKey] = [];
+            frameGroups[timeKey].push(p);
+        }
+
+        const consistentPositions = [];
+        for (const [timeKey, group] of Object.entries(frameGroups)) {
+            // Pick face closest to median X/Y (the most consistently appearing subject)
+            const best = group.reduce((a, b) => {
+                const distA = Math.abs(a.x - medianX) + Math.abs(a.y - medianY) * 0.5;
+                const distB = Math.abs(b.x - medianX) + Math.abs(b.y - medianY) * 0.5;
+                return distA <= distB ? a : b;
+            });
+            consistentPositions.push(best);
+            console.log(`[FaceTracker] t=${timeKey}s Ã¢â€ â€™ selected face src=(${best.x},${best.y}) [${Math.round(best.x / srcWLocal * 100)}%L] conf=${best.confidence.toFixed(2)} (from ${group.length} candidates)`);
+        }
+        consistentPositions.sort((a, b) => a.time - b.time);
+
+        // Replace rawPositions with the per-frame-consistent selection
+        rawPositions.length = 0;
+        rawPositions.push(...consistentPositions);
+
+        // Second-pass retry: for frames that got no detection, try with LOWER threshold
+        // This helps when people are partially visible, far from camera, or at frame edge
+        const missedFrameIndices = [];
+        for (let i = 0; i < frames.length; i++) {
+            if (!rawPositions.find(p => p.time === i * SAMPLE_RATE)) {
+                missedFrameIndices.push(i);
+            }
+        }
+        if (missedFrameIndices.length > 0) {
+            console.log(`[FaceTracker] Retry ${missedFrameIndices.length} missed frames with lower threshold (0.35)...`);
+            for (const i of missedFrameIndices) {
+                try {
+                    const facesLow = await detectFacesOnnx(frames[i], FRAME_W, FRAME_H, 0.35);
+                    if (facesLow.length > 0) {
+                        const best = facesLow.sort((a, b) => b.confidence - a.confidence)[0];
+                        const srcCenterX = Math.round((best.x + best.w / 2) * scaleX);
+                        const srcCenterY = Math.round((best.y + best.h / 2) * scaleY);
+                        rawPositions.push({
+                            time: i * SAMPLE_RATE,
+                            x: srcCenterX,
+                            y: srcCenterY,
+                            w: Math.round(best.w * scaleX),
+                            h: Math.round(best.h * scaleY),
+                            confidence: best.confidence * 0.6 // lower weight for low-confidence
+                        });
+                        console.log(`[FaceTracker] Frame ${i} retry: found face at src=(${srcCenterX},${srcCenterY}) conf=${best.confidence.toFixed(2)}`);
+                    }
+                } catch (e) { /* ignore retry errors */ }
+            }
+            rawPositions.sort((a, b) => a.time - b.time);
+        }
+
         console.log(`[FaceTracker] Detected faces in ${rawPositions.length}/${frames.length} frames`);
 
-        // Fill gaps: if a frame has no detection, interpolate from neighbors
+        // Fill gaps: if a frame has no detection, interpolate between before/after neighbors
         const allPositions = [];
         for (let i = 0; i < frames.length; i++) {
             const existing = rawPositions.find(p => p.time === i * SAMPLE_RATE);
             if (existing) {
                 allPositions.push(existing);
             } else if (rawPositions.length > 0) {
-                // Interpolate from nearest detected positions
+                // Find nearest detected positions before and after this frame
                 let before = null, after = null;
                 for (const p of rawPositions) {
                     if (p.time <= i * SAMPLE_RATE) before = p;
                     if (p.time > i * SAMPLE_RATE && !after) after = p;
                 }
-                const ref = before || after;
-                if (ref) {
-                    allPositions.push({
+                let interp;
+                if (before && after) {
+                    // Linear interpolation between before and after
+                    const t = (i * SAMPLE_RATE - before.time) / (after.time - before.time);
+                    interp = {
                         time: i * SAMPLE_RATE,
-                        x: ref.x,
-                        y: ref.y,
-                        w: ref.w,
-                        h: ref.h,
-                        confidence: ref.confidence * 0.5 // lower confidence for interpolated
-                    });
+                        x: Math.round(before.x + (after.x - before.x) * t),
+                        y: Math.round(before.y + (after.y - before.y) * t),
+                        w: Math.round(before.w + (after.w - before.w) * t),
+                        h: Math.round(before.h + (after.h - before.h) * t),
+                        confidence: Math.min(before.confidence, after.confidence) * 0.5
+                    };
+                } else {
+                    // Only one side available Ã¢â‚¬â€ use nearest
+                    const ref = before || after;
+                    interp = {
+                        time: i * SAMPLE_RATE,
+                        x: ref.x, y: ref.y, w: ref.w, h: ref.h,
+                        confidence: ref.confidence * 0.4
+                    };
                 }
+                allPositions.push(interp);
             }
         }
 
@@ -453,11 +404,11 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration, star
 
         let cropW, cropH;
         if (targetAR < srcW / srcH) {
-            // Target is taller (e.g., 9:16 from 16:9) — crop width
+            // Target is taller (e.g., 9:16 from 16:9) Ã¢â‚¬â€ crop width
             cropH = srcH;
             cropW = Math.round(srcH * targetAR);
         } else {
-            // Target is wider — crop height
+            // Target is wider Ã¢â‚¬â€ crop height
             cropW = srcW;
             cropH = Math.round(srcW / targetAR);
         }
@@ -508,7 +459,7 @@ async function generateFaceTrackCrop(videoPath, targetW, targetH, duration, star
 
     } finally {
         // Cleanup temp frames
-        try { fs.removeSync(tempDir); } catch (e) { /* ignore cleanup errors */ }
+        try { removeTempDir(tempDir); } catch (e) { /* ignore cleanup errors */ }
     }
 }
 
@@ -712,14 +663,14 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
         const probeData = JSON.parse(probeOut);
         const videoStream = probeData.streams.find(s => s.codec_type === 'video');
         if (!videoStream) {
-            console.log('[Podcast] Cannot probe video → center crop fallback');
+            console.log('[Podcast] Cannot probe video Ã¢â€ â€™ center crop fallback');
             return { mode: 'center', cropFilter: null, faceCount: 0 };
         }
         const srcW = videoStream.width;
         const srcH = videoStream.height;
         console.log(`[Podcast] Source: ${srcW}x${srcH}`);
 
-        // ─── Helper: build split screen filter ─────────────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Helper: build split screen filter Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         const buildSplitFilter = (leftCenterX, rightCenterX) => {
             const sepH = 4;
             const halfH = Math.floor((targetH - sepH) / 2);
@@ -738,12 +689,12 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
                 cropW = cropW % 2 === 0 ? cropW : cropW - 1;
                 cropH = cropH % 2 === 0 ? cropH : cropH - 1;
                 const cropX = clamp(Math.round(centerX - cropW / 2), 0, srcW - cropW);
-                console.log(`[Podcast] ${label}: centerX=${Math.round(centerX)} → crop=${cropW}x${cropH}@${cropX},0`);
+                console.log(`[Podcast] ${label}: centerX=${Math.round(centerX)} Ã¢â€ â€™ crop=${cropW}x${cropH}@${cropX},0`);
                 return { cropW, cropH, cropX };
             };
 
-            const lc = buildPanelCrop(leftCenterX, 'LEFT→top');
-            const rc = buildPanelCrop(rightCenterX, 'RIGHT→bottom');
+            const lc = buildPanelCrop(leftCenterX, 'LEFTÃ¢â€ â€™top');
+            const rc = buildPanelCrop(rightCenterX, 'RIGHTÃ¢â€ â€™bottom');
 
             return [
                 `[0:v]split=3[psva][psvb][psvsep]`,
@@ -754,14 +705,14 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
             ].join(';');
         };
 
-        // ─── Step 1: Face detection voting on sample frames ─────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Step 1: Face detection voting on sample frames Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         let votes1 = 0, votes2 = 0;
         let bestSingleFace = null;
         let best2FaceLeft = null, best2FaceRight = null;
 
         try {
             // Sample ONLY a few frames from the start of the clip for speaker detection.
-            // Cap at 8 seconds max sampling — just enough to determine 1 vs 2 speakers.
+            // Cap at 8 seconds max sampling Ã¢â‚¬â€ just enough to determine 1 vs 2 speakers.
             const sampleDuration = Math.min(duration, 8);
             const frames = await extractSampleFrames(videoPath, tempDir, 0.5, startTime, sampleDuration);
 
@@ -823,13 +774,13 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
             console.log('[Podcast] Face detection error:', e.message.substring(0, 100));
         }
 
-        console.log(`[Podcast] Final vote → 1-person: ${votes1}, 2-people: ${votes2}`);
+        console.log(`[Podcast] Final vote Ã¢â€ â€™ 1-person: ${votes1}, 2-people: ${votes2}`);
 
-        // ─── Step 2: Decide mode ────────────────────────────────────────────────
+        // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Step 2: Decide mode Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-        // ── CASE A: 2 speakers clearly detected ──
+        // Ã¢â€â‚¬Ã¢â€â‚¬ CASE A: 2 speakers clearly detected Ã¢â€â‚¬Ã¢â€â‚¬
         if (votes2 > votes1 && best2FaceLeft && best2FaceRight) {
-            console.log(`[Podcast] → MODE: SPLIT SCREEN (2 speakers, face-centered)`);
+            console.log(`[Podcast] Ã¢â€ â€™ MODE: SPLIT SCREEN (2 speakers, face-centered)`);
             return {
                 mode: 'split',
                 cropFilter: buildSplitFilter(best2FaceLeft.srcX, best2FaceRight.srcX),
@@ -837,9 +788,9 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
             };
         }
 
-        // ── CASE B: 1 speaker detected → static face-centered crop (no dynamic tracking for perf) ──
+        // Ã¢â€â‚¬Ã¢â€â‚¬ CASE B: 1 speaker detected Ã¢â€ â€™ static face-centered crop (no dynamic tracking for perf) Ã¢â€â‚¬Ã¢â€â‚¬
         if (votes1 > 0 && bestSingleFace) {
-            console.log(`[Podcast] → MODE: FACE TRACKING (1 speaker) — static centered`);
+            console.log(`[Podcast] Ã¢â€ â€™ MODE: FACE TRACKING (1 speaker) Ã¢â‚¬â€ static centered`);
             // Use static center crop around detected face (avoids re-extracting all frames).
             // Dynamic face tracking (generateFaceTrackCrop) is too slow for long AV1 videos.
             const tAR = targetW / targetH;
@@ -848,7 +799,7 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
             if (cropW > srcW) { cropW = srcW; cropH = Math.round(srcW / tAR); }
             cropW = cropW % 2 === 0 ? cropW : cropW - 1;
             cropH = cropH % 2 === 0 ? cropH : cropH - 1;
-            // srcX from bestSingleFace is in the scaled-down (480px) frame — scale back up
+            // srcX from bestSingleFace is in the scaled-down (480px) frame Ã¢â‚¬â€ scale back up
             const scaleRatioX = srcW / 480;
             const faceX = Math.round((bestSingleFace.srcX || srcW / 2) * scaleRatioX);
             const cropX = clamp(Math.round(faceX - cropW / 2), 0, srcW - cropW);
@@ -861,10 +812,10 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
             };
         }
 
-        // ── CASE C: 0 faces detected → podcast fallback = geometric 50/50 split ──
+        // Ã¢â€â‚¬Ã¢â€â‚¬ CASE C: 0 faces detected Ã¢â€ â€™ podcast fallback = geometric 50/50 split Ã¢â€â‚¬Ã¢â€â‚¬
         // In podcast mode, 0 detected faces usually means detection failed,
         // NOT that there's no one in frame. Geometric split is better than center crop.
-        console.log(`[Podcast] → MODE: GEOMETRIC SPLIT (0 faces, assuming 2-person podcast setup)`);
+        console.log(`[Podcast] Ã¢â€ â€™ MODE: GEOMETRIC SPLIT (0 faces, assuming 2-person podcast setup)`);
         return {
             mode: 'split',
             cropFilter: buildSplitFilter(srcW * 0.25, srcW * 0.75),
@@ -872,7 +823,7 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
         };
 
     } finally {
-        try { fs.removeSync(tempDir); } catch (e) { }
+        try { removeTempDir(tempDir); } catch (e) { }
     }
 }
 
@@ -880,13 +831,8 @@ async function generatePodcastCrop(videoPath, targetW, targetH, duration, startT
 
 
 
-
-
 module.exports = {
-    extractSampleFrames,
-    detectROI,
-    analyzeRegion,
     generateFaceTrackCrop,
     generatePodcastCrop,
-    smoothPositions
 };
+

@@ -449,38 +449,113 @@ bot.start(async (ctx) => {
     const hasLicense = myPaidOrders.length > 0;
 
     const text =
-        `🤖 <b>ClipperSkuy — License Store</b>
+        `╔══════════════════════╗
+     ⚡ <b>CLIPPERSKUY</b> ⚡
+     <i>AI Video Clip Generator</i>
+╚══════════════════════╝
 
-Halo <b>${name}</b>! 👋
-Selamat datang di toko lisensi resmi ClipperSkuy.
+Hai <b>${name}</b>! 👋🏻
 
-<b>⚡ ClipperSkuy</b> adalah AI Video Clip Generator yang mengubah video panjang jadi konten viral untuk TikTok, Reels & YouTube Shorts — 100% offline di PC kamu.
+Ubah video panjang jadi konten <b>viral</b> untuk
+TikTok · Reels · YouTube Shorts
+<i>100% offline di PC kamu</i>
 
-━━━━━━━━━━━━━━━━━━
-📦 <b>Produk Tersedia:</b>
+┌─── 💎 <b>PAKET TERSEDIA</b> ───┐
+│                                                          │
+│  ⚡ <b>Pro</b>  ·  mulai <b>Rp 69rb</b>/bln           │
+│  🎯 Face Tracking · 🔊 Audio AI          │
+│  📺 1080p · ∞ Unlimited Export           │
+│                                                          │
+│  👑 <b>Enterprise</b>  ·  Hubungi Admin     │
+│  🔌 API · 🏷 Branding · ♾ Lifetime       │
+│                                                          │
+└──────────────────────┘
 
-⚡ <b>Pro</b> — Rp69rb/bulan
-    Face Tracking, Audio Enhancement, 1080p, Unlimited
+${hasLicense ? '✅ <b>License aktif terdeteksi!</b>' : '👇 <i>Pilih menu untuk mulai:</i>'}`;
 
-👑 <b>Enterprise</b> — Hubungi Admin
-    Semua fitur Pro + API + Branding + Lifetime
-━━━━━━━━━━━━━━━━━━
-${hasLicense ? '✅ Kamu sudah punya license aktif!' : '👆 Pilih menu di bawah untuk mulai:'}`;
+    const hasTrial = db.users[userId]?.trial_used;
+    const buttons = [
+        [Markup.button.callback('🛒  Beli License', 'catalog'),
+        Markup.button.callback('⬇️  Download', 'download_action')],
+        [Markup.button.callback('🔑  License Saya', 'my_license'),
+        Markup.button.callback('📋  Riwayat', 'my_orders')],
+        [Markup.button.callback('🎁  Referral', 'referral_info'),
+        Markup.button.callback('❓  FAQ', 'help')],
+        [Markup.button.callback('🎫  Tiket Support', 'open_ticket'),
+        Markup.button.callback('💬  Admin', 'contact')],
+    ];
+    // Show trial button for users who haven't used it and don't have a license
+    if (!hasTrial && !hasLicense) {
+        buttons.splice(1, 0, [Markup.button.callback('🎮  Coba GRATIS 1 Hari', 'start_trial')]);
+    }
+    await ctx.replyWithHTML(text, Markup.inlineKeyboard(buttons));
+});
 
-    await ctx.replyWithHTML(text, Markup.inlineKeyboard([
-        // Row 1 — Utama
-        [Markup.button.callback('🛒 Beli License', 'catalog'),
-        Markup.button.callback('⬇️ Download App', 'download_action')],
-        // Row 2 — License saya
-        [Markup.button.callback('🔑 Cek License Saya', 'my_license'),
-        Markup.button.callback('📋 Riwayat Beli', 'my_orders')],
-        // Row 3 — Referral & Promo
-        [Markup.button.callback('🎁 Referral & Diskon', 'referral_info'),
-        Markup.button.callback('❓ Bantuan / FAQ', 'help')],
-        // Row 4 — Support
-        [Markup.button.callback('🎫 Buat Tiket Support', 'open_ticket'),
-        Markup.button.callback('📞 Hubungi Admin', 'contact')],
-    ]));
+// ============ TRIAL GRATIS 1 HARI ============
+bot.action('start_trial', async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = String(ctx.from.id);
+    const name = ctx.from.first_name || 'User';
+
+    // Cek apakah sudah pernah trial
+    if (!db.users[userId]) db.users[userId] = { name, username: ctx.from.username || '', joined: new Date().toISOString() };
+    if (db.users[userId].trial_used) {
+        return ctx.replyWithHTML(
+            '❌ <b>Kamu sudah pernah menggunakan trial.</b>\n\nSetiap akun hanya bisa trial 1x.\nBeli license untuk akses penuh!',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🛒 Beli License', 'catalog')],
+                [Markup.button.callback('◀️ Kembali', 'back_start')]
+            ])
+        );
+    }
+
+    // Generate trial key (1 hari)
+    try {
+        const trialKey = await generateLicenseKey('pro', 1);
+        if (!trialKey) {
+            return ctx.replyWithHTML('⚠️ Gagal generate trial key. Coba lagi nanti atau hubungi admin.');
+        }
+
+        // Mark as used
+        db.users[userId].trial_used = true;
+        db.users[userId].trial_key = trialKey;
+        db.users[userId].trial_at = new Date().toISOString();
+        saveDB(db);
+
+        await ctx.replyWithHTML(
+            `\n🎮 <b>TRIAL GRATIS AKTIF!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `Selamat <b>${name}</b>! 🎉\nKamu dapat akses ClipperSkuy Pro selama <b>1 hari</b>.\n\n` +
+            `┌──────────────────────┐\n` +
+            `│                                                            │\n` +
+            `│  🔑  <b>TRIAL LICENSE KEY</b>                    │\n` +
+            `│                                                            │\n` +
+            `│  <code>${trialKey}</code>                       │\n` +
+            `│                                                            │\n` +
+            `│  📦  ClipperSkuy Pro                            │\n` +
+            `│  ⏱  1 Hari (24 jam)                              │\n` +
+            `│  🎯  Face Tracking + Audio AI           │\n` +
+            `│                                                            │\n` +
+            `└──────────────────────┘\n\n` +
+            `📋 <b>Cara Aktivasi:</b>\n` +
+            `  1 ▸  Buka ClipperSkuy di PC\n` +
+            `  2 ▸  <b>Settings</b>  →  <b>License</b>\n` +
+            `  3 ▸  Paste key di atas\n` +
+            `  4 ▸  Klik <b>"Activate"</b>\n\n` +
+            `⚠️  <i>Trial hanya 1x per akun.\nSuka? Beli license untuk akses penuh!</i>`,
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🛒  Upgrade ke Pro', 'catalog')],
+                [Markup.button.callback('⬇️  Download App', 'download_action')],
+                [Markup.button.callback('◀️  Menu Utama', 'back_start')]
+            ])
+        );
+
+        // Log ke admin
+        await sendLog(bot, `🎮 <b>TRIAL BARU</b>\n👤 ${name} (@${ctx.from.username || '-'}) [<code>${userId}</code>]\n🔑 Key: <code>${trialKey}</code>`);
+
+    } catch (e) {
+        console.error('Trial error:', e.message);
+        await ctx.replyWithHTML('⚠️ Terjadi kesalahan. Coba lagi nanti.');
+    }
 });
 
 // Quick action: cek license dari start menu
@@ -565,21 +640,41 @@ bot.action('referral_info', async (ctx) => {
         saveDB(db);
     }
 
+    // Progress bar referral
+    const MILESTONES = [3, 5, 10];
+    const nextMilestone = MILESTONES.find(m => m > referralCount) || 10;
+    const progress = Math.min(referralCount, nextMilestone);
+    const progressBar = '█'.repeat(Math.floor((progress / nextMilestone) * 8)) + '░'.repeat(8 - Math.floor((progress / nextMilestone) * 8));
+    let rewardText = '';
+    if (referralCount < 3) rewardText = `🎯 Next: <b>3 referral</b> → Diskon 15%`;
+    else if (referralCount < 5) rewardText = `🎯 Next: <b>5 referral</b> → Diskon 25%`;
+    else if (referralCount < 10) rewardText = `🎯 Next: <b>10 referral</b> → Free License!`;
+    else rewardText = `🏆 <b>Semua reward sudah diraih!</b>`;
+
     await ctx.replyWithHTML(
-        `🎁 <b>Referral & Diskon</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `<b>🎁 Kode Referral Kamu:</b>\n` +
-        `<code>${code}</code>\n\n` +
-        `<b>📲 Cara Share ke Teman:</b>\n` +
-        `Kirim pesan ini ke teman kamu:\n` +
+        `\n🎁 <b>REFERRAL & DISKON</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `┌──────────────────┐\n` +
+        `│  🎟  <b>Kode Referral Kamu:</b>              │\n` +
+        `│  <code>${code}</code>                                       │\n` +
+        `└──────────────────┘\n\n` +
+        `📲 <b>Cara Share ke Teman:</b>\n` +
+        `Kirim pesan ini:\n\n` +
         `<i>"Beli ClipperSkuy pakai kode <code>${code}</code>\ndapet diskon 10%! Beli di @Skuy_bot"</i>\n\n` +
-        `<b>✅ Cara Teman Pakai Kode:</b>\n` +
-        `1️⃣ Buka bot → ketik /start\n` +
-        `2️⃣ Ketik: <code>/promo ${code}</code>\n` +
-        `3️⃣ Pilih produk & bayar → diskon 10% otomatis!\n\n` +
-        `📊 Total referral berhasil: <b>${referralCount}</b>`,
+        `┌─── 🏅 <b>REWARD KAMU</b> ───┐\n` +
+        `│                                                            │\n` +
+        `│  📊 Referral: <b>${referralCount}</b>/${nextMilestone}              │\n` +
+        `│  ${progressBar}                            │\n` +
+        `│                                                            │\n` +
+        `│  3 ref → 🎁 Diskon 15%  ${referralCount >= 3 ? '✅' : '⬜'}       │\n` +
+        `│  5 ref → 🎁 Diskon 25%  ${referralCount >= 5 ? '✅' : '⬜'}       │\n` +
+        `│  10 ref → 🔑 Free License ${referralCount >= 10 ? '✅' : '⬜'}  │\n` +
+        `│                                                            │\n` +
+        `│  ${rewardText}                            │\n` +
+        `│                                                            │\n` +
+        `└──────────────────────┘`,
         Markup.inlineKeyboard([
-            [Markup.button.callback('🛒 Beli Sekarang', 'catalog')],
-            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            [Markup.button.callback('🛒  Beli Sekarang', 'catalog')],
+            [Markup.button.callback('◀️  Kembali', 'back_start')]
         ])
     );
 });
@@ -588,16 +683,19 @@ bot.action('referral_info', async (ctx) => {
 bot.action('open_ticket', async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.replyWithHTML(
-        `🎫 <b>Buat Tiket Support</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `Ketik pesan tiket kamu dengan format:\n\n` +
+        `\n🎫 <b>TIKET SUPPORT</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `Ketik pesan tiket kamu:\n\n` +
         `<code>/tiket PERTANYAAN_KAMU</code>\n\n` +
-        `Contoh:\n` +
-        `<code>/tiket License saya tidak bisa diaktivasi</code>\n` +
-        `<code>/tiket Saya sudah bayar tapi key belum datang</code>\n\n` +
-        `⏱ Admin akan membalas dalam 1×24 jam.`,
+        `┌─── 💡 <b>CONTOH</b> ───┐\n` +
+        `│                                                             │\n` +
+        `│  <code>/tiket License tidak bisa aktif</code>     │\n` +
+        `│  <code>/tiket Sudah bayar, key belum datang</code>│\n` +
+        `│                                                             │\n` +
+        `└───────────────────────┘\n\n` +
+        `⏱  <i>Admin akan membalas dalam 1×24 jam</i>`,
         Markup.inlineKeyboard([
-            [Markup.button.callback('📞 Hubungi Admin Langsung', 'contact')],
-            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            [Markup.button.callback('💬  Hubungi Admin Langsung', 'contact')],
+            [Markup.button.callback('◀️  Kembali', 'back_start')]
         ])
     );
 });
@@ -607,28 +705,34 @@ bot.action('open_ticket', async (ctx) => {
 bot.action('catalog', async (ctx) => {
     await ctx.answerCbQuery();
     const text = `
-🛒 <b>KATALOG PRODUK</b>
-━━━━━━━━━━━━━━━━━━
+🛍 <b>KATALOG PRODUK</b>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 
-Pilih paket yang kamu mau:
+Pilih tier yang sesuai kebutuhan kamu:
 
-⚡ <b>ClipperSkuy Pro</b>
-AI Video Clip Generator untuk kreator serius.
-Face Tracking, Audio Enhancement, 1080p, Unlimited.
+┌─── ⚡ <b>PRO</b> ───┐
+│  Untuk kreator serius                │
+│  🎯 Face Tracking AI                 │
+│  🔊 Audio Enhancement              │
+│  📺 1080p · ∞ Unlimited              │
+│  ⚡ GPU Acceleration                 │
+└────────────────┘
 
-👑 <b>ClipperSkuy Enterprise</b>
-Untuk agensi & tim produksi.
-Semua fitur Pro + API + Custom Branding.
+┌─── 👑 <b>ENTERPRISE</b> ───┐
+│  Untuk agensi & tim produksi     │
+│  ✦ Semua fitur Pro                     │
+│  🔌 API · 🏷 Custom Branding     │
+│  ♾ Lifetime · 🛡 Priority Support │
+└─────────────────────┘
 
-━━━━━━━━━━━━━━━━━━
-Ketuk tier untuk lihat paket durasi:`;
+<i>Ketuk untuk lihat paket & harga:</i>`;
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback('⚡ Pro Plans', 'tier_pro')],
-            [Markup.button.callback('👑 Enterprise Plans', 'tier_enterprise')],
-            [Markup.button.callback('⬅️ Kembali', 'back_start')]
+            [Markup.button.callback('⚡  Lihat Pro Plans', 'tier_pro')],
+            [Markup.button.callback('👑  Lihat Enterprise', 'tier_enterprise')],
+            [Markup.button.callback('◀️  Kembali', 'back_start')]
         ])
     });
 });
@@ -655,29 +759,33 @@ bot.action('tier_pro', async (ctx) => {
     const p365 = PRODUCTS.pro_365;
 
     const text = `
-⚡ <b>ClipperSkuy Pro Plans</b>
-━━━━━━━━━━━━━━━━━━
+⚡ <b>CLIPPERSKUY PRO</b>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 
 ${p30.features.join('\n')}
 
-━━━━━━━━━━━━━━━━━━
+┌─── 💰 <b>PILIH DURASI</b> ───┐
+│                                                │
+│  1️⃣  <b>30 Hari</b>                            │
+│      <s>${formatPrice(p30.originalPrice)}</s>  →  <b>${formatPrice(p30.price)}</b>              │
+│                                                │
+│  2️⃣  <b>90 Hari</b>  ${p90.badge || ''}                   │
+│      <s>${formatPrice(p90.originalPrice)}</s>  →  <b>${formatPrice(p90.price)}</b>            │
+│                                                │
+│  3️⃣  <b>365 Hari</b>  ${p365.badge || ''}                 │
+│      <s>${formatPrice(p365.originalPrice)}</s>  →  <b>${formatPrice(p365.price)}</b>          │
+│                                                │
+└────────────────────┘
 
-💰 <b>Pilih Durasi:</b>
-
-1️⃣ <b>30 Hari</b> — <s>${formatPrice(p30.originalPrice)}</s> ➜ <b>${formatPrice(p30.price)}</b>
-2️⃣ <b>90 Hari</b> — <s>${formatPrice(p90.originalPrice)}</s> ➜ <b>${formatPrice(p90.price)}</b> ${p90.badge || ''}
-3️⃣ <b>365 Hari</b> — <s>${formatPrice(p365.originalPrice)}</s> ➜ <b>${formatPrice(p365.price)}</b> ${p365.badge || ''}
-
-━━━━━━━━━━━━━━━━━━
-🔑 License key dikirim otomatis setelah pembayaran.`;
+🔑 <i>License key dikirim otomatis setelah bayar</i>`;
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback(`🛒 30 Hari — ${formatPrice(p30.price)}`, 'buy_pro_30')],
-            [Markup.button.callback(`🛒 90 Hari — ${formatPrice(p90.price)}`, 'buy_pro_90')],
-            [Markup.button.callback(`🛒 365 Hari — ${formatPrice(p365.price)}`, 'buy_pro_365')],
-            [Markup.button.callback('⬅️ Kembali', 'catalog')]
+            [Markup.button.callback(`⚡ 30 Hari — ${formatPrice(p30.price)}`, 'buy_pro_30')],
+            [Markup.button.callback(`💰 90 Hari — ${formatPrice(p90.price)}`, 'buy_pro_90')],
+            [Markup.button.callback(`🔥 365 Hari — ${formatPrice(p365.price)}`, 'buy_pro_365')],
+            [Markup.button.callback('◀️  Kembali', 'catalog')]
         ])
     });
 });
@@ -687,29 +795,32 @@ bot.action('tier_enterprise', async (ctx) => {
     await ctx.answerCbQuery();
 
     const text = `
-👑 <b>ClipperSkuy Enterprise</b>
-━━━━━━━━━━━━━━━━━━
+👑 <b>CLIPPERSKUY ENTERPRISE</b>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 
-✅ Semua fitur Pro
-✅ API Access
-✅ Custom Branding
-✅ Multi-device license
-✅ White-label ready
-✅ Priority Support
-✅ Early access features
+┌─── ✦ <b>FITUR</b> ───┐
+│                                              │
+│  ✅ Semua fitur Pro                      │
+│  🔌 API Access                             │
+│  🏷 Custom Branding                     │
+│  📱 Multi-device License              │
+│  🏢 White-label Ready                 │
+│  🛡 Priority Support                     │
+│  🚀 Early Access Features            │
+│                                              │
+└──────────────────┘
 
-━━━━━━━━━━━━━━━━━━
+💰  <b>Harga:</b>  Konsultasi dengan Admin
 
-💰 <b>Harga:</b> Hubungi Admin
-
-Untuk paket Enterprise, silakan hubungi admin untuk konsultasi harga & kebutuhan custom.`;
+<i>Untuk kebutuhan agensi & tim — 
+harga disesuaikan dengan skala</i>`;
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback('📞 Hubungi Admin', 'contact')],
-            [Markup.button.url('💬 WhatsApp', 'https://wa.me/628151616315')],
-            [Markup.button.callback('⬅️ Kembali', 'catalog')]
+            [Markup.button.callback('💬  Hubungi Admin', 'contact')],
+            [Markup.button.url('📱 WhatsApp', 'https://wa.me/628151616315')],
+            [Markup.button.callback('◀️  Kembali', 'catalog')]
         ])
     });
 });
@@ -739,21 +850,23 @@ async function handleBuy(ctx, productId) {
     }
 
     const text = `
-🧾 <b>KONFIRMASI PESANAN</b>
-━━━━━━━━━━━━━━━━━━
+╔══════════════════════╗
+     🧾 <b>KONFIRMASI ORDER</b>
+╚══════════════════════╝
 
-📦 <b>Produk:</b> ${product.name}
-⏱ <b>Durasi:</b> ${product.desc}
-💰 <b>Harga Normal:</b> ${formatPrice(product.price)}${promoLine}
-💳 <b>Total Bayar:</b> <b>${formatPrice(finalPrice)}</b>
-🆔 <b>Order ID:</b> <code>${orderId}</code>
+📦  <b>Produk:</b>  ${product.name}
+⏱  <b>Durasi:</b>  ${product.desc}
+💰  <b>Harga:</b>   ${formatPrice(product.price)}${promoLine}
 
-━━━━━━━━━━━━━━━━━━
+┌──────────────────┐
+│  💳  <b>TOTAL BAYAR</b>                      │
+│  <b>${formatPrice(finalPrice)}</b>                              │
+└──────────────────┘
 
-Ketuk <b>"💳 Bayar Sekarang"</b> untuk mendapatkan kode QRIS pembayaran.
+🆔  Order:  <code>${orderId}</code>
 
-⚠️ Pembayaran otomatis expired dalam <b>5 menit</b>.
-🔑 License key akan dikirim otomatis setelah pembayaran terverifikasi.`;
+⏱  <i>Expired dalam 5 menit</i>
+🔑  <i>Key otomatis dikirim setelah bayar</i>`;
 
     // Save pending order
     const order = {
@@ -769,6 +882,7 @@ Ketuk <b>"💳 Bayar Sekarang"</b> untuk mendapatkan kode QRIS pembayaran.
         price: finalPrice,
         discount_code: discount ? pendingPromo.toUpperCase() : null,
         discount_percent: discount ? discount.percent : 0,
+        referral_by: (discount && db.discounts[pendingPromo.toUpperCase()]?.owner_id) || null,
         status: 'pending',
         license_key: null,
         created_at: new Date().toISOString(),
@@ -779,9 +893,9 @@ Ketuk <b>"💳 Bayar Sekarang"</b> untuk mendapatkan kode QRIS pembayaran.
     saveDB(db);
 
     const buttons = [
-        [Markup.button.callback('💳 Bayar Sekarang (QRIS)', `pay_${orderId}`)],
-        [Markup.button.callback('🏷️ Ganti Kode Promo', `promo_change_${productId}`), Markup.button.callback('❌ Batalkan', `cancel_${orderId}`)],
-        [Markup.button.callback('⬅️ Kembali', 'catalog')]
+        [Markup.button.callback('💳  Bayar Sekarang (QRIS)', `pay_${orderId}`)],
+        [Markup.button.callback('🏷️ Promo', `promo_change_${productId}`), Markup.button.callback('✖️ Batal', `cancel_${orderId}`)],
+        [Markup.button.callback('◀️  Kembali', 'catalog')]
     ];
 
     await ctx.editMessageText(text, {
@@ -1283,14 +1397,29 @@ bot.action('admin_flashsale_guide', async (ctx) => {
     if (!isAdmin(ctx.from.id)) return ctx.answerCbQuery('❌ Not admin');
     await ctx.answerCbQuery();
     await ctx.replyWithHTML(
-        `⚡ <b>Flash Sale</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `<b>Format:</b>\n<code>/flashsale PRODUCT_ID DISKON% DURASI_MENIT PESAN</code>\n\n` +
-        `<b>Contoh:</b>\n<code>/flashsale pro_30 30 60 Flash Sale 1 Jam!</code>\n` +
-        `<code>/flashsale pro_365 50 120 Promo Hari Kemerdekaan!</code>\n\n` +
-        `<b>Product ID:</b>\n` +
-        Object.entries(PRODUCTS).map(([id, p]) => `• <code>${id}</code> — ${p.name} ${p.desc}`).join('\n') + '\n\n' +
-        `<i>Bot otomatis broadcast ke semua user + generate kode diskon.</i>`,
-        Markup.inlineKeyboard([[Markup.button.callback('⬅️ Admin Panel', 'back_admin')]])
+        `\n⚡ <b>FLASH SALE</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `┌─── 📊 <b>FORMAT PERSEN</b> ───┐\n` +
+        `│                                                                 │\n` +
+        `│  <code>/flashsale PRODUCT DISKON% MENIT PESAN</code>  │\n` +
+        `│                                                                 │\n` +
+        `│  Contoh:                                                    │\n` +
+        `│  <code>/flashsale pro_30 30 60 Promo!</code>           │\n` +
+        `│  → Rp 69.000 diskon 30% = <b>Rp 48.300</b>  │\n` +
+        `│                                                                 │\n` +
+        `└─────────────────────────┘\n\n` +
+        `┌─── 💰 <b>FORMAT RUPIAH</b> ───┐\n` +
+        `│                                                                 │\n` +
+        `│  <code>/flashsale PRODUCT rpJUMLAH MENIT PESAN</code>│\n` +
+        `│                                                                 │\n` +
+        `│  Contoh:                                                    │\n` +
+        `│  <code>/flashsale pro_30 rp20000 60 Diskon!</code>  │\n` +
+        `│  → Rp 69.000 - Rp 20.000 = <b>Rp 49.000</b> │\n` +
+        `│                                                                 │\n` +
+        `└─────────────────────────┘\n\n` +
+        `<b>📦 Product ID:</b>\n` +
+        Object.entries(PRODUCTS).map(([id, p]) => `  ▸ <code>${id}</code> — ${p.name} (${p.desc})`).join('\n') + '\n\n' +
+        `<i>Bot otomatis broadcast ke semua user\n+ generate kode diskon + kuota 50 user.</i>`,
+        Markup.inlineKeyboard([[Markup.button.callback('◀️  Admin Panel', 'back_admin')]])
     );
 });
 
@@ -1552,6 +1681,104 @@ async function processSuccessfulPayment(ctx, orderId) {
         useDiscount(order.discount_code);
     }
 
+    // ── REFERRAL REWARD SYSTEM ──
+    if (order.referral_by) {
+        const referrerId = order.referral_by;
+        const referralCount = db.orders.filter(o => o.referral_by === referrerId && o.status === 'paid').length;
+        const REWARDS = [
+            { milestone: 3, type: 'discount', percent: 15, label: '🎁 Diskon 15%' },
+            { milestone: 5, type: 'discount', percent: 25, label: '🎁 Diskon 25%' },
+            { milestone: 10, type: 'free_key', label: '🏆 Free Pro 30 Hari' }
+        ];
+        const reward = REWARDS.find(r => r.milestone === referralCount);
+        if (reward) {
+            try {
+                if (reward.type === 'discount') {
+                    const rewardCode = 'REWARD' + referralCount + '_' + Date.now().toString(36).toUpperCase().slice(-4);
+                    if (!db.discounts) db.discounts = {};
+                    db.discounts[rewardCode] = {
+                        active: true, percent: reward.percent, type: 'percent',
+                        quota: 1, used: 0, expires_at: null, owner_id: referrerId, products: []
+                    };
+                    saveDB(db);
+                    await ctx.telegram.sendMessage(referrerId,
+                        `\n🎉 <b>REWARD REFERRAL!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+                        `Selamat! Kamu sudah mengajak <b>${referralCount} teman</b> berbelanja! 🥳\n\n` +
+                        `┌──────────────────────┐\n` +
+                        `│                                                            │\n` +
+                        `│  ${reward.label}                                    │\n` +
+                        `│  Kode: <code>${rewardCode}</code>                    │\n` +
+                        `│  Berlaku 1x pakai                                │\n` +
+                        `│                                                            │\n` +
+                        `└──────────────────────┘\n\n` +
+                        `💡 Ketik <code>/promo ${rewardCode}</code> saat beli`,
+                        { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('🛒  Pakai Sekarang', 'catalog')]]) }
+                    );
+                } else if (reward.type === 'free_key') {
+                    const freeKey = await generateLicenseKey('pro', 30);
+                    if (freeKey) {
+                        await ctx.telegram.sendMessage(referrerId,
+                            `\n🏆 <b>REWARD SPESIAL!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+                            `Luar biasa! Kamu sudah mengajak <b>${referralCount} teman!</b> 🎊\n\n` +
+                            `┌──────────────────────┐\n` +
+                            `│                                                            │\n` +
+                            `│  🔑  <b>FREE LICENSE KEY</b>                  │\n` +
+                            `│  ClipperSkuy Pro — 30 Hari           │\n` +
+                            `│                                                            │\n` +
+                            `│  <code>${freeKey}</code>                       │\n` +
+                            `│                                                            │\n` +
+                            `└──────────────────────┘\n\n` +
+                            `Terima kasih atas kontribusimu! 🙏🏻`,
+                            { parse_mode: 'HTML' }
+                        );
+                    }
+                }
+                await sendLog(bot, `🎁 <b>REFERRAL REWARD</b>\n👤 ${referrerId} → Milestone ${referralCount} → ${reward.label}`);
+            } catch (e) { console.error('Referral reward error:', e.message); }
+        }
+    }
+
+    // ── VIP TIER SYSTEM ──
+    if (user && user.order_count >= 2 && !user.vip) {
+        user.vip = true;
+        user.vip_since = new Date().toISOString();
+        // Generate permanent VIP discount code
+        const vipCode = 'VIP' + order.user_id.slice(-4) + '_5';
+        if (!db.discounts) db.discounts = {};
+        if (!db.discounts[vipCode]) {
+            db.discounts[vipCode] = {
+                active: true, percent: 5, type: 'percent',
+                quota: null, used: 0, expires_at: null,
+                owner_id: order.user_id, products: []
+            };
+        }
+        user.vip_code = vipCode;
+        saveDB(db);
+
+        try {
+            await ctx.telegram.sendMessage(order.user_id,
+                `\n👑 <b>SELAMAT! KAMU SEKARANG VIP!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+                `Terima kasih sudah menjadi pelanggan setia! 🎉\n\n` +
+                `┌──────────────────────┐\n` +
+                `│                                                            │\n` +
+                `│  👑  <b>VIP MEMBER</b>                                │\n` +
+                `│                                                            │\n` +
+                `│  🎁  Diskon <b>5%</b> SELAMANYA               │\n` +
+                `│  🎟  Kode: <code>${vipCode}</code>                    │\n` +
+                `│  ♾  Bisa dipakai berkali-kali             │\n` +
+                `│  ⚡  Priority support                          │\n` +
+                `│                                                            │\n` +
+                `└──────────────────────┘\n\n` +
+                `💡 Ketik <code>/promo ${vipCode}</code> setiap kali beli!`,
+                {
+                    parse_mode: 'HTML',
+                    ...Markup.inlineKeyboard([[Markup.button.callback('🛒  Belanja Lagi', 'catalog')]])
+                }
+            );
+        } catch (e) { }
+        await sendLog(bot, `👑 <b>VIP BARU</b>\n👤 ${order.user_name} (@${order.username || '-'})\n📊 Total order: ${user.order_count}`);
+    }
+
     // Update global stats
     db.stats.total_orders++;
     db.stats.total_revenue += order.price;
@@ -1559,43 +1786,43 @@ async function processSuccessfulPayment(ctx, orderId) {
 
     // Send license key to user
     const successMsg = `
-🎉 <b>PEMBAYARAN BERHASIL!</b>
-━━━━━━━━━━━━━━━━━━
+╔══════════════════════╗
+     🎉 <b>PEMBAYARAN BERHASIL</b> 🎉
+╚══════════════════════╝
 
-📦 <b>Produk:</b> ${order.product_name}
-🆔 <b>Order:</b> <code>${orderId}</code>
-💰 <b>Dibayar:</b> ${formatPrice(order.price)}
+📦  ${order.product_name}
+🆔  <code>${orderId}</code>
+💰  ${formatPrice(order.price)}
 
-━━━━━━━━━━━━━━━━━━
-🔑 <b>LICENSE KEY KAMU:</b>
-
-<code>${licenseKey}</code>
-
-━━━━━━━━━━━━━━━━━━
+┌──────────────────────┐
+│                                                            │
+│  🔑  <b>LICENSE KEY KAMU</b>                       │
+│                                                            │
+│  <code>${licenseKey}</code>               │
+│                                                            │
+└──────────────────────┘
 
 📋 <b>Cara Aktivasi:</b>
-1. Buka ClipperSkuy di PC
-2. Buka menu <b>Settings → License</b>
-3. Paste license key di atas
-4. Klik <b>"Activate License"</b>
-5. Selesai! Semua fitur premium aktif 🎉
+  1 ▸  Buka ClipperSkuy di PC
+  2 ▸  <b>Settings</b>  →  <b>License</b>
+  3 ▸  Paste key di atas
+  4 ▸  Klik <b>"Activate"</b>
+  5 ▸  Done! Semua fitur aktif 🚀
 
-⚠️ <i>1 key = 1 PC. Simpan baik-baik, jangan dibagikan.</i>
+⚠️  <i>1 key = 1 PC · Simpan baik-baik</i>
 
-Terimakasih sudah berbelanja! 🙏
+Terima kasih! 🙏🏻
 
-━━━━━━━━━━━━━━━━━━
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 👥 <b>Join Grup Support Premium:</b>
-${SUPPORT_GROUP}
-
-Dapatkan bantuan, tips & update eksklusif!`;
+${SUPPORT_GROUP}`;
 
     try {
         await ctx.telegram.sendMessage(order.user_id, successMsg, {
             parse_mode: 'HTML',
             ...Markup.inlineKeyboard([
-                [Markup.button.url('👥 Join Grup Support', SUPPORT_GROUP)],
-                [Markup.button.callback('🛒 Beli Lagi', 'catalog')]
+                [Markup.button.url('👥  Gabung Grup Support', SUPPORT_GROUP)],
+                [Markup.button.callback('🛒  Beli Lagi', 'catalog')]
             ])
         });
     } catch (e) { console.error('Send key error:', e); }
@@ -1672,33 +1899,37 @@ bot.action('about', async (ctx) => {
     await ctx.answerCbQuery();
     const text = `
 ℹ️ <b>TENTANG CLIPPERSKUY</b>
-━━━━━━━━━━━━━━━━━━
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 
-<b>⚡ ClipperSkuy</b> — AI Video Clip Generator
+⚡ <b>ClipperSkuy</b> — AI Video Clip Generator
 
-Ubah video panjang jadi konten viral untuk TikTok, Reels & YouTube Shorts — otomatis dengan AI! 
+<i>Ubah video panjang jadi konten viral
+untuk TikTok, Reels & YouTube Shorts</i>
 
-🧠 AI Clip Detection + Viral Score
-💬 Auto Subtitle (Whisper AI)
-🎯 Face Tracking & Reframing
-🎙️ Podcast Mode (Split Screen)
-🔇 Audio Enhancement
-📊 Progress Bar & Hook Text
-🎬 Auto B-Roll (Pexels)
-📱 Multi-Platform Export
-🖥️ 100% Offline & Private
+┌─── ✨ <b>FITUR UNGGULAN</b> ───┐
+│                                                           │
+│  🧠 AI Clip Detection + Viral Score   │
+│  💬 Auto Subtitle (Whisper AI)          │
+│  🎯 Face Tracking & Reframing      │
+│  🎙️ Podcast Mode (Split Screen)  │
+│  🔊 Audio Enhancement                   │
+│  📊 Progress Bar & Hook Text        │
+│  🎬 Auto B-Roll (Pexels)                  │
+│  📱 Multi-Platform Export                │
+│  🖥️ 100% Offline & Private             │
+│                                                           │
+└──────────────────────┘
 
-━━━━━━━━━━━━━━━━━━
-🔗 <b>Website:</b> clipperskuy.my.id
-📖 <b>Panduan:</b> clipperskuy.my.id/guide
+🔗  <b>Website:</b>  clipperskuy.my.id
+📖  <b>Panduan:</b>  clipperskuy.my.id/guide
 
 💡 <i>Trial 7 hari gratis — download sekarang!</i>`;
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback('🛒 Lihat Produk', 'catalog')],
-            [Markup.button.callback('⬅️ Menu Utama', 'back_start')]
+            [Markup.button.callback('🛒  Lihat Produk', 'catalog')],
+            [Markup.button.callback('◀️  Menu Utama', 'back_start')]
         ])
     });
 });
@@ -1707,12 +1938,22 @@ Ubah video panjang jadi konten viral untuk TikTok, Reels & YouTube Shorts — ot
 bot.action('contact', async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.editMessageText(
-        `📞 <b>HUBUNGI ADMIN</b>\n━━━━━━━━━━━━━━━━━━\n\nHubungi admin untuk:\n• Custom order / Enterprise\n• Kendala pembayaran\n• Bantuan teknis\n• Reset aktivasi license\n\n💬 <b>WhatsApp:</b> wa.me/628151616315\n📱 <b>Telegram:</b> @skuysdazen\n\n<i>Respon dalam max 1x24 jam (biasanya lebih cepat).</i>`,
+        `\n💬 <b>HUBUNGI ADMIN</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `Hubungi admin untuk:\n\n` +
+        `  ▸  Custom order / Enterprise\n` +
+        `  ▸  Kendala pembayaran\n` +
+        `  ▸  Bantuan teknis\n` +
+        `  ▸  Reset aktivasi license\n\n` +
+        `┌──────────────────┐\n` +
+        `│  📱  <b>WhatsApp</b>  wa.me/628151616315  │\n` +
+        `│  💬  <b>Telegram</b>  @skuysdazen              │\n` +
+        `└──────────────────┘\n\n` +
+        `<i>Respon max 1×24 jam (biasanya lebih cepat)</i>`,
         {
             parse_mode: 'HTML',
             ...Markup.inlineKeyboard([
-                [Markup.button.url('💬 WhatsApp', 'https://wa.me/628151616315')],
-                [Markup.button.callback('⬅️ Menu Utama', 'back_start')]
+                [Markup.button.url('📱  WhatsApp', 'https://wa.me/628151616315')],
+                [Markup.button.callback('◀️  Menu Utama', 'back_start')]
             ])
         }
     );
@@ -1722,38 +1963,40 @@ bot.action('contact', async (ctx) => {
 bot.action('help', async (ctx) => {
     await ctx.answerCbQuery();
     const text = `
-❓ <b>BANTUAN</b>
-━━━━━━━━━━━━━━━━━━
+❓ <b>BANTUAN & FAQ</b>
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 
-<b>Cara Order:</b>
-1. Ketuk "🛒 Lihat Produk"
-2. Pilih tier (Pro / Enterprise)
-3. Pilih durasi
-4. Ketuk "💳 Bayar Sekarang"
-5. Scan QRIS & bayar
-6. License key otomatis dikirim! 🎉
+┌─── 🛒 <b>CARA ORDER</b> ───┐
+│  1 ▸  Ketuk "Beli License"                  │
+│  2 ▸  Pilih tier (Pro / Enterprise)      │
+│  3 ▸  Pilih durasi                                  │
+│  4 ▸  Ketuk "Bayar Sekarang"            │
+│  5 ▸  Scan QRIS & bayar                     │
+│  6 ▸  Key otomatis dikirim! 🎉          │
+└──────────────────────┘
 
-<b>Cara Aktivasi Key:</b>
-1. Buka ClipperSkuy di PC
-2. Menu Settings → License
-3. Paste license key
-4. Klik "Activate License"
+┌─── 🔑 <b>CARA AKTIVASI</b> ───┐
+│  1 ▸  Buka ClipperSkuy di PC             │
+│  2 ▸  Settings → License                     │
+│  3 ▸  Paste key                                       │
+│  4 ▸  Klik "Activate"                              │
+└──────────────────────┘
 
-<b>Command:</b>
-/start — Menu utama
-/catalog — Lihat produk
-/myorders — Pesanan saya
-/help — Bantuan
+<b>📋 Command:</b>
+  /start · /catalog · /myorders · /help
 
-<b>FAQ:</b>
-• 1 key = 1 PC (terikat Machine ID)
-• Mau pindah PC? Hubungi admin
-• Key expired? Beli key baru
-• Refund? Hubungi admin`;
+<b>❓ FAQ:</b>
+  ▸  1 key = 1 PC (terikat Machine ID)
+  ▸  Pindah PC? Hubungi admin
+  ▸  Key expired? Beli key baru
+  ▸  Refund? Hubungi admin`;
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Menu Utama', 'back_start')]])
+        ...Markup.inlineKeyboard([
+            [Markup.button.callback('🛒  Beli License', 'catalog')],
+            [Markup.button.callback('◀️  Menu Utama', 'back_start')]
+        ])
     });
 });
 
@@ -1762,17 +2005,22 @@ bot.action('back_start', async (ctx) => {
     await ctx.answerCbQuery();
     const name = ctx.from.first_name || 'User';
     const text = `
-🤖 <b>ClipperSkuy — License Store</b>
+╔══════════════════════╗
+     ⚡ <b>CLIPPERSKUY</b> ⚡
+╚══════════════════════╝
 
-Halo <b>${name}</b>! 👋
-Ketuk tombol di bawah:`;
+Hai <b>${name}</b>! 👋🏻
+<i>Pilih menu di bawah:</i>`;
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback('🛒 Lihat Produk', 'catalog')],
-            [Markup.button.callback('📋 Pesanan Saya', 'my_orders'), Markup.button.callback('ℹ️ Tentang App', 'about')],
-            [Markup.button.callback('📞 Hubungi Admin', 'contact'), Markup.button.callback('❓ Bantuan', 'help')]
+            [Markup.button.callback('🛒  Beli License', 'catalog'),
+            Markup.button.callback('⬇️  Download', 'download_action')],
+            [Markup.button.callback('📋  Riwayat', 'my_orders'),
+            Markup.button.callback('ℹ️  Tentang', 'about')],
+            [Markup.button.callback('💬  Admin', 'contact'),
+            Markup.button.callback('❓  FAQ', 'help')]
         ])
     });
 });
@@ -2411,6 +2659,111 @@ bot.command('help', async (ctx) => {
 });
 
 // ============================================================
+// FITUR — LEADERBOARD REFERRAL
+// ============================================================
+bot.command('leaderboard', async (ctx) => {
+    // Hitung referral per user
+    const referralMap = {};
+    (db.orders || []).filter(o => o.referral_by && o.status === 'paid').forEach(o => {
+        referralMap[o.referral_by] = (referralMap[o.referral_by] || 0) + 1;
+    });
+
+    const sorted = Object.entries(referralMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+    if (sorted.length === 0) {
+        return ctx.replyWithHTML(
+            `🏆 <b>LEADERBOARD REFERRAL</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n<i>Belum ada referral. Jadi yang pertama!</i>`,
+            Markup.inlineKeyboard([[Markup.button.callback('🎁 Lihat Kode Referral', 'referral_info')]])
+        );
+    }
+
+    const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    let board = '';
+    for (let i = 0; i < sorted.length; i++) {
+        const [uid, count] = sorted[i];
+        const user = db.users[uid];
+        const name = user?.name || uid.slice(-6);
+        const vipBadge = user?.vip ? ' 👑' : '';
+        board += `${medals[i]}  <b>${name}</b>${vipBadge}  —  ${count} referral\n`;
+    }
+
+    const myId = String(ctx.from.id);
+    const myCount = referralMap[myId] || 0;
+    const myRank = sorted.findIndex(s => s[0] === myId) + 1;
+
+    await ctx.replyWithHTML(
+        `\n🏆 <b>LEADERBOARD REFERRAL</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `┌──────────────────────┐\n` +
+        `│                                                            │\n` +
+        board.split('\n').filter(l => l).map(l => `│  ${l}               │`).join('\n') + `\n` +
+        `│                                                            │\n` +
+        `└──────────────────────┘\n\n` +
+        `📊 <b>Posisimu:</b> ${myRank > 0 ? `#${myRank}` : 'Belum masuk'} (${myCount} referral)\n\n` +
+        `<i>Top referrer bulan ini dapat bonus reward! 🎁\nShare kode referralmu untuk naik peringkat.</i>`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🎁 Lihat Kode Referral', 'referral_info')],
+            [Markup.button.callback('◀️ Menu Utama', 'back_start')]
+        ])
+    );
+});
+
+// ============================================================
+// FITUR — CEK STATUS VIP
+// ============================================================
+bot.command('vip', async (ctx) => {
+    const userId = String(ctx.from.id);
+    const user = db.users[userId];
+
+    if (!user || !user.vip) {
+        const orderCount = user?.order_count || 0;
+        const remaining = Math.max(0, 2 - orderCount);
+        return ctx.replyWithHTML(
+            `\n👑 <b>VIP MEMBERSHIP</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `Status: <b>Belum VIP</b>\n\n` +
+            `┌──────────────────────┐\n` +
+            `│                                                            │\n` +
+            `│  📊  Order kamu: <b>${orderCount}</b>/2                     │\n` +
+            `│  🎯  Butuh <b>${remaining}</b> order lagi              │\n` +
+            `│                                                            │\n` +
+            `│  ✨  <b>Keuntungan VIP:</b>                        │\n` +
+            `│  🎁  Diskon 5% selamanya                   │\n` +
+            `│  ♾  Unlimited pakai kode VIP              │\n` +
+            `│  ⚡  Priority support                          │\n` +
+            `│                                                            │\n` +
+            `└──────────────────────┘`,
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🛒 Beli Sekarang', 'catalog')],
+                [Markup.button.callback('◀️ Menu Utama', 'back_start')]
+            ])
+        );
+    }
+
+    const vipSince = new Date(user.vip_since).toLocaleDateString('id-ID');
+    await ctx.replyWithHTML(
+        `\n👑 <b>VIP MEMBERSHIP</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `┌──────────────────────┐\n` +
+        `│                                                            │\n` +
+        `│  👑  <b>VIP MEMBER AKTIF</b>                      │\n` +
+        `│                                                            │\n` +
+        `│  📅  Sejak: ${vipSince}                          │\n` +
+        `│  📊  Total order: <b>${user.order_count}</b>                  │\n` +
+        `│  💰  Total belanja: <b>${formatPrice(user.total_spent || 0)}</b>  │\n` +
+        `│                                                            │\n` +
+        `│  🎁  Diskon <b>5%</b> selamanya                   │\n` +
+        `│  🎟  Kode: <code>${user.vip_code}</code>                    │\n` +
+        `│                                                            │\n` +
+        `└──────────────────────┘\n\n` +
+        `💡 Pakai <code>/promo ${user.vip_code}</code> setiap beli!`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🛒 Belanja Lagi', 'catalog')],
+            [Markup.button.callback('◀️ Menu Utama', 'back_start')]
+        ])
+    );
+});
+
+// ============================================================
 // FITUR #8 — DOWNLOAD LINKS
 // ============================================================
 const DOWNLOAD_URL = process.env.DOWNLOAD_URL || 'https://github.com/tendo81/clipperskuy/releases';
@@ -2506,29 +2859,80 @@ async function runDailyTasks(botInstance) {
         for (const order of paidOrders) {
             const expireAt = new Date(new Date(order.paid_at).getTime() + order.duration * 86400000);
             const daysLeft = Math.ceil((expireAt - now) / 86400000);
-            // Kirim notif H-3 dan H-1
             if (daysLeft === 3 || daysLeft === 1) {
                 const alreadySentKey = `notif_${order.id}_d${daysLeft}`;
-                if (db.users[order.user_id]?.[alreadySentKey]) continue; // already sent
+                if (db.users[order.user_id]?.[alreadySentKey]) continue;
+                const renewDiscount = daysLeft === 1 ? 15 : 10;
+                const renewCode = 'RENEW' + Date.now().toString(36).toUpperCase().slice(-4);
+                if (!db.discounts) db.discounts = {};
+                db.discounts[renewCode] = {
+                    active: true, percent: renewDiscount, type: 'percent',
+                    quota: 1, used: 0, expires_at: expireAt.toISOString(),
+                    owner_id: order.user_id, products: []
+                };
                 try {
                     await botInstance.telegram.sendMessage(order.user_id,
-                        `⏰ <b>Reminder: License Segera Habis!</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-                        `📦 ${order.product_name}\n` +
-                        `⏱ License kamu expired dalam <b>${daysLeft} hari</b>\n` +
-                        `📅 Expired: ${expireAt.toLocaleDateString('id-ID')}\n\n` +
-                        `Perpanjang sekarang sebelum expired!`,
+                        `\n⏰ <b>LICENSE SEGERA HABIS!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+                        `┌──────────────────────┐\n` +
+                        `│                                                            │\n` +
+                        `│  📦  ${order.product_name}         │\n` +
+                        `│  ⏱  Sisa: <b>${daysLeft} hari lagi</b>               │\n` +
+                        `│  📅  Expired: ${expireAt.toLocaleDateString('id-ID')}    │\n` +
+                        `│                                                            │\n` +
+                        `│  🎁  Perpanjang sekarang dapat       │\n` +
+                        `│  <b>DISKON ${renewDiscount}%!</b>                            │\n` +
+                        `│  Kode: <code>${renewCode}</code>                      │\n` +
+                        `│                                                            │\n` +
+                        `└──────────────────────┘\n\n` +
+                        `💡 Ketik <code>/promo ${renewCode}</code> lalu beli!`,
                         {
                             parse_mode: 'HTML',
-                            ...Markup.inlineKeyboard([[Markup.button.callback('🔄 Perpanjang Sekarang', 'renewal_menu')]])
+                            ...Markup.inlineKeyboard([
+                                [Markup.button.callback('🔄  Perpanjang Sekarang', 'catalog')],
+                                [Markup.button.callback('📋  Cek License', 'my_license')]
+                            ])
                         }
                     );
                     if (!db.users) db.users = {};
                     if (!db.users[order.user_id]) db.users[order.user_id] = {};
                     db.users[order.user_id][alreadySentKey] = true;
                     saveDB(db);
-                    console.log(`[Notif] Sent ${daysLeft}d expiry reminder to ${order.user_id}`);
+                    console.log(`[Notif] Sent ${daysLeft}d expiry reminder + ${renewDiscount}% code to ${order.user_id}`);
                 } catch (e) { console.warn('[Notif] Failed:', e.message); }
             }
+        }
+    }
+
+    // ---- FOLLOW-UP: belum bayar 30 menit ----
+    const pendingOrders = (db.orders || []).filter(o =>
+        ['pending', 'waiting_payment', 'waiting_proof'].includes(o.status) &&
+        o.created_at && !o.followup_sent
+    );
+    for (const order of pendingOrders) {
+        const minutesSince = Math.floor((now - new Date(order.created_at)) / 60000);
+        if (minutesSince >= 30 && minutesSince < 120) {
+            try {
+                await botInstance.telegram.sendMessage(order.user_id,
+                    `\n💭 <b>Hei ${order.user_name || ''}!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+                    `Kamu punya order yang belum selesai:\n\n` +
+                    `┌──────────────────────┐\n` +
+                    `│  📦  ${order.product_name}         │\n` +
+                    `│  💰  ${formatPrice(order.price)}                              │\n` +
+                    `│  🆔  <code>${order.id}</code>                     │\n` +
+                    `└──────────────────────┘\n\n` +
+                    `⏱ Selesaikan pembayaran sekarang\nsebelum order expired!`,
+                    {
+                        parse_mode: 'HTML',
+                        ...Markup.inlineKeyboard([
+                            [Markup.button.callback('💳  Bayar Sekarang', `pay_${order.id}`)],
+                            [Markup.button.callback('❌  Batalkan Order', `cancel_${order.id}`)]
+                        ])
+                    }
+                );
+                order.followup_sent = true;
+                saveDB(db);
+                console.log(`[FollowUp] Sent reminder for order ${order.id}`);
+            } catch (e) { console.warn('[FollowUp] Failed:', e.message); }
         }
     }
 
@@ -2704,6 +3108,126 @@ bot.command('reply', async (ctx) => {
         await ctx.reply(`✅ Balasan terkirim ke user ${ticket.user_name}!`);
     } catch (e) { await ctx.reply(`⚠️ Gagal kirim ke user: ${e.message}`); }
 });
+// ═══════════════════════════════════════════════════════════════
+// FITUR: ADMIN DM — Kirim pesan langsung ke user
+// /dm USER_ID PESAN
+// ═══════════════════════════════════════════════════════════════
+bot.command('dm', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const parts = ctx.message.text.split(' ');
+    if (parts.length < 3) {
+        return ctx.replyWithHTML(
+            `\n💬 <b>KIRIM PESAN KE USER</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `<b>Format:</b>\n<code>/dm USER_ID PESAN</code>\n\n` +
+            `┌─── 💡 <b>CONTOH</b> ───┐\n` +
+            `│                                                         │\n` +
+            `│  <code>/dm 123456 Halo, ada update!</code>  │\n` +
+            `│  <code>/dm 123456 Key kamu sudah</code>      │\n` +
+            `│  <code>di-reset, silakan coba lagi</code>    │\n` +
+            `│                                                         │\n` +
+            `└─────────────────────┘\n\n` +
+            `💡 <i>Gunakan /users untuk lihat daftar user</i>`
+        );
+    }
+
+    const targetUserId = parts[1].trim();
+    const message = parts.slice(2).join(' ');
+
+    // Cari info user
+    const userInfo = db.users[targetUserId];
+    const userName = userInfo?.name || `User ${targetUserId}`;
+
+    try {
+        await ctx.telegram.sendMessage(targetUserId,
+            `\n📩 <b>PESAN DARI ADMIN</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `${message}\n\n` +
+            `<i>Balas pesan ini dengan /tiket jika butuh bantuan</i>`,
+            {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('💬  Balas Admin', 'open_ticket')],
+                    [Markup.button.callback('🏠  Menu Utama', 'back_start')]
+                ])
+            }
+        );
+
+        await ctx.replyWithHTML(
+            `✅ <b>Pesan terkirim!</b>\n\n` +
+            `👤  <b>User:</b> ${userName} (<code>${targetUserId}</code>)\n` +
+            `💬  <b>Pesan:</b> ${message}`
+        );
+
+        // Log
+        await sendLog(bot, `📩 <b>ADMIN DM</b>\n👤 ${userName} (<code>${targetUserId}</code>)\n💬 ${message}`);
+    } catch (e) {
+        await ctx.replyWithHTML(
+            `❌ <b>Gagal kirim pesan</b>\n\n` +
+            `User ID <code>${targetUserId}</code> mungkin:\n` +
+            `  ▸  Belum pernah /start di bot\n` +
+            `  ▸  Sudah blokir bot\n` +
+            `  ▸  ID salah\n\n` +
+            `<i>Error: ${e.message}</i>`
+        );
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FITUR: LIST USERS — Lihat semua user terdaftar
+// /users [cari]
+// ═══════════════════════════════════════════════════════════════
+bot.command('users', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    
+    const searchTerm = ctx.message.text.split(' ').slice(1).join(' ').toLowerCase().trim();
+    const allUsers = Object.values(db.users || {});
+    
+    let filteredUsers = allUsers;
+    if (searchTerm) {
+        filteredUsers = allUsers.filter(u => 
+            (u.name || '').toLowerCase().includes(searchTerm) ||
+            (u.username || '').toLowerCase().includes(searchTerm) ||
+            (u.id || '').includes(searchTerm)
+        );
+    }
+
+    if (filteredUsers.length === 0) {
+        return ctx.replyWithHTML(
+            searchTerm
+                ? `❌ Tidak ada user yang cocok dengan "<b>${searchTerm}</b>"`
+                : '📋 Belum ada user terdaftar.'
+        );
+    }
+
+    // Tampilkan max 15 user
+    const shown = filteredUsers.slice(0, 15);
+    const totalPaid = (db.orders || []).filter(o => o.status === 'paid');
+    
+    let text = `\n👥 <b>DAFTAR USER</b>${searchTerm ? ` — "${searchTerm}"` : ''}\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n`;
+    text += `📊 Total: <b>${filteredUsers.length}</b> user${searchTerm ? ` (dari ${allUsers.length})` : ''}\n\n`;
+
+    for (const u of shown) {
+        const userOrders = totalPaid.filter(o => o.user_id === u.id);
+        const spent = userOrders.reduce((s, o) => s + (o.price || 0), 0);
+        const hasLicense = userOrders.length > 0;
+        const statusIcon = hasLicense ? '✅' : '⬜';
+        
+        text += `${statusIcon} <b>${u.name || 'Unknown'}</b>`;
+        if (u.username) text += ` @${u.username}`;
+        text += `\n`;
+        text += `     ID: <code>${u.id}</code>`;
+        if (spent > 0) text += ` · ${formatPrice(spent)}`;
+        text += `\n`;
+    }
+
+    if (filteredUsers.length > 15) {
+        text += `\n<i>... dan ${filteredUsers.length - 15} user lainnya</i>\n`;
+    }
+
+    text += `\n💡 <i>Kirim pesan: <code>/dm USER_ID pesan</code></i>`;
+    text += `\n🔍 <i>Cari user: <code>/users nama</code></i>`;
+
+    await ctx.replyWithHTML(text);
+});
 
 // ═══════════════════════════════════════════════════════════════
 // FITUR #2 — FLASH SALE / PROMO TIMER
@@ -2717,15 +3241,40 @@ bot.command('flashsale', async (ctx) => {
     const parts = ctx.message.text.split(' ');
     if (parts.length < 4) {
         return ctx.replyWithHTML(
-            '❌ Format: <code>/flashsale PRODUCT_ID DISKON% DURASI_MENIT PESAN</code>\n' +
-            'Contoh: <code>/flashsale pro_30 30 60 Flash Sale Hari Ini!</code>\n\n' +
-            'Product ID: ' + Object.keys(PRODUCTS).map(id => `<code>${id}</code>`).join(', ')
+            `\n💥 <b>FLASH SALE COMMAND</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `<b>Format Persen:</b>\n<code>/flashsale PRODUCT_ID DISKON% MENIT PESAN</code>\n` +
+            `Contoh: <code>/flashsale pro_30 30 60 Promo Akhir Pekan!</code>\n\n` +
+            `<b>Format Potongan Rupiah:</b>\n<code>/flashsale PRODUCT_ID rpJUMLAH MENIT PESAN</code>\n` +
+            `Contoh: <code>/flashsale pro_30 rp20000 60 Diskon 20rb!</code>\n\n` +
+            `<b>Product ID:</b> ` + Object.keys(PRODUCTS).map(id => `<code>${id}</code>`).join(', ')
         );
     }
     const [, productId, discountStr, durationStr, ...msgParts] = parts;
     const product = PRODUCTS[productId];
     if (!product) return ctx.reply('❌ Product tidak ditemukan.');
-    const discountPercent = parseInt(discountStr);
+    
+    // Detect discount type: "rp20000" = flat amount, "30" = percentage
+    const isFlat = discountStr.toLowerCase().startsWith('rp');
+    let discountAmount = 0;
+    let discountPercent = 0;
+    let flashPrice = 0;
+    let discountLabel = '';
+
+    if (isFlat) {
+        discountAmount = parseInt(discountStr.toLowerCase().replace('rp', ''));
+        if (isNaN(discountAmount) || discountAmount <= 0) return ctx.reply('❌ Jumlah potongan tidak valid.');
+        if (discountAmount >= product.price) return ctx.reply('❌ Potongan tidak boleh >= harga produk.');
+        flashPrice = product.price - discountAmount;
+        discountPercent = Math.round((discountAmount / product.price) * 100);
+        discountLabel = `-${formatPrice(discountAmount)}`;
+    } else {
+        discountPercent = parseInt(discountStr);
+        if (isNaN(discountPercent) || discountPercent <= 0 || discountPercent >= 100) return ctx.reply('❌ Diskon harus 1-99%.');
+        flashPrice = Math.floor(product.price * (100 - discountPercent) / 100);
+        discountAmount = product.price - flashPrice;
+        discountLabel = `-${discountPercent}%`;
+    }
+
     const durationMin = parseInt(durationStr);
     const customMsg = msgParts.join(' ') || 'Flash Sale!';
     const endTime = new Date(Date.now() + durationMin * 60000);
@@ -2733,22 +3282,42 @@ bot.command('flashsale', async (ctx) => {
 
     // Register diskon code
     if (!db.discounts) db.discounts = {};
-    db.discounts[flashCode] = {
-        active: true, percent: discountPercent, type: 'percent',
-        quota: 50, used: 0, expires_at: endTime.toISOString(), products: [productId]
-    };
+    if (isFlat) {
+        db.discounts[flashCode] = {
+            active: true, amount: discountAmount, type: 'amount',
+            quota: 50, used: 0, expires_at: endTime.toISOString(), products: [productId]
+        };
+    } else {
+        db.discounts[flashCode] = {
+            active: true, percent: discountPercent, type: 'percent',
+            quota: 50, used: 0, expires_at: endTime.toISOString(), products: [productId]
+        };
+    }
     saveDB(db);
-    activeFlashSale = { productId, discountPercent, endTime, flashCode };
+    activeFlashSale = { productId, discountPercent, discountAmount, endTime, flashCode };
 
     // Broadcast ke semua user
     const saleMsg =
-        `⚡ <b>FLASH SALE — ${customMsg}</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
-        `📦 ${product.name} (${product.desc})\n` +
-        `💰 Harga Normal: <s>${formatPrice(product.price)}</s>\n` +
-        `🔥 Harga Flash: <b>${formatPrice(Math.floor(product.price * (100 - discountPercent) / 100))}</b> (-${discountPercent}%)\n\n` +
-        `⏱ Berakhir: ${endTime.toLocaleString('id-ID')}\n` +
-        `🎟 Kode: <code>${flashCode}</code>\n\n` +
-        `👉 Gunakan kode ini saat checkout!`;
+        `\n⚡⚡⚡ <b>FLASH SALE</b> ⚡⚡⚡\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `🏷 <b>${customMsg}</b>\n\n` +
+        `┌──────────────────────┐\n` +
+        `│                                                            │\n` +
+        `│  📦  <b>${product.name}</b>                         │\n` +
+        `│  ⏱  ${product.desc}                                       │\n` +
+        `│                                                            │\n` +
+        `│  💰  <s>${formatPrice(product.price)}</s>                               │\n` +
+        `│  🔥  <b>${formatPrice(flashPrice)}</b>  (${discountLabel})       │\n` +
+        `│  💸  Hemat <b>${formatPrice(discountAmount)}</b>                    │\n` +
+        `│                                                            │\n` +
+        `└──────────────────────┘\n\n` +
+        `⏱  Berakhir: <b>${endTime.toLocaleString('id-ID')}</b>\n` +
+        `🎟  Kode: <code>${flashCode}</code>\n` +
+        `🎯  Kuota: <b>50 user</b> pertama\n\n` +
+        `┌─── ✅ <b>CARA PAKAI</b> ───┐\n` +
+        `│  1 ▸  Ketik: <code>/promo ${flashCode}</code>       │\n` +
+        `│  2 ▸  Pilih produk & bayar                     │\n` +
+        `│  3 ▸  Diskon otomatis! 🎉                     │\n` +
+        `└──────────────────────┘`;
 
     const allUserIds = Object.keys(db.users);
     let sent = 0;
@@ -2870,17 +3439,28 @@ bot.command('riwayat', async (ctx) => {
 // ═══════════════════════════════════════════════════════════════
 const AUTO_REPLIES = {
     'harga': `💰 <b>Harga ClipperSkuy:</b>\n⚡ Pro 30 Hari — <b>Rp69.000</b>\n⚡ Pro 90 Hari — <b>Rp150.000</b>\n⚡ Pro 365 Hari — <b>Rp250.000</b>\n\nGunakan /start untuk beli!`,
+    'berapa': `💰 <b>Harga ClipperSkuy:</b>\n⚡ Pro 30 Hari — <b>Rp69.000</b>\n⚡ Pro 90 Hari — <b>Rp150.000</b>\n⚡ Pro 365 Hari — <b>Rp250.000</b>\n\nGunakan /start untuk beli!`,
     'cara bayar': `💳 <b>Cara Bayar:</b>\n1. Ketuk /start\n2. Pilih produk\n3. Klik "Bayar"\n4. Scan QRIS atau bayar via GoPay\n5. Key otomatis dikirim!`,
     'cara aktivasi': `🔑 <b>Cara Aktivasi:</b>\n1. Buka ClipperSkuy\n2. Klik Settings\n3. Pilih menu License\n4. Paste license key\n5. Klik Activate`,
+    'cara install': `📥 <b>Cara Install:</b>\n1. Download via /download\n2. Extract file ZIP\n3. Jalankan ClipperSkuy.exe\n4. Login dengan license key\n\nBelum punya key? Beli via /start!`,
+    'cara pakai': `📖 <b>Cara Pakai:</b>\n1. Import video panjang\n2. AI otomatis deteksi momen viral\n3. Pilih clip yang mau di-export\n4. Export ke 9:16 untuk TikTok/Reels!`,
     'download': `📥 Gunakan /download untuk link download terbaru.`,
     'expired': `⏱ Cek status license kamu dengan /ceklicense\nUntuk perpanjang, klik tombol Perpanjang di sana.`,
+    'habis': `⏱ Cek status license kamu dengan /ceklicense\nUntuk perpanjang, klik tombol Perpanjang di sana.`,
     'gagal': `❌ Ada masalah? Buat tiket: /tiket MASALAH_KAMU\nAtau hubungi admin langsung.`,
+    'error': `❌ Ada error? Buat tiket: /tiket DESKRIPSI_ERROR\nSertakan screenshot kalau bisa.`,
     'tidak bisa': `❌ Ada masalah? Gunakan /tiket DESKRIPSI_MASALAH untuk buat laporan ke admin.`,
     'refund': `🔁 Kebijakan refund: Lisensi yang sudah diaktivasi tidak dapat di-refund.\nHubungi admin jika ada masalah teknis.`,
-    'free': `✅ Ada trial gratis 3 hari! Gunakan /start dan pilih coba gratis.`,
-    'trial': `✅ Ada trial gratis 3 hari! Gunakan /start dan pilih coba gratis.`,
+    'free': `✅ Ada trial gratis 1 hari! Gunakan /start dan pilih "Coba GRATIS 1 Hari".`,
+    'trial': `✅ Ada trial gratis 1 hari! Gunakan /start dan pilih "Coba GRATIS 1 Hari".`,
+    'gratis': `✅ Mau coba gratis? Gunakan /start → klik "Coba GRATIS 1 Hari" (1x per akun).`,
     'diskon': `🏷 Punya kode promo? Masukkan saat checkout.\nAtau gunakan /referral untuk dapat kode diskon!`,
-    'promo': `🔥 Cek promo terbaru dengan /start — atau minta kode dari teman yang sudah beli via /referral!`
+    'promo': `🔥 Cek promo terbaru dengan /start — atau minta kode dari teman yang sudah beli via /referral!`,
+    'spin': `🎰 Coba keberuntunganmu! Ketik /spin untuk putar roda hadiah harian.`,
+    'update': `📋 Cek update terbaru dengan /changelog`,
+    'fitur': `📋 Cek fitur terbaru dengan /changelog — atau /start untuk melihat semua menu.`,
+    'admin': `💬 Hubungi admin langsung via /start → Admin`,
+    'bantuan': `❓ Ketik /help untuk daftar semua fitur dan panduan lengkap.`
 };
 
 bot.on('text', async (ctx, next) => {
@@ -2894,6 +3474,174 @@ bot.on('text', async (ctx, next) => {
         }
     }
     return next();
+});
+
+// ════════════════════════════════════════════════════════════════
+// FITUR — SPIN WHEEL (Hadiah Harian)
+// ════════════════════════════════════════════════════════════════
+const SPIN_PRIZES = [
+    { emoji: '🎁', name: 'Diskon 5%', weight: 25, type: 'discount', percent: 5 },
+    { emoji: '🎉', name: 'Diskon 10%', weight: 15, type: 'discount', percent: 10 },
+    { emoji: '🔥', name: 'Diskon 15%', weight: 8, type: 'discount', percent: 15 },
+    { emoji: '💎', name: 'Diskon 25%', weight: 2, type: 'discount', percent: 25 },
+    { emoji: '😅', name: 'Zonk! Coba lagi besok', weight: 30, type: 'zonk' },
+    { emoji: '🍀', name: 'Bonus 1 Referral', weight: 10, type: 'bonus_ref' },
+    { emoji: '⭐', name: 'Stiker Eksklusif', weight: 10, type: 'sticker' },
+];
+
+function weightedRandom(prizes) {
+    const totalWeight = prizes.reduce((s, p) => s + p.weight, 0);
+    let random = Math.random() * totalWeight;
+    for (const prize of prizes) {
+        random -= prize.weight;
+        if (random <= 0) return prize;
+    }
+    return prizes[prizes.length - 1];
+}
+
+bot.command('spin', async (ctx) => {
+    const userId = String(ctx.from.id);
+    if (!db.users[userId]) db.users[userId] = { name: ctx.from.first_name, joined: new Date().toISOString() };
+
+    // Cek cooldown (1x per hari)
+    const today = new Date().toISOString().substring(0, 10);
+    if (db.users[userId].last_spin === today) {
+        return ctx.replyWithHTML(
+            `⏳ <b>Kamu sudah spin hari ini!</b>\n\nCoba lagi besok ya. Setiap hari dapat 1 spin gratis! 🎰`,
+            Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu Utama', 'back_start')]])
+        );
+    }
+
+    const prize = weightedRandom(SPIN_PRIZES);
+    db.users[userId].last_spin = today;
+
+    // Animasi spin
+    const spinFrames = ['🎰 Spinning...  ▫️▫️▫️', '🎰 Spinning...  🔴▫️▫️', '🎰 Spinning...  🔴🟡▫️', '🎰 Spinning...  🔴🟡🟢'];
+    const msg = await ctx.reply(spinFrames[0]);
+    for (let i = 1; i < spinFrames.length; i++) {
+        await new Promise(r => setTimeout(r, 600));
+        try { await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, spinFrames[i]); } catch(e) {}
+    }
+    await new Promise(r => setTimeout(r, 800));
+
+    let resultMsg = '';
+    const buttons = [[Markup.button.callback('◀️ Menu Utama', 'back_start')]];
+
+    if (prize.type === 'discount') {
+        const spinCode = 'SPIN' + prize.percent + '_' + Date.now().toString(36).toUpperCase().slice(-4);
+        if (!db.discounts) db.discounts = {};
+        db.discounts[spinCode] = {
+            active: true, percent: prize.percent, type: 'percent',
+            quota: 1, used: 0, owner_id: userId, products: [],
+            expires_at: new Date(Date.now() + 3 * 86400000).toISOString() // 3 hari
+        };
+        saveDB(db);
+        resultMsg =
+            `\n🎰 <b>SPIN RESULT!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `${prize.emoji}  <b>${prize.name}</b>\n\n` +
+            `┌──────────────────────┐\n` +
+            `│                                                            │\n` +
+            `│  🎟  Kode: <code>${spinCode}</code>                    │\n` +
+            `│  ⏱  Berlaku 3 hari                                │\n` +
+            `│  🔢  1x pakai                                        │\n` +
+            `│                                                            │\n` +
+            `└──────────────────────┘\n\n` +
+            `💡 Ketik <code>/promo ${spinCode}</code> saat beli!`;
+        buttons.unshift([Markup.button.callback('🛒 Pakai Sekarang', 'catalog')]);
+    } else if (prize.type === 'bonus_ref') {
+        if (!db.users[userId].bonus_refs) db.users[userId].bonus_refs = 0;
+        db.users[userId].bonus_refs++;
+        saveDB(db);
+        resultMsg =
+            `\n🎰 <b>SPIN RESULT!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `${prize.emoji}  <b>${prize.name}</b>\n\n` +
+            `+1 bonus referral ditambahkan ke akunmu!\nTotal bonus: ${db.users[userId].bonus_refs}`;
+    } else if (prize.type === 'sticker') {
+        saveDB(db);
+        resultMsg =
+            `\n🎰 <b>SPIN RESULT!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `${prize.emoji}  <b>${prize.name}</b>\n\n` +
+            `Kamu dapat stiker eksklusif ClipperSkuy! 🌟\nTerima kasih sudah main!`;
+    } else {
+        saveDB(db);
+        resultMsg =
+            `\n🎰 <b>SPIN RESULT!</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+            `${prize.emoji}  <b>${prize.name}</b>\n\n` +
+            `Jangan menyerah! Coba lagi besok.\nSetiap hari punya kesempatan menang! 🍀`;
+    }
+
+    try {
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, resultMsg, {
+            parse_mode: 'HTML', ...Markup.inlineKeyboard(buttons)
+        });
+    } catch(e) {
+        await ctx.replyWithHTML(resultMsg, Markup.inlineKeyboard(buttons));
+    }
+
+    await sendLog(bot, `🎰 <b>SPIN</b>\n👤 ${ctx.from.first_name} [${userId}]\n🎁 ${prize.emoji} ${prize.name}`);
+});
+
+// ════════════════════════════════════════════════════════════════
+// FITUR — CHANGELOG (What's New)
+// ════════════════════════════════════════════════════════════════
+if (!db.changelog) db.changelog = {
+    version: 'v2.0.0',
+    date: new Date().toISOString().substring(0, 10),
+    changes: [
+        '🎮 Trial gratis 1 hari untuk user baru',
+        '👑 VIP Tier — diskon 5% selamanya setelah 2x beli',
+        '🏆 Leaderboard Referral',
+        '🎰 Spin Wheel — hadiah harian',
+        '⏰ Reminder expired + diskon perpanjangan',
+        '💭 Follow-up otomatis order belum bayar',
+        '⭐ Rating request setelah 7 hari',
+        '📊 Laporan harian ke admin',
+    ]
+};
+
+bot.command('changelog', async (ctx) => {
+    const cl = db.changelog || { version: '-', date: '-', changes: ['Belum ada update.'] };
+    const changeList = cl.changes.map(c => `  •  ${c}`).join('\n');
+    await ctx.replyWithHTML(
+        `\n📋 <b>WHAT'S NEW</b>\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
+        `┌──────────────────────┐\n` +
+        `│                                                            │\n` +
+        `│  📦  Versi: <b>${cl.version}</b>                       │\n` +
+        `│  📅  Tanggal: ${cl.date}                         │\n` +
+        `│                                                            │\n` +
+        `└──────────────────────┘\n\n` +
+        `<b>✨ Fitur Terbaru:</b>\n${changeList}\n\n` +
+        `<i>Update otomatis, tidak perlu download ulang app.</i>`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🛒 Beli License', 'catalog')],
+            [Markup.button.callback('◀️ Menu Utama', 'back_start')]
+        ])
+    );
+});
+
+// Admin: update changelog
+bot.command('setchangelog', async (ctx) => {
+    if (!isAdmin(ctx.from.id)) return ctx.reply('❌ Bukan admin.');
+    const text = ctx.message.text.replace('/setchangelog', '').trim();
+    if (!text) return ctx.replyWithHTML(
+        `❌ Format:\n<code>/setchangelog v2.1.0 | Fitur 1 | Fitur 2 | Fitur 3</code>\n\nPisahkan versi dan fitur dengan <code>|</code>`
+    );
+    const parts = text.split('|').map(s => s.trim());
+    const version = parts[0] || 'v2.0.0';
+    const changes = parts.slice(1).filter(c => c);
+    if (changes.length === 0) return ctx.reply('❌ Minimal 1 fitur baru.');
+
+    db.changelog = {
+        version,
+        date: new Date().toISOString().substring(0, 10),
+        changes
+    };
+    saveDB(db);
+    await ctx.replyWithHTML(
+        `✅ <b>Changelog diupdate!</b>\n\n📦 Versi: ${version}\n` +
+        changes.map(c => `  • ${c}`).join('\n') +
+        `\n\nBroadcast ke semua user? Gunakan /broadcast`
+    );
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -3076,6 +3824,10 @@ bot.launch()
             { command: 'riwayat', description: '📋 Histori semua pembelian kamu' },
             { command: 'download', description: '⬇️ Link download app terbaru' },
             { command: 'referral', description: '🎁 Kode referral & program diskon 10%' },
+            { command: 'leaderboard', description: '🏆 Top 5 referrer bulan ini' },
+            { command: 'vip', description: '👑 Cek status VIP membership' },
+            { command: 'spin', description: '🎰 Putar roda hadiah harian' },
+            { command: 'changelog', description: '📋 Lihat update & fitur terbaru' },
             { command: 'tiket', description: '🎫 Buat tiket support ke admin' },
             { command: 'cektiket', description: '🔍 Cek status tiket support kamu' },
             { command: 'myid', description: '👤 Lihat Telegram User ID kamu' },
@@ -3099,6 +3851,8 @@ bot.launch()
             { command: 'unblockuser', description: '✅ Unblokir user' },
             { command: 'newdiskon', description: '🏷 Buat kode diskon baru' },
             { command: 'hapusdiskon', description: '🗑 Hapus kode diskon' },
+            { command: 'dm', description: '💬 Kirim pesan langsung ke user' },
+            { command: 'users', description: '👥 Lihat daftar semua user' },
         ];
 
         // Set command untuk semua user (scope: default)

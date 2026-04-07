@@ -94,6 +94,7 @@ async function initDatabase() {
       filler_words TEXT,
       silence_gaps TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     )
   `);
@@ -277,6 +278,15 @@ async function initDatabase() {
   for (const [key, value] of Object.entries(defaults)) {
     insertDefault.run(key, value);
   }
+
+  // ─── Schema migrations (safe for existing DBs) ───
+  try {
+    const cols = db.prepare("PRAGMA table_info(transcripts)").all();
+    if (!cols.find(c => c.name === 'updated_at')) {
+      db.exec("ALTER TABLE transcripts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+      console.log('[DB] Migration: added updated_at to transcripts');
+    }
+  } catch (e) { /* table may not exist yet */ }
 
   console.log('[DB] Database initialized at', dbPath);
   return db;

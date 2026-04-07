@@ -8,7 +8,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
-const { getDb, saveDatabase } = require('../database');
+const { all, get, run } = require('../database');
 
 const DATA_DIR = process.env.CLIPPERSKUY_DATA || path.join(__dirname, '..', '..', 'data');
 const MUSIC_DIR = path.join(DATA_DIR, 'music');
@@ -35,11 +35,7 @@ const upload = multer({
 // GET /api/music — List all music tracks
 router.get('/', (req, res) => {
     try {
-        const db = getDb();
-        const stmt = db.prepare('SELECT * FROM music_tracks ORDER BY category, name');
-        const tracks = [];
-        while (stmt.step()) tracks.push(stmt.getAsObject());
-        stmt.free();
+        const tracks = all('SELECT * FROM music_tracks ORDER BY category, name');
         res.json(tracks);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -49,28 +45,36 @@ router.get('/', (req, res) => {
 // GET /api/music/:id/stream — Stream music file
 router.get('/:id/stream', (req, res) => {
     try {
-        const db = getDb();
-        const stmt = db.prepare('SELECT * FROM music_tracks WHERE id = ?');
-        stmt.bind([req.params.id]);
-        if (!stmt.step()) {
-            stmt.free();
-            return res.status(404).json({ error: 'Track not found' });
-        }
-        const track = stmt.getAsObject();
-        stmt.free();
+        const track = get('SELECT * FROM music_tracks WHERE id = ?', [req.params.id]);
+        if (!track) return res.status(404).json({ error: 'Track not found' });
 
-        const filePath = track.file_path;
-        if (!fs.existsSync(filePath)) {
+        if (!fs.existsSync(track.file_path)) {
             return res.status(404).json({ error: 'File not found' });
         }
 
-        const stat = fs.statSync(filePath);
-        res.writeHead(200, {
-            'Content-Type': 'audio/mpeg',
-            'Content-Length': stat.size,
-            'Accept-Ranges': 'bytes'
-        });
-        fs.createReadStream(filePath).pipe(res);
+        const stat = fs.statSync(track.file_path);
+        const range = req.headers.range;
+
+        if (range) {
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+            const chunkSize = end - start + 1;
+            res.writeHead(206, {
+                'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunkSize,
+                'Content-Type': 'audio/mpeg',
+            });
+            fs.createReadStream(track.file_path, { start, end }).pipe(res);
+        } else {
+            res.writeHead(200, {
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': stat.size,
+                'Accept-Ranges': 'bytes'
+            });
+            fs.createReadStream(track.file_path).pipe(res);
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -81,12 +85,11 @@ router.post('/', upload.single('file'), (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-        const db = getDb();
         const id = uuidv4();
         const { name, category, mood, bpm } = req.body;
+        const filePath = req.file.path;
 
         // Get audio duration using ffprobe
-        const filePath = req.file.path;
         let duration = 0;
         try {
             const { execSync } = require('child_process');
@@ -100,20 +103,14 @@ router.post('/', upload.single('file'), (req, res) => {
             console.warn('[Music] Could not detect duration:', e.message);
         }
 
-        db.run(
+        run(
             `INSERT INTO music_tracks (id, name, file_path, file_name, category, mood, bpm, duration, file_size)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [id, name || path.parse(req.file.originalname).name, filePath, req.file.originalname,
                 category || 'general', mood || 'neutral', parseInt(bpm) || 0, duration, req.file.size]
         );
-        saveDatabase();
 
-        const stmt = db.prepare('SELECT * FROM music_tracks WHERE id = ?');
-        stmt.bind([id]);
-        stmt.step();
-        const track = stmt.getAsObject();
-        stmt.free();
-
+        const track = get('SELECT * FROM music_tracks WHERE id = ?', [id]);
         res.json(track);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -123,14 +120,16 @@ router.post('/', upload.single('file'), (req, res) => {
 // PUT /api/music/:id — Update track metadata
 router.put('/:id', (req, res) => {
     try {
-        const db = getDb();
+        const track = get('SELECT * FROM music_tracks WHERE id = ?', [req.params.id]);
+        if (!track) return res.status(404).json({ error: 'Track not found' });
+
         const { name, category, mood, bpm } = req.body;
-        db.run(
+        run(
             `UPDATE music_tracks SET name = ?, category = ?, mood = ?, bpm = ? WHERE id = ?`,
-            [name, category, mood, parseInt(bpm) || 0, req.params.id]
+            [name || track.name, category || track.category, mood || track.mood, parseInt(bpm) || track.bpm, req.params.id]
         );
-        saveDatabase();
-        res.json({ success: true });
+        const updated = get('SELECT * FROM music_tracks WHERE id = ?', [req.params.id]);
+        res.json({ success: true, track: updated });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -139,19 +138,11 @@ router.put('/:id', (req, res) => {
 // DELETE /api/music/:id — Delete music track
 router.delete('/:id', (req, res) => {
     try {
-        const db = getDb();
-        const stmt = db.prepare('SELECT file_path FROM music_tracks WHERE id = ?');
-        stmt.bind([req.params.id]);
-        if (stmt.step()) {
-            const track = stmt.getAsObject();
-            if (track.file_path && fs.existsSync(track.file_path)) {
-                fs.removeSync(track.file_path);
-            }
+        const track = get('SELECT file_path FROM music_tracks WHERE id = ?', [req.params.id]);
+        if (track && track.file_path && fs.existsSync(track.file_path)) {
+            fs.removeSync(track.file_path);
         }
-        stmt.free();
-
-        db.run('DELETE FROM music_tracks WHERE id = ?', [req.params.id]);
-        saveDatabase();
+        run('DELETE FROM music_tracks WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
