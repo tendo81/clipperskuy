@@ -30,6 +30,9 @@
         },
         "api/promo.js": {
             "maxDuration": 10
+        },
+        "api/check.js": {
+            "maxDuration": 10
         }
     }
 }
