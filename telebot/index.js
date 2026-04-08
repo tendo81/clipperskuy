@@ -46,18 +46,35 @@ async function logToChannel(text) {
     }
 }
 
-// ============ SELF-HEALTH CHECK ============
-// Ping Telegram API setiap 2 menit. Kalau 3x gagal berturut-turut → auto-restart
+// ============ SELF-HEALTH CHECK + POLLING WATCHDOG ============
 let healthFailCount = 0;
+let lastUpdateTime = Date.now(); // Track when we last received ANY update
 const HEALTH_CHECK_INTERVAL = 2 * 60 * 1000; // 2 menit
 const MAX_FAIL = 3;
+const POLLING_DEAD_TIMEOUT = 5 * 60 * 1000; // 5 menit tanpa update = polling mati
+
+// Call this whenever we receive any update from Telegram
+function touchLastUpdate() {
+    lastUpdateTime = Date.now();
+}
 
 function startHealthCheck() {
     setInterval(async () => {
         try {
             const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getMe`, { timeout: 10000 });
             if (res.ok) {
-                healthFailCount = 0; // Reset counter
+                healthFailCount = 0;
+                // API works - now check if polling is still receiving updates
+                const silentMs = Date.now() - lastUpdateTime;
+                const silentMin = Math.floor(silentMs / 60000);
+                
+                if (silentMs > POLLING_DEAD_TIMEOUT) {
+                    // API works but no updates for 5+ min = polling dead
+                    console.log(`💀 Polling dead! API OK but no updates for ${silentMin} min — restarting...`);
+                    logToChannel(`⚠️ <b>BOT AUTO-RESTART</b>\nPolling died (API OK tapi ${silentMin}m tanpa update)`);
+                    setTimeout(() => process.exit(1), 2000);
+                    return;
+                }
             } else {
                 healthFailCount++;
                 console.log(`⚠️ Health check failed (${healthFailCount}/${MAX_FAIL}): HTTP ${res.status}`);
@@ -69,10 +86,11 @@ function startHealthCheck() {
 
         if (healthFailCount >= MAX_FAIL) {
             console.log('❌ Bot unresponsive! Auto-restarting...');
-            process.exit(1); // Exit → run_bot.bat akan restart otomatis
+            logToChannel('⚠️ <b>BOT AUTO-RESTART</b>\nHealth check gagal 3x berturut');
+            setTimeout(() => process.exit(1), 2000);
         }
     }, HEALTH_CHECK_INTERVAL);
-    console.log('🏥 Health check active (every 2 min, auto-restart after 3 fails)');
+    console.log('🏥 Health check active (every 2 min, polling watchdog 5 min)');
 }
 
 // ============ DATABASE (Redis + JSON fallback) ============
@@ -464,6 +482,12 @@ if (!BOT_TOKEN) {
 }
 
 const bot = new Telegraf(BOT_TOKEN);
+
+// ★ Middleware: track semua update untuk polling watchdog
+bot.use((ctx, next) => {
+    touchLastUpdate();
+    return next();
+});
 
 // ============ /start ============
 bot.start(async (ctx) => {
