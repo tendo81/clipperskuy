@@ -607,7 +607,7 @@ bot.action('my_license', async (ctx) => {
         let statusIcon, expireLine;
         // Query license server for real activation status
         try {
-            const resp = await fetch(`${LICENSE_SERVER}/api/validate`, {
+            const resp = await fetch(`${LICENSE_SERVER}/api/check`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: o.license_key })
@@ -2586,7 +2586,7 @@ bot.command('ceklicense', async (ctx) => {
         const paidAt = new Date(o.paid_at);
         let statusIcon, expireLine;
         try {
-            const resp = await fetch(`${LICENSE_SERVER}/api/validate`, {
+            const resp = await fetch(`${LICENSE_SERVER}/api/check`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key: o.license_key })
