@@ -35,6 +35,17 @@ const BAYARGG_METHOD = process.env.BAYARGG_METHOD || 'gopay_qris';
 const USE_BAYARGG = false; // was: !!BAYARGG_API_KEY
 const SUPPORT_GROUP = process.env.SUPPORT_GROUP_LINK || 'https://t.me/+GANTI_DENGAN_LINK_GRUP';
 
+// ============ LOG CHANNEL ============
+// Kirim notifikasi penting ke channel admin
+async function logToChannel(text) {
+    if (!LOG_CHANNEL) return;
+    try {
+        await bot.telegram.sendMessage(LOG_CHANNEL, text, { parse_mode: 'HTML', disable_notification: false });
+    } catch (e) {
+        console.error('[LogChannel] Failed:', e.message);
+    }
+}
+
 // ============ SELF-HEALTH CHECK ============
 // Ping Telegram API setiap 2 menit. Kalau 3x gagal berturut-turut → auto-restart
 let healthFailCount = 0;
@@ -955,6 +966,16 @@ async function handleBuy(ctx, productId) {
     db.orders.push(order);
     saveDB(db);
 
+    // Log ke channel admin
+    logToChannel(
+        `🛒 <b>ORDER BARU</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `👤 ${name} (@${ctx.from.username || '-'})\n` +
+        `📦 ${product.name} — ${product.desc}\n` +
+        `💰 ${formatPrice(finalPrice)}${discount ? ` (diskon ${discount.percent}%)` : ''}\n` +
+        `🆔 <code>${orderId}</code>\n` +
+        `⏱ ${new Date().toLocaleString('id-ID')}`
+    );
+
     const buttons = [
         [Markup.button.callback('💳  Bayar Sekarang (QRIS)', `pay_${orderId}`)],
         [Markup.button.callback('🏷️ Promo', `promo_change_${productId}`), Markup.button.callback('✖️ Batal', `cancel_${orderId}`)],
@@ -1730,6 +1751,17 @@ async function processSuccessfulPayment(ctx, orderId) {
     order.status = 'paid';
     order.license_key = licenseKey;
     order.paid_at = new Date().toISOString();
+
+    // Log pembayaran ke channel admin
+    logToChannel(
+        `💰 <b>PEMBAYARAN MASUK</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `👤 ${order.user_name} (@${order.username || '-'})\n` +
+        `📦 ${order.product_name}\n` +
+        `💵 ${formatPrice(order.price)}\n` +
+        `🔑 <code>${licenseKey}</code>\n` +
+        `🆔 <code>${order.id}</code>\n` +
+        `⏱ ${new Date().toLocaleString('id-ID')}`
+    );
 
     // Update user stats
     const user = db.users[order.user_id];
@@ -3147,6 +3179,15 @@ bot.command('tiket', async (ctx) => {
     db.tickets.push(ticket);
     saveDB(db);
 
+    // Log ke channel admin
+    logToChannel(
+        `🎫 <b>TIKET SUPPORT BARU</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `👤 ${ticket.user_name} (@${ticket.username || '-'})\n` +
+        `📝 ${text}\n` +
+        `🆔 <code>${ticketId}</code>\n` +
+        `⏱ ${new Date().toLocaleString('id-ID')}`
+    );
+
     await ctx.replyWithHTML(
         `✅ <b>Tiket Support Dibuat!</b>\n━━━━━━━━━━━━━━━━━━\n` +
         `🎫 ID Tiket: <code>${ticketId}</code>\n` +
@@ -3981,6 +4022,16 @@ bot.catch((err, ctx) => {
             // Keep process alive forever
         }, 60000);
         console.log('🔒 Process locked (keep-alive active)');
+
+        // Log startup ke channel
+        const paidCount = (db.orders || []).filter(o => o.status === 'paid').length;
+        logToChannel(
+            `🤖 <b>BOT STARTED</b>\n━━━━━━━━━━━━━━━━━━\n` +
+            `⏱ ${new Date().toLocaleString('id-ID')}\n` +
+            `📊 Users: ${Object.keys(db.users || {}).length} | Orders: ${paidCount}\n` +
+            `💰 Revenue: ${formatPrice(db.stats?.total_revenue || 0)}\n` +
+            `🔗 Server: ${LICENSE_SERVER}`
+        );
 
     } catch (err) {
         console.error('❌ Bot failed to start:', err.message);
