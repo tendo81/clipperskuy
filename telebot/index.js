@@ -613,14 +613,23 @@ bot.action('my_license', async (ctx) => {
                 body: JSON.stringify({ key: o.license_key })
             });
             const info = await resp.json();
-            if (info.valid && info.expiresAt) {
+            if (info.valid && info.activated && info.expiresAt) {
+                // Sudah diaktivasi dan punya tanggal expired
                 const expireAt = new Date(info.expiresAt);
                 const daysLeft = info.daysRemaining || Math.ceil((expireAt - new Date()) / 86400000);
                 statusIcon = daysLeft <= 0 ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
                 expireLine = `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n`;
-            } else if (info.valid && !info.expiresAt) {
+            } else if (info.valid && info.activated && !info.expiresAt) {
+                // Lifetime
                 statusIcon = '♾️ Lifetime';
                 expireLine = '';
+            } else if (info.valid && !info.activated) {
+                // Belum diaktivasi
+                statusIcon = '⏳ Belum Diaktivasi';
+                expireLine = `📌 Aktifkan di app untuk mulai countdown ${o.duration} hari\n`;
+            } else if (info.expired) {
+                statusIcon = '❌ Expired';
+                expireLine = info.expiresAt ? `⏱ Expired: ${new Date(info.expiresAt).toLocaleDateString('id-ID')}\n` : '';
             } else {
                 statusIcon = '⏳ Belum Diaktivasi';
                 expireLine = `📌 Aktifkan di app untuk mulai countdown ${o.duration} hari\n`;
@@ -2592,14 +2601,20 @@ bot.command('ceklicense', async (ctx) => {
                 body: JSON.stringify({ key: o.license_key })
             });
             const info = await resp.json();
-            if (info.valid && info.expiresAt) {
+            if (info.valid && info.activated && info.expiresAt) {
                 const expireAt = new Date(info.expiresAt);
                 const daysLeft = info.daysRemaining || Math.ceil((expireAt - new Date()) / 86400000);
                 statusIcon = daysLeft <= 0 ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
                 expireLine = `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n`;
-            } else if (info.valid && !info.expiresAt) {
+            } else if (info.valid && info.activated && !info.expiresAt) {
                 statusIcon = '♾️ Lifetime';
                 expireLine = '';
+            } else if (info.valid && !info.activated) {
+                statusIcon = '⏳ Belum Diaktivasi';
+                expireLine = `📌 Aktifkan di app untuk mulai countdown ${o.duration} hari\n`;
+            } else if (info.expired) {
+                statusIcon = '❌ Expired';
+                expireLine = info.expiresAt ? `⏱ Expired: ${new Date(info.expiresAt).toLocaleDateString('id-ID')}\n` : '';
             } else {
                 statusIcon = '⏳ Belum Diaktivasi';
                 expireLine = `📌 Aktifkan di app untuk mulai countdown ${o.duration} hari\n`;
