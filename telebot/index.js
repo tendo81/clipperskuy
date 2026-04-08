@@ -3824,7 +3824,7 @@ bot.catch((err, ctx) => {
     console.error('❌ Bot error:', err.message);
 });
 
-// ============ LAUNCH (Manual Polling — anti-hang) ============
+// ============ LAUNCH ============
 (async function main() {
     try {
         // Step 1: Delete any existing webhook
@@ -3832,7 +3832,7 @@ bot.catch((err, ctx) => {
         await bot.telegram.deleteWebhook({ drop_pending_updates: true });
         console.log('✅ Webhook cleared');
 
-        // Step 2: Use startPolling directly (bot.launch() hangs on Windows)
+        // Step 2: Start polling (non-blocking)
         console.log('🚀 Starting polling...');
         bot.startPolling();
         console.log('✅ Polling started!');
@@ -3856,7 +3856,6 @@ bot.catch((err, ctx) => {
         startDailyTaskScheduler(bot);
 
         // ── Daftarkan command list ke Telegram ──
-        // Command untuk semua user
         const userCommands = [
             { command: 'start', description: '🏠 Menu utama — semua fitur dari sini' },
             { command: 'ceklicense', description: '🔑 Cek status & expiry license kamu' },
@@ -3873,7 +3872,6 @@ bot.catch((err, ctx) => {
             { command: 'help', description: '❓ Bantuan & daftar semua fitur' },
         ];
 
-        // Command tambahan khusus admin
         const adminCommands = [
             ...userCommands,
             { command: 'admin', description: '🔧 Panel admin utama' },
@@ -3894,10 +3892,8 @@ bot.catch((err, ctx) => {
             { command: 'users', description: '👥 Lihat daftar semua user' },
         ];
 
-        // Set command untuk semua user (scope: default)
         await bot.telegram.setMyCommands(userCommands);
 
-        // Set command khusus untuk setiap admin (scope: chat)
         for (const adminId of ADMIN_IDS) {
             try {
                 await bot.telegram.setMyCommands(adminCommands, {
@@ -3909,14 +3905,22 @@ bot.catch((err, ctx) => {
             }
         }
         console.log(`[Commands] ✅ User commands registered (${userCommands.length} commands)`);
-        startHealthCheck(); // Start health monitoring
+        startHealthCheck();
+
+        // ★★★ KEEP-ALIVE — prevent node from exiting ★★★
+        // bot.startPolling() is non-blocking, so without this, node exits
+        // and run_bot.bat spawns a new instance → zombie processes
+        setInterval(() => {
+            // Keep process alive forever
+        }, 60000);
+        console.log('🔒 Process locked (keep-alive active)');
 
     } catch (err) {
         console.error('❌ Bot failed to start:', err.message);
         process.exit(1);
     }
 
-    // Graceful stop — properly disconnect polling
+    // Graceful stop
     const gracefulStop = (signal) => {
         console.log(`\n⏹ Stopping bot (${signal})...`);
         try { bot.stop(signal); } catch(e) {}
@@ -3925,7 +3929,7 @@ bot.catch((err, ctx) => {
     process.once('SIGINT', () => gracefulStop('SIGINT'));
     process.once('SIGTERM', () => gracefulStop('SIGTERM'));
 
-    // Crash handlers — stop polling before exit to prevent zombie processes
+    // Crash handlers
     process.on('uncaughtException', (err) => {
         console.error('💥 UNCAUGHT ERROR:', err.message);
         try { bot.stop('CRASH'); } catch(e) {}
