@@ -604,15 +604,40 @@ bot.action('my_license', async (ctx) => {
     let text = `🔑 <b>License Aktif Kamu</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
     for (const o of paidOrders) {
         const paidAt = new Date(o.paid_at);
-        const expireAt = o.duration > 0 ? new Date(paidAt.getTime() + o.duration * 86400000) : null;
-        const now = new Date();
-        const isExpired = expireAt && expireAt < now;
-        const daysLeft = expireAt ? Math.ceil((expireAt - now) / 86400000) : -1;
-        const statusIcon = o.duration === 0 ? '♾️ Lifetime' : isExpired ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+        let statusIcon, expireLine;
+        // Query license server for real activation status
+        try {
+            const resp = await fetch(`${LICENSE_SERVER}/api/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: o.license_key })
+            });
+            const info = await resp.json();
+            if (info.valid && info.expiresAt) {
+                const expireAt = new Date(info.expiresAt);
+                const daysLeft = info.daysRemaining || Math.ceil((expireAt - new Date()) / 86400000);
+                statusIcon = daysLeft <= 0 ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+                expireLine = `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n`;
+            } else if (info.valid && !info.expiresAt) {
+                statusIcon = '♾️ Lifetime';
+                expireLine = '';
+            } else {
+                statusIcon = '⏳ Belum Diaktivasi';
+                expireLine = `📌 Aktifkan di app untuk mulai countdown ${o.duration} hari\n`;
+            }
+        } catch (e) {
+            // Fallback ke hitungan lama jika server gagal
+            const expireAt = o.duration > 0 ? new Date(paidAt.getTime() + o.duration * 86400000) : null;
+            const now = new Date();
+            const isExpired = expireAt && expireAt < now;
+            const daysLeft = expireAt ? Math.ceil((expireAt - now) / 86400000) : -1;
+            statusIcon = o.duration === 0 ? '♾️ Lifetime' : isExpired ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+            expireLine = expireAt ? `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n` : '';
+        }
         text += `📦 <b>${o.product_name}</b>\n` +
             `🔑 <code>${o.license_key}</code>\n` +
             `📅 Beli: ${paidAt.toLocaleDateString('id-ID')}\n` +
-            `${expireAt ? `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n` : ''}` +
+            `${expireLine}` +
             `📊 Status: ${statusIcon}\n\n`;
     }
     await ctx.replyWithHTML(text, Markup.inlineKeyboard([
@@ -2559,15 +2584,38 @@ bot.command('ceklicense', async (ctx) => {
     let text = `🔑 <b>License Kamu</b>\n━━━━━━━━━━━━━━━━━━\n\n`;
     for (const o of paidOrders) {
         const paidAt = new Date(o.paid_at);
-        const expireAt = o.duration > 0 ? new Date(paidAt.getTime() + o.duration * 86400000) : null;
-        const now = new Date();
-        const isExpired = expireAt && expireAt < now;
-        const daysLeft = expireAt ? Math.ceil((expireAt - now) / 86400000) : -1;
-        const statusIcon = o.duration === 0 ? '♾️ Lifetime' : isExpired ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+        let statusIcon, expireLine;
+        try {
+            const resp = await fetch(`${LICENSE_SERVER}/api/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: o.license_key })
+            });
+            const info = await resp.json();
+            if (info.valid && info.expiresAt) {
+                const expireAt = new Date(info.expiresAt);
+                const daysLeft = info.daysRemaining || Math.ceil((expireAt - new Date()) / 86400000);
+                statusIcon = daysLeft <= 0 ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+                expireLine = `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n`;
+            } else if (info.valid && !info.expiresAt) {
+                statusIcon = '♾️ Lifetime';
+                expireLine = '';
+            } else {
+                statusIcon = '⏳ Belum Diaktivasi';
+                expireLine = `📌 Aktifkan di app untuk mulai countdown ${o.duration} hari\n`;
+            }
+        } catch (e) {
+            const expireAt = o.duration > 0 ? new Date(paidAt.getTime() + o.duration * 86400000) : null;
+            const now = new Date();
+            const isExpired = expireAt && expireAt < now;
+            const daysLeft = expireAt ? Math.ceil((expireAt - now) / 86400000) : -1;
+            statusIcon = o.duration === 0 ? '♾️ Lifetime' : isExpired ? '❌ Expired' : `✅ Aktif (${daysLeft} hari lagi)`;
+            expireLine = expireAt ? `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n` : '';
+        }
         text += `📦 <b>${o.product_name}</b>\n` +
             `🔑 <code>${o.license_key}</code>\n` +
             `📅 Beli: ${paidAt.toLocaleDateString('id-ID')}\n` +
-            `${expireAt ? `⏱ Expired: ${expireAt.toLocaleDateString('id-ID')}\n` : ''}` +
+            `${expireLine}` +
             `📊 Status: ${statusIcon}\n\n`;
     }
     await ctx.replyWithHTML(text, Markup.inlineKeyboard([
