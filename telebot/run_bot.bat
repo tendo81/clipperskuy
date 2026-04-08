@@ -10,9 +10,13 @@ echo.
 cd /d "C:\Users\kuyka\Music\opus 1\telebot"
 
 :start
+echo [%date% %time%] Killing old instances...
+taskkill /F /IM node.exe >nul 2>&1
+timeout /t 5 /nobreak >nul
+
 echo [%date% %time%] Starting bot...
 node index.js
 echo.
-echo [%date% %time%] Bot crashed or stopped! Restarting in 5 seconds...
-timeout /t 5 /nobreak
+echo [%date% %time%] Bot stopped! Restarting in 10 seconds...
+timeout /t 10 /nobreak
 goto start

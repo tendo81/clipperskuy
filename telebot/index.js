@@ -3916,8 +3916,22 @@ bot.catch((err, ctx) => {
         process.exit(1);
     }
 
-    // Graceful stop
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
-})();
+    // Graceful stop — properly disconnect polling
+    const gracefulStop = (signal) => {
+        console.log(`\n⏹ Stopping bot (${signal})...`);
+        try { bot.stop(signal); } catch(e) {}
+        setTimeout(() => process.exit(0), 2000);
+    };
+    process.once('SIGINT', () => gracefulStop('SIGINT'));
+    process.once('SIGTERM', () => gracefulStop('SIGTERM'));
 
+    // Crash handlers — stop polling before exit to prevent zombie processes
+    process.on('uncaughtException', (err) => {
+        console.error('💥 UNCAUGHT ERROR:', err.message);
+        try { bot.stop('CRASH'); } catch(e) {}
+        setTimeout(() => process.exit(1), 2000);
+    });
+    process.on('unhandledRejection', (err) => {
+        console.error('💥 UNHANDLED REJECTION:', err);
+    });
+})();
