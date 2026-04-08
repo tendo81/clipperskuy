@@ -3895,7 +3895,11 @@ bot.catch((err, ctx) => {
         await bot.telegram.deleteWebhook({ drop_pending_updates: true });
         console.log('✅ Webhook cleared');
 
-        // Step 2: Start polling (non-blocking)
+        // Step 2: Wait for any previous polling to die
+        console.log('⏳ Waiting 5s for old connections to clear...');
+        await new Promise(r => setTimeout(r, 5000));
+
+        // Step 3: Start polling (non-blocking)
         console.log('🚀 Starting polling...');
         bot.startPolling();
         console.log('✅ Polling started!');
@@ -4000,5 +4004,18 @@ bot.catch((err, ctx) => {
     });
     process.on('unhandledRejection', (err) => {
         console.error('💥 UNHANDLED REJECTION:', err);
+        // 409 Conflict = another polling instance exists, polling is dead
+        // Must exit so runner.js can restart us
+        const is409 = err && err.response && err.response.error_code === 409;
+        const isFatal = err && err.message && (
+            err.message.includes('terminated by other getUpdates') ||
+            err.message.includes('ETELEGRAM') ||
+            err.message.includes('network socket disconnected')
+        );
+        if (is409 || isFatal) {
+            console.error('🔄 Fatal polling error — restarting...');
+            try { bot.stop('POLLING_DEAD'); } catch(e) {}
+            setTimeout(() => process.exit(1), 3000);
+        }
     });
 })();
