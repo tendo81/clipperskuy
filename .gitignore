@@ -39,3 +39,6 @@ temp/
 # Misc
 *.exe
 !electron/resources/*.ico
+
+*.zip
+.env.production

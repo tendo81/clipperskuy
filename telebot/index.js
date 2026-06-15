@@ -524,16 +524,15 @@ Ubah video panjang jadi konten <b>viral</b> untuk
 TikTok · Reels · YouTube Shorts
 <i>100% offline di PC kamu</i>
 
-┌─── 💎 <b>PAKET TERSEDIA</b> ───┐
-│                                                          │
-│  ⚡ <b>Pro</b>  ·  mulai <b>Rp 69rb</b>/bln           │
-│  🎯 Face Tracking · 🔊 Audio AI          │
-│  📺 1080p · ∞ Unlimited Export           │
-│                                                          │
-│  👑 <b>Enterprise</b>  ·  Hubungi Admin     │
-│  🔌 API · 🏷 Branding · ♾ Lifetime       │
-│                                                          │
-└──────────────────────┘
+💎 <b>PAKET TERSEDIA</b>
+━━━━━━━━━━━━━━━━━━
+⚡ <b>Pro</b>  ·  mulai <b>Rp 69rb</b>/bln
+🎯 Face Tracking · 🔊 Audio AI
+📺 1080p · ∞ Unlimited Export
+
+👑 <b>Enterprise</b>  ·  Hubungi Admin
+🔌 API · 🏷 Branding · ♾ Lifetime
+━━━━━━━━━━━━━━━━━━
 
 ${hasLicense ? '✅ <b>License aktif terdeteksi!</b>' : '👇 <i>Pilih menu untuk mulai:</i>'}`;
 
